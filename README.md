@@ -54,6 +54,30 @@ Une clé API Nexus Mods (`NEXUS_API_KEY`) et/ou mod.io (`MODIO_API_KEY`,
   traiter) ; suivi par git comme gabarit vide, contenu réel local
   uniquement (`git update-index --skip-worktree`).
 
+## Développement
+
+Installation des dépendances via [Poetry](https://python-poetry.org/) :
+
+```bash
+poetry install
+poetry run bg3-mod-tui
+```
+
+`pip install -e .` (utilisé par `run.sh`/`run.bat`) fonctionne aussi
+directement, `pyproject.toml` étant lu par les deux (backend `poetry-core`,
+métadonnées au format standard PEP 621).
+
+### Créer une release
+
+```bash
+./scripts/make_release.sh
+```
+
+Empaquette `bg3_mod_tui/`, les scripts de lancement et la doc dans
+`dist/bg3-mod-tui-vX.Y.Z.zip` (version lue dans `pyproject.toml`), et pose
+le tag git `vX.Y.Z` correspondant (à pousser ensuite avec
+`git push origin vX.Y.Z`).
+
 ## Prérequis
 
 - Python ≥ 3.11

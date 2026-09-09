@@ -14,8 +14,11 @@ dependencies = [
 bg3-mod-tui = "bg3_mod_tui.__main__:run"
 
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = ["poetry-core>=1.7.0"]
+build-backend = "poetry.core.masonry.api"
 
-[tool.setuptools.packages.find]
-include = ["bg3_mod_tui*"]
+# poetry-core lit directement les métadonnées/dépendances de [project]
+# ci-dessus (PEP 621) ; cette section ne sert qu'à préciser le paquet à
+# empaqueter (sinon poetry-core ne le détecte pas automatiquement).
+[tool.poetry]
+packages = [{ include = "bg3_mod_tui" }]
