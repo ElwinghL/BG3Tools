@@ -10,6 +10,7 @@ from textual.app import App
 from bg3_mod_tui.config import ModToolsConfig, load_config
 from bg3_mod_tui.screens.actions import ActionsScreen
 from bg3_mod_tui.screens.setup import SetupScreen
+from bg3_mod_tui.theme import BG3_THEME
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
@@ -21,6 +22,9 @@ class BG3ModTUIApp(App):
     TITLE = "BG3 Mod TUI"
 
     def on_mount(self) -> None:
+        self.register_theme(BG3_THEME)
+        self.theme = BG3_THEME.name
+
         load_dotenv(ENV_PATH)
         config = load_config()
         if config.is_valid():

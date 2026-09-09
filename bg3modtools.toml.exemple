@@ -1,0 +1,34 @@
+# =============================================================================
+# BG3 Mod TUI - exemple de configuration
+# =============================================================================
+#
+# Ce fichier n'est qu'un exemple documenté. Le vrai fichier "bg3modtools.toml"
+# est généré et mis à jour automatiquement par l'application (assistant de
+# configuration au premier lancement) — inutile de le copier/renommer.
+#
+# =============================================================================
+
+# Dossier d'installation de BG3 (contenant bin/).
+bg3_install_dir = ""
+
+# Dossier AppData de BG3 (Larian Studios/Baldur's Gate 3, contenant Mods/ et
+# PlayerProfiles/).
+bg3_appdata_dir = ""
+
+# Nom du profil de mods actuellement actif (voir Profils).
+active_profile = ""
+
+# -----------------------------------------------------------------------------
+# Accès distant (fonctionnalité "Web" à venir, pas encore implémentée)
+# -----------------------------------------------------------------------------
+#
+# Adresse publique (URL) permettant de joindre cette machine depuis
+# l'extérieur (ex: IP publique, DDNS). Demandée une première fois au
+# lancement du script ; sera re-demandée si absente au moment d'utiliser le
+# futur bouton "Web".
+#
+# public_url = "https://exemple.mon-ddns.net"
+
+# Port public associé.
+#
+# public_port = "8080"

@@ -55,7 +55,7 @@ def _popen_detached(
     subprocess.Popen(args, **kwargs)
 
 
-def _resolve_wine_bin(prefix: Path) -> str:
+def resolve_wine_bin(prefix: Path) -> str:
     """Retrouve le binaire `wine` à utiliser : en priorité celui fourni par
     la version de Proton associée au préfixe (le seul garanti compatible
     avec celui-ci), sinon un `wine` système en repli."""
@@ -93,7 +93,7 @@ def launch_tool(exe_path: Path, *, reference_path: Path, log_dir: Path | None = 
             "refusé (par sécurité, seul le préfixe Proton de BG3 est autorisé)."
         )
 
-    wine_bin = _resolve_wine_bin(prefix)
+    wine_bin = resolve_wine_bin(prefix)
 
     env = os.environ.copy()
     env["WINEPREFIX"] = str(prefix)
@@ -127,4 +127,9 @@ def open_protontricks(reference_path: Path, *, log_dir: Path | None = None) -> N
         raise LauncherError("Le binaire 'protontricks' est introuvable dans le PATH.")
 
     log_file = log_dir / "protontricks.log" if log_dir else None
-    _popen_detached([protontricks_bin, appid], cwd=str(prefix), log_file=log_file)
+    # `protontricks APPID` sans commande ni `--gui` se contente d'afficher
+    # l'aide (code de retour 0, silencieusement) : il faut `--gui` explicite
+    # (avant l'AppID) pour ouvrir l'interface winetricks du jeu.
+    _popen_detached(
+        [protontricks_bin, "--gui", appid], cwd=str(prefix), log_file=log_file
+    )

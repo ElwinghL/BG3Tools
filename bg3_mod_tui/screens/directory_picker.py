@@ -3,6 +3,7 @@ avec possibilité de saisir directement un chemin pour s'y rendre."""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from textual import on
@@ -10,6 +11,15 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, DirectoryTree, Input, Label
+
+
+class VisibleDirectoryTree(DirectoryTree):
+    """DirectoryTree qui masque les dossiers cachés (nom commençant par
+    '.') — inutiles pour choisir un dossier d'installation BG3, et souvent
+    nombreux (.git, .cache, ...)."""
+
+    def filter_paths(self, paths: Iterable[Path]) -> Iterable[Path]:
+        return [p for p in paths if not p.name.startswith(".")]
 
 
 class DirectoryPickerScreen(ModalScreen[str | None]):
@@ -73,7 +83,7 @@ class DirectoryPickerScreen(ModalScreen[str | None]):
         with Vertical(id="picker-box"):
             yield Label("Choisir un dossier", classes="title")
             yield Input(value=str(self._root_path), id="picker-manual-path")
-            yield DirectoryTree(str(self._root_path), id="picker-tree")
+            yield VisibleDirectoryTree(str(self._root_path), id="picker-tree")
             yield Label(f"Dossier sélectionné : {self._selected_path}", id="picker-current")
             with Horizontal(id="picker-buttons"):
                 yield Button("Aller à ce chemin", id="picker-goto")
@@ -103,7 +113,7 @@ class DirectoryPickerScreen(ModalScreen[str | None]):
         if not path.is_dir():
             current_status.update(f"[red]Dossier introuvable : {path}[/red]")
             return
-        self.query_one("#picker-tree", DirectoryTree).path = str(path)
+        self.query_one("#picker-tree", VisibleDirectoryTree).path = str(path)
         self._set_selected(path)
 
     @on(Button.Pressed, "#picker-choose")

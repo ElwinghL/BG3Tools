@@ -32,6 +32,8 @@ mkdir -p "$PKG_DIR"
 
 cp -r bg3_mod_tui "$PKG_DIR/"
 find "$PKG_DIR/bg3_mod_tui" -type d -name "__pycache__" -exec rm -rf {} +
+cp -r fonts "$PKG_DIR/"
+cp -r icons "$PKG_DIR/"
 cp pyproject.toml README.md .env.example run.sh run.bat "$PKG_DIR/"
 
 mkdir -p "$DIST_DIR"

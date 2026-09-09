@@ -1,0 +1,185 @@
+"""Export/import de profils de mods sous forme d'archive `.tar.zst`
+autonome, pour les partager avec quelqu'un utilisant le même outil.
+
+Contrairement à `profiles.py` (sauvegarde locale : ne garde que les *noms*
+de fichiers, puisque Mods/ et bin/NativeMods/ sont déjà là), une archive
+exportée embarque le contenu réel des .pak, des DLL de bin/NativeMods/ et
+des fichiers "loose" de DataMods/, en plus de modsettings.lsx et du
+manifeste (avec l'origine Nexus de chaque mod quand elle a pu être
+retrouvée) — pour que l'import recrée le même profil chez quelqu'un
+d'autre sans qu'il ait besoin de retélécharger quoi que ce soit.
+
+Compression : zstandard niveau 19, multi-thread — bon compromis
+ratio/temps ; les .pak sont déjà eux-mêmes compressés (gain modeste), les
+DLL/loose files le sont rarement (gain plus net).
+
+L'import recrée d'abord un profil local standard (mêmes dossiers gérés
+que `save_profile`), puis appelle `restore_profile` pour l'activer —
+aucune logique de déploiement n'est dupliquée."""
+
+from __future__ import annotations
+
+import json
+import shutil
+import tarfile
+import tempfile
+from collections.abc import Callable
+from pathlib import Path
+
+import zstandard
+
+from bg3_mod_tui.profiles import (
+    MANIFEST_FILENAME,
+    MODSETTINGS_FILENAME,
+    ProfileError,
+    find_profile_dir,
+    manifest_file_names,
+    slugify_profile_name,
+)
+
+LogFn = Callable[[str], None]
+
+ZSTD_LEVEL = 19
+ARCHIVE_SUFFIX = ".bg3profile.tar.zst"
+
+MODS_ARCNAME = "Mods"
+NATIVE_MODS_ARCNAME = "NativeMods"
+LOOSE_MODS_ARCNAME = "DataMods"
+
+
+class ProfileArchiveError(RuntimeError):
+    """Erreur d'export/import — message destiné à l'utilisateur."""
+
+
+def export_profile_archive(
+    name: str,
+    *,
+    profiles_dir: Path,
+    mods_dir: Path,
+    loose_mods_dir: Path,
+    native_mods_dir: Path,
+    dest_path: Path,
+    log: LogFn = lambda _msg: None,
+) -> Path:
+    """Exporte le profil `name` (déjà sauvegardé via `save_profile`) vers
+    une archive `.tar.zst` autonome sous `dest_path` : modsettings.lsx,
+    manifeste, et le contenu réel de chaque .pak (`mods_dir`), DLL
+    (`native_mods_dir`) et fichier loose (`loose_mods_dir`) listé dans le
+    manifeste. Un fichier attendu mais absent est journalisé et ignoré
+    (pas d'échec global) — l'archive reste utile même incomplète."""
+    try:
+        profile_dir = find_profile_dir(profiles_dir, name)
+    except ProfileError:
+        raise
+    manifest_path = profile_dir / MANIFEST_FILENAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    compressor = zstandard.ZstdCompressor(level=ZSTD_LEVEL, threads=-1)
+
+    included = 0
+    missing = 0
+    with dest_path.open("wb") as raw, compressor.stream_writer(raw) as zfh:
+        with tarfile.open(fileobj=zfh, mode="w|") as tar:
+            tar.add(profile_dir / MODSETTINGS_FILENAME, arcname=MODSETTINGS_FILENAME)
+            tar.add(manifest_path, arcname=MANIFEST_FILENAME)
+
+            for entries, source_dir, arc_root in (
+                (manifest.get("paks", []), mods_dir, MODS_ARCNAME),
+                (manifest.get("native_mods", []), native_mods_dir, NATIVE_MODS_ARCNAME),
+            ):
+                for file_name in sorted(manifest_file_names(entries)):
+                    source = source_dir / file_name
+                    if not source.is_file():
+                        log(f"[yellow]Absent, ignoré : {source}[/yellow]")
+                        missing += 1
+                        continue
+                    tar.add(source, arcname=f"{arc_root}/{file_name}")
+                    included += 1
+
+            for relative in sorted(manifest.get("loose_files", [])):
+                source = loose_mods_dir / relative
+                if not source.is_file():
+                    log(f"[yellow]Absent, ignoré : {source}[/yellow]")
+                    missing += 1
+                    continue
+                tar.add(source, arcname=f"{LOOSE_MODS_ARCNAME}/{relative}")
+                included += 1
+
+    log(f"Archive créée : {dest_path} ({included} fichier(s), {missing} absent(s)).")
+    return dest_path
+
+
+def import_profile_archive(
+    archive_path: Path,
+    *,
+    profiles_dir: Path,
+    mods_dir: Path,
+    loose_mods_dir: Path,
+    native_mods_dir: Path,
+    log: LogFn = lambda _msg: None,
+) -> str:
+    """Importe une archive créée par `export_profile_archive` : extrait
+    son contenu vers les dossiers gérés (`mods_dir`, `native_mods_dir`,
+    `loose_mods_dir`), puis enregistre le profil sous `profiles_dir` comme
+    s'il avait été sauvegardé localement (mêmes modsettings.lsx +
+    manifeste). Ne l'active pas — l'appelant doit ensuite appeler
+    `restore_profile` pour ça (même flux que pour un profil sauvegardé
+    localement). Retourne le nom du profil importé. Lève
+    `ProfileArchiveError` si l'archive est invalide."""
+    if not archive_path.is_file():
+        raise ProfileArchiveError(f"Archive introuvable : {archive_path}")
+
+    with tempfile.TemporaryDirectory(prefix="bg3profile_import_") as tmp:
+        tmp_path = Path(tmp)
+        try:
+            decompressor = zstandard.ZstdDecompressor()
+            with archive_path.open("rb") as raw, decompressor.stream_reader(raw) as zfh:
+                with tarfile.open(fileobj=zfh, mode="r|") as tar:
+                    tar.extractall(tmp_path, filter="data")
+        except (zstandard.ZstdError, tarfile.TarError, OSError) as exc:
+            raise ProfileArchiveError(f"Archive invalide ou corrompue : {exc}") from exc
+
+        manifest_path = tmp_path / MANIFEST_FILENAME
+        modsettings_path = tmp_path / MODSETTINGS_FILENAME
+        if not manifest_path.is_file() or not modsettings_path.is_file():
+            raise ProfileArchiveError(
+                f"Archive incomplète : {MANIFEST_FILENAME} ou {MODSETTINGS_FILENAME} manquant."
+            )
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        name = manifest.get("name") or archive_path.stem
+
+        mods_dir.mkdir(parents=True, exist_ok=True)
+        native_mods_dir.mkdir(parents=True, exist_ok=True)
+
+        copied = 0
+        for entries, source_root, target_dir in (
+            (manifest.get("paks", []), tmp_path / MODS_ARCNAME, mods_dir),
+            (manifest.get("native_mods", []), tmp_path / NATIVE_MODS_ARCNAME, native_mods_dir),
+        ):
+            for file_name in sorted(manifest_file_names(entries)):
+                source = source_root / file_name
+                if not source.is_file():
+                    log(f"[yellow]Absent de l'archive, ignoré : {file_name}[/yellow]")
+                    continue
+                shutil.copy2(source, target_dir / file_name)
+                copied += 1
+
+        loose_source_root = tmp_path / LOOSE_MODS_ARCNAME
+        for relative in sorted(manifest.get("loose_files", [])):
+            source = loose_source_root / relative
+            if not source.is_file():
+                log(f"[yellow]Absent de l'archive, ignoré : {relative}[/yellow]")
+                continue
+            target = loose_mods_dir / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
+            copied += 1
+
+        dest_dir = profiles_dir / slugify_profile_name(name)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(modsettings_path, dest_dir / MODSETTINGS_FILENAME)
+        shutil.copy2(manifest_path, dest_dir / MANIFEST_FILENAME)
+
+    log(f"Profil « {name} » importé ({copied} fichier(s) copié(s)).")
+    return name

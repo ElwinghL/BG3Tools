@@ -10,6 +10,10 @@ dans l'AppData de l'utilisateur.
 3. Remplacer le `modsettings.lsx` de l'AppData par un hardlink vers notre
    copie gérée, afin que les deux restent en permanence synchronisés (même
    fichier sur le disque, deux chemins).
+4. Créer, dans le dossier géré, un lien symbolique `Installation BG3`
+   pointant vers le dossier d'installation du jeu — permet d'accéder
+   rapidement à bin/ (ex: NativeMods/, DLL du Script Extender) sans
+   naviguer jusqu'à l'installation Steam.
 """
 
 from __future__ import annotations
@@ -120,5 +124,15 @@ def setup_links(config: ModToolsConfig) -> LinkingReport:
     # 3. Remplacement du modsettings.lsx AppData par un hardlink vers la copie gérée.
     _replace_with_hardlink(appdata_modsettings, managed_modsettings)
     report.add(f"Hardlink en place : {appdata_modsettings} <-> {managed_modsettings}")
+
+    # 4. Lien symbolique vers le dossier d'installation du jeu.
+    install_dir = config.install_path
+    if not install_dir.is_dir():
+        raise LinkingError(
+            f"Le dossier d'installation BG3 attendu est introuvable : '{install_dir}'. "
+            "Vérifie l'emplacement d'installation renseigné."
+        )
+    _create_symlink(config.managed_install_link, install_dir, target_is_dir=True)
+    report.add(f"Lien symbolique créé : {config.managed_install_link} -> {install_dir}")
 
     return report

@@ -4,6 +4,7 @@
 # BG3 Mod TUI - config locale et dossier géré (chemins/liens spécifiques
 # à la machine, ne doivent pas être versionnés)
 /bg3modtools.toml
+/native_mods_manifest.json
 /BG3_Managed/
 
 # Environnement virtuel Python

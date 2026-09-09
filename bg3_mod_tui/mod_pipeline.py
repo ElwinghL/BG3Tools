@@ -5,7 +5,6 @@ archives téléchargées vers le dossier Mods géré.
 
 from __future__ import annotations
 
-import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -13,6 +12,13 @@ from pathlib import Path
 
 from bg3_mod_tui.archives import ArchiveError, extract_archive, is_supported_archive
 from bg3_mod_tui.downloader import _filename_from_url, download_file
+from bg3_mod_tui.game_deploy import deploy_loose_files
+from bg3_mod_tui.inventory import known_mod_ids
+from bg3_mod_tui.native_mods import (
+    NativeModsManifestError,
+    deploy_native_mod_archive,
+    load_manifest as load_native_mods_manifest,
+)
 from bg3_mod_tui.log_format import (
     STATUS_ECHEC,
     STATUS_EXAMEN,
@@ -52,6 +58,8 @@ def download_mods_from_links_file(
     links_file: Path,
     dest_dir: Path,
     *,
+    archives_installed_dir: Path | None = None,
+    archives_pending_dir: Path | None = None,
     log: LogFn = lambda _msg: None,
 ) -> dict[str, list]:
     """Télécharge, pour chaque mod listé dans `links_file`, la dernière
@@ -59,13 +67,20 @@ def download_mods_from_links_file(
     par nom de fichier distinct) vers `dest_dir`. Nécessite un compte
     Nexus Premium pour le téléchargement direct via l'API.
 
+    Un mod est considéré comme déjà présent s'il a une archive dans
+    `dest_dir` OU dans `archives_installed_dir`/`archives_pending_dir` (une
+    archive déjà extraite a été déplacée hors de `dest_dir`, sans quoi elle
+    serait retéléchargée à chaque passage).
+
     Retourne {"downloaded": [...], "skipped": [...], "failed": [(id, err)]}.
     """
     mod_ids = parse_mod_links_file(links_file)
     log(f"{len(mod_ids)} mod(s) listé(s) dans {links_file.name}.")
 
     dest_dir.mkdir(parents=True, exist_ok=True)
-    existing_names = " ".join(p.name for p in dest_dir.iterdir() if p.is_file())
+    already_present_ids = known_mod_ids(
+        dest_dir, *(d for d in (archives_installed_dir, archives_pending_dir) if d is not None)
+    )
 
     report: dict[str, list] = {"downloaded": [], "skipped": [], "failed": []}
 
@@ -78,7 +93,7 @@ def download_mods_from_links_file(
             label = str(mod_id)
             version = ""
 
-        if re.search(rf"-{mod_id}-\d", existing_names):
+        if mod_id in already_present_ids:
             log(fmt_row(label, STATUS_IGNORE, version=version, detail="déjà présent"))
             report["skipped"].append(mod_id)
             continue
@@ -164,23 +179,137 @@ def clean_pak_files(mods_dir: Path, *, log: LogFn = lambda _msg: None) -> list[s
     return removed
 
 
+def _merge_copy_tree(src: Path, dst: Path) -> int:
+    """Copie récursivement le contenu de `src` dans `dst`, fusionnant avec
+    ce qui existe déjà (les fichiers de même nom sont écrasés — c'est le
+    comportement attendu pour combiner plusieurs mods "loose files" qui
+    partagent une même arborescence, ex: Public/.../Generated/...).
+    Retourne le nombre de fichiers copiés."""
+    count = 0
+    for item in src.rglob("*"):
+        if item.is_dir():
+            continue
+        target = dst / item.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(item, target)
+        count += 1
+    return count
+
+
+# Sous-dossiers connus de Data/ dans une installation BG3 : un mod "loose
+# files" fournit typiquement l'un d'eux tel quel (ex: Generated/ pour un
+# fichier stats généré, ou Public/ dont l'arborescence interne peut
+# elle-même contenir des dossiers Generated/ plus profonds — voir Double
+# XP: Public/Shared/Stats/Generated/Data/XPData.txt). Il faut préserver
+# toute la structure sous ce dossier plutôt que de chercher "Generated"
+# n'importe où et l'aplatir, sous peine de faire collisionner des
+# fichiers de même nom venant de sous-arborescences différentes.
+_DATA_ROOT_DIR_NAMES = {
+    "generated",
+    "public",
+    "localization",
+    "editor",
+    "mods",
+    "video",
+    "fonts",
+}
+
+
+def _find_loose_file_roots(extracted_root: Path) -> list[Path]:
+    """Repère, à la racine de `extracted_root` (après avoir traversé les
+    éventuels dossiers d'enrobage — beaucoup d'archives placent tout sous
+    un seul dossier portant le nom du mod), les dossiers correspondant à
+    un sous-dossier connu de Data/ (voir `_DATA_ROOT_DIR_NAMES`)."""
+    root = extracted_root
+    while True:
+        entries = [p for p in root.iterdir() if not p.name.startswith(".")]
+        if (
+            len(entries) == 1
+            and entries[0].is_dir()
+            and entries[0].name.lower() not in _DATA_ROOT_DIR_NAMES
+        ):
+            root = entries[0]
+            continue
+        break
+    return [p for p in root.iterdir() if p.is_dir() and p.name.lower() in _DATA_ROOT_DIR_NAMES]
+
+
 def extract_archives_to_mods(
     archives_dir: Path,
     mods_dir: Path,
     pending_dir: Path,
     installed_dir: Path,
     *,
+    loose_mods_dir: Path | None = None,
+    game_data_dir: Path | None = None,
+    native_mods_manifest_path: Path | None = None,
+    native_mods_managed_dir: Path | None = None,
+    managed_dir: Path | None = None,
     log: LogFn = lambda _msg: None,
 ) -> dict[str, list]:
     """Extrait chaque archive de `archives_dir` : les .pak trouvés sont
     copiés (à plat) dans `mods_dir`, puis l'archive traitée est déplacée
-    dans `installed_dir`. Si aucune .pak n'est trouvée, l'archive est
-    déplacée telle quelle dans `pending_dir` pour examen manuel.
+    dans `installed_dir`.
+
+    Si aucune .pak n'est trouvée mais qu'un sous-dossier connu de Data/
+    (Generated, Public, ...) est présent — mods "loose files" — sa structure
+    est d'abord fusionnée dans `loose_mods_dir` (notre copie gérée et
+    permanente, qui combine les dossiers de plusieurs mods), puis reliée par
+    hardlink dans `game_data_dir` (l'installation réelle du jeu). Nécessite
+    `loose_mods_dir` et `game_data_dir` ; sinon ce cas est traité comme les
+    autres mods non reconnus (voir ci-dessous).
+
+    Si l'archive (par son nom exact) est décrite dans le manifeste des
+    mods natifs (`native_mods_manifest_path`), elle est déployée comme mod
+    DLL (voir `native_mods.deploy_native_mod_archive`) plutôt que d'être
+    mise en attente — nécessite `native_mods_managed_dir` et `managed_dir`.
+    Le même manifeste est aussi utilisé pour rattraper les archives déjà
+    mises en attente lors d'un passage précédent (`_a_traiter`) mais
+    entre-temps décrites dans le manifeste : elles sont déployées et
+    déplacées vers `installed_dir` en fin de fonction.
+
+    Si rien de tout ça n'est trouvé, l'archive est déplacée telle quelle
+    dans `pending_dir` pour examen manuel.
 
     Retourne {"installed": [...], "pending": [...], "failed": [(name, err)]}.
     """
     mods_dir.mkdir(parents=True, exist_ok=True)
     report: dict[str, list] = {"installed": [], "pending": [], "failed": []}
+
+    can_handle_native = native_mods_manifest_path is not None and native_mods_managed_dir is not None and managed_dir is not None
+    native_manifest: dict[str, str] = {}
+    if can_handle_native:
+        try:
+            native_manifest = load_native_mods_manifest(native_mods_manifest_path)
+        except NativeModsManifestError as exc:
+            log(f"[red]Manifeste des mods natifs ignoré : {exc}[/red]")
+            can_handle_native = False
+
+    def _try_deploy_native(archive_path: Path) -> bool:
+        """Si `archive_path` correspond à une entrée du manifeste des mods
+        natifs, la déploie et la déplace vers `installed_dir`. Retourne
+        True si traitée (succès ou échec journalisé), False si aucune
+        entrée ne correspond (l'appelant doit alors continuer normalement)."""
+        relative_dest = native_manifest.get(archive_path.name)
+        if relative_dest is None:
+            return False
+        try:
+            deploy_native_mod_archive(
+                archive_path,
+                relative_dest,
+                managed_native_dir=native_mods_managed_dir,
+                managed_dir=managed_dir,
+                log=log,
+            )
+        except (NativeModsManifestError, ArchiveError) as exc:
+            log(fmt_row(archive_path.name, STATUS_ECHEC, detail=str(exc)))
+            report["failed"].append((archive_path.name, str(exc)))
+            return True
+        log(fmt_row(archive_path.name, STATUS_SUCCES, detail="mod DLL déployé (manifest natif)"))
+        dest = _unique_destination(installed_dir, archive_path.name)
+        shutil.move(str(archive_path), str(dest))
+        report["installed"].append(archive_path.name)
+        return True
 
     if not archives_dir.is_dir():
         log(f"Dossier d'archives introuvable : {archives_dir}")
@@ -194,6 +323,9 @@ def extract_archives_to_mods(
     log(f"{len(archives)} archive(s) à traiter dans {archives_dir.name}.")
 
     for archive in archives:
+        if can_handle_native and _try_deploy_native(archive):
+            continue
+
         with tempfile.TemporaryDirectory(prefix="bg3modtools_") as tmp:
             tmp_path = Path(tmp)
             try:
@@ -206,19 +338,52 @@ def extract_archives_to_mods(
                 continue
 
             paks = list(tmp_path.rglob("*.pak"))
-            if not paks:
-                log(fmt_row(archive.name, STATUS_EXAMEN, detail="aucun .pak trouvé"))
-                dest = _unique_destination(pending_dir, archive.name)
+            if paks:
+                for pak in paks:
+                    shutil.copy2(pak, _unique_destination(mods_dir, pak.name))
+                log(fmt_row(archive.name, STATUS_SUCCES, detail=f"{len(paks)} .pak installé(s)"))
+                dest = _unique_destination(installed_dir, archive.name)
                 shutil.move(str(archive), str(dest))
-                report["pending"].append(archive.name)
+                report["installed"].append(archive.name)
                 continue
 
-            for pak in paks:
-                shutil.copy2(pak, _unique_destination(mods_dir, pak.name))
-            log(fmt_row(archive.name, STATUS_SUCCES, detail=f"{len(paks)} .pak installé(s)"))
+            can_handle_loose = loose_mods_dir is not None and game_data_dir is not None
+            loose_roots = _find_loose_file_roots(tmp_path) if can_handle_loose else []
+            if loose_roots:
+                copied = sum(
+                    _merge_copy_tree(root, loose_mods_dir / root.name) for root in loose_roots
+                )
+                linked = deploy_loose_files(loose_mods_dir, game_data_dir, log=log)
+                names = ", ".join(f"Data/{root.name}" for root in loose_roots)
+                log(
+                    fmt_row(
+                        archive.name,
+                        STATUS_SUCCES,
+                        detail=(
+                            f"{copied} fichier(s) loose ({names}) géré(s) et "
+                            f"reliés (hardlink) dans Data/ ({linked} au total)"
+                        ),
+                    )
+                )
+                dest = _unique_destination(installed_dir, archive.name)
+                shutil.move(str(archive), str(dest))
+                report["installed"].append(archive.name)
+                continue
 
-            dest = _unique_destination(installed_dir, archive.name)
+            log(fmt_row(archive.name, STATUS_EXAMEN, detail="aucun .pak ni dossier Data/ reconnu trouvé"))
+            dest = _unique_destination(pending_dir, archive.name)
             shutil.move(str(archive), str(dest))
-            report["installed"].append(archive.name)
+            report["pending"].append(archive.name)
+
+    # Rattrapage : des archives déjà mises en attente lors d'un passage
+    # précédent peuvent depuis avoir été décrites dans le manifeste des
+    # mods natifs (ex: après avoir vu le nom exact du fichier téléchargé,
+    # variable d'un téléchargement à l'autre — impossible à deviner avant).
+    if can_handle_native and pending_dir.is_dir():
+        for archive_name in list(native_manifest):
+            archive_path = pending_dir / archive_name
+            if archive_path.is_file():
+                _try_deploy_native(archive_path)
+                report["pending"] = [n for n in report["pending"] if n != archive_name]
 
     return report

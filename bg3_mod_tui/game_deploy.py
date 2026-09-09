@@ -193,3 +193,27 @@ def deploy_script_extender(tools_dir: Path, game_bin_dir: Path, *, log: LogFn) -
             "[BG3 Script Extender] Linux/Proton : ajoute ceci aux options de "
             f"lancement Steam du jeu : {STEAM_LAUNCH_OPTION_REMINDER}"
         )
+
+
+def deploy_loose_files(managed_dir: Path, game_data_dir: Path, *, log: LogFn) -> int:
+    """Relie par hardlink chaque fichier de `managed_dir` (notre copie
+    gérée et permanente des mods "loose files", structurée comme Data/ du
+    jeu — ex: managed_dir/Generated/..., managed_dir/Public/.../Generated/...)
+    vers son équivalent sous `game_data_dir`, en créant les dossiers
+    intermédiaires nécessaires. Idempotent (ne touche pas un lien déjà à
+    jour). Retourne le nombre de fichiers reliés."""
+    if not managed_dir.is_dir():
+        return 0
+    if not game_data_dir.is_dir():
+        log(f"[Mods loose files] dossier Data/ du jeu introuvable : {game_data_dir}")
+        return 0
+
+    count = 0
+    for item in managed_dir.rglob("*"):
+        if item.is_dir():
+            continue
+        target = game_data_dir / item.relative_to(managed_dir)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _hardlink_replace(target, item, log=log)
+        count += 1
+    return count

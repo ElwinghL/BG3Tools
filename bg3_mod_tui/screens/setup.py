@@ -68,6 +68,21 @@ class SetupScreen(Screen):
                 placeholder=r"ex: %LOCALAPPDATA%\Larian Studios\Baldur's Gate 3",
                 id="appdata-dir",
             )
+            yield Label(
+                "Adresse publique (optionnel — pour la future fonctionnalité "
+                "Web) :"
+            )
+            yield Input(
+                value=self._config.public_url,
+                placeholder="ex: https://mon-ddns.exemple.net",
+                id="public-url",
+            )
+            yield Label("Port public (optionnel) :")
+            yield Input(
+                value=self._config.public_port,
+                placeholder="ex: 8080",
+                id="public-port",
+            )
             yield Button("Valider et configurer les liens", id="submit", variant="primary")
             yield Static(id="status")
         yield Footer()
@@ -103,6 +118,8 @@ class SetupScreen(Screen):
 
         self._config.bg3_install_dir = str(install_path)
         self._config.bg3_appdata_dir = str(appdata_path)
+        self._config.public_url = self.query_one("#public-url", Input).value.strip()
+        self._config.public_port = self.query_one("#public-port", Input).value.strip()
 
         if is_windows() and not can_create_links_without_admin():
             status.update(
