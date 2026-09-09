@@ -1,0 +1,8 @@
+# Secrets
+.env
+
+# Outils tiers téléchargés (binaires, pas notre code)
+/Archives_installees/
+/BG3-Load-Order-Optimizer/
+/BG3ModManager_Latest/
+/Para-Tools/
