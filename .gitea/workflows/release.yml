@@ -1,0 +1,64 @@
+name: Release
+
+# Se déclenche sur les push sur main qui touchent pyproject.toml (donc
+# concrètement : quand la version est bumpée). Réutilise scripts/make_release.sh
+# (le même script utilisable en local) pour bâtir le zip et poser le tag ;
+# si le tag existe déjà (version pas changée, ou déjà relâchée), le job ne
+# fait rien.
+on:
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
+  workflow_dispatch: {}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Lire la version / vérifier si le tag existe déjà
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Construire l'archive et poser le tag
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq zip python3 >/dev/null
+          git config user.name "gitea-actions"
+          git config user.email "actions@noreply.localhost"
+          ./scripts/make_release.sh
+
+      - name: Pousser le tag
+        if: steps.version.outputs.exists == 'false'
+        run: git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Publier la Release Gitea (avec le zip en pièce jointe)
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          API="${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
+          RELEASE_ID=$(curl -fsS -X POST "$API/releases" \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"draft\":false,\"prerelease\":false}" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+          curl -fsS -X POST "$API/releases/$RELEASE_ID/assets" \
+            -H "Authorization: token $GITEA_TOKEN" \
+            -F "attachment=@dist/bg3-mod-tui-${TAG}.zip"

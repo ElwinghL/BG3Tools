@@ -78,6 +78,14 @@ Empaquette `bg3_mod_tui/`, les scripts de lancement et la doc dans
 le tag git `vX.Y.Z` correspondant (à pousser ensuite avec
 `git push origin vX.Y.Z`).
 
+### Release automatique (Gitea Actions)
+
+`.gitea/workflows/release.yml` déclenche ce même script automatiquement à
+chaque push sur `main` qui modifie `pyproject.toml` (donc quand la version
+est bumpée) : il pose le tag, le pousse, puis publie une Release Gitea avec
+le zip en pièce jointe. Rien ne se passe si le tag existe déjà (version
+inchangée). Nécessite un runner Gitea Actions enregistré sur l'instance.
+
 ## Prérequis
 
 - Python ≥ 3.11
