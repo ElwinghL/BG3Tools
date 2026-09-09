@@ -13,6 +13,8 @@ __pycache__/
 *.egg-info/
 /build/
 /dist/
+.vscode/
+.claude/
 
 # Outils tiers téléchargés : on garde la structure des dossiers (.gitkeep)
 # mais on ignore les fichiers eux-mêmes (binaires/archives, pas notre code).
