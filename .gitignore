@@ -1,23 +1,43 @@
 # Secrets
 .env
 
+# BG3 Mod TUI - config locale et dossier géré (chemins/liens spécifiques
+# à la machine, ne doivent pas être versionnés)
+/bg3modtools.toml
+/BG3_Managed/
+
+# Environnement virtuel Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+/build/
+/dist/
+
 # Outils tiers téléchargés : on garde la structure des dossiers (.gitkeep)
 # mais on ignore les fichiers eux-mêmes (binaires/archives, pas notre code).
 
-/Archives_installees/*.zip
-/Archives_installees/*.rar
+/Tools/Archives_installees/*.zip
+/Tools/Archives_installees/*.rar
 
-/BG3-Load-Order-Optimizer/**/*.dll
-/BG3-Load-Order-Optimizer/**/*.exe
-/BG3-Load-Order-Optimizer/**/*.json
-/BG3-Load-Order-Optimizer/**/*.txt
+/Tools/BG3-Load-Order-Optimizer/**/*.dll
+/Tools/BG3-Load-Order-Optimizer/**/*.exe
+/Tools/BG3-Load-Order-Optimizer/**/*.json
+/Tools/BG3-Load-Order-Optimizer/**/*.txt
 
-/BG3ModManager_Latest/**/*.dll
-/BG3ModManager_Latest/**/*.exe
-/BG3ModManager_Latest/**/*.config
-/BG3ModManager_Latest/**/*.json
-/BG3ModManager_Latest/**/*.log
-/BG3ModManager_Latest/*.old-*
+/Tools/BG3ModManager_Latest/**/*.dll
+/Tools/BG3ModManager_Latest/**/*.exe
+/Tools/BG3ModManager_Latest/**/*.config
+/Tools/BG3ModManager_Latest/**/*.json
+/Tools/BG3ModManager_Latest/**/*.log
+/Tools/BG3ModManager_Latest/*.old-*
 
-/Para-Tools/*.App
-/Para-Tools/*.pdb
+/Tools/Para-Tools/*.App
+/Tools/Para-Tools/*.pdb
+
+/Tools/BG3 Script Extender/*.dll
+
+/Tools/ExportTools/**/*.dll
+/Tools/ExportTools/**/*.exe
+/Tools/ExportTools/**/*.json
+/Tools/ExportTools/**/*.config
