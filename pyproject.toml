@@ -1,6 +1,6 @@
 [project]
 name = "bg3-mod-tui"
-version = "0.1.0"
+version = "1.0.0"
 description = "TUI de gestion et téléchargement de mods BG3 (Nexus Mods / mod.io)"
 requires-python = ">=3.11"
 dependencies = [

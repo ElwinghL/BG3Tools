@@ -18,6 +18,8 @@ from bg3_mod_tui.platform_utils import (
     is_windows,
     relaunch_as_admin,
 )
+from bg3_mod_tui.screens.directory_picker import DirectoryPickerScreen
+from bg3_mod_tui.widgets.path_input import PathInput
 
 
 class SetupScreen(Screen):
@@ -51,16 +53,17 @@ class SetupScreen(Screen):
             yield Label(
                 "Renseigne le dossier d'installation du jeu (contenant bin/), "
                 "puis le dossier AppData de BG3 (Larian Studios/Baldur's Gate 3, "
-                "contenant Mods/ et PlayerProfiles/)."
+                "contenant Mods/ et PlayerProfiles/). Clique sur un champ pour "
+                "parcourir les dossiers."
             )
             yield Label("Dossier d'installation de BG3 :")
-            yield Input(
+            yield PathInput(
                 value=self._config.bg3_install_dir,
                 placeholder=r"ex: C:\...\Steam\steamapps\common\Baldurs Gate 3",
                 id="install-dir",
             )
             yield Label("Dossier AppData de BG3 :")
-            yield Input(
+            yield PathInput(
                 value=self._config.bg3_appdata_dir,
                 placeholder=r"ex: %LOCALAPPDATA%\Larian Studios\Baldur's Gate 3",
                 id="appdata-dir",
@@ -68,6 +71,16 @@ class SetupScreen(Screen):
             yield Button("Valider et configurer les liens", id="submit", variant="primary")
             yield Static(id="status")
         yield Footer()
+
+    @on(PathInput.BrowseRequested)
+    def handle_browse_requested(self, event: PathInput.BrowseRequested) -> None:
+        target_input = event.path_input
+
+        def on_picked(chosen: str | None) -> None:
+            if chosen:
+                target_input.value = chosen
+
+        self.app.push_screen(DirectoryPickerScreen(target_input.value), on_picked)
 
     @on(Button.Pressed, "#submit")
     def handle_submit(self) -> None:
