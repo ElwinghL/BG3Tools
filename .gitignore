@@ -43,3 +43,5 @@ __pycache__/
 /Tools/ExportTools/**/*.exe
 /Tools/ExportTools/**/*.json
 /Tools/ExportTools/**/*.config
+
+/Tools/Native Mod Loader/bin/*.dll
