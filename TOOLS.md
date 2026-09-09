@@ -9,3 +9,4 @@ Liste des outils tiers utilisés dans ce workspace (non versionnés, voir
 | LSLib | — | https://github.com/Norbyte/lslib |
 | Para Tool | `Para-Tools/` | https://github.com/Paramonov86/Para_Tool |
 | BG3 Mod Manager | `BG3ModManager_Latest/` | https://github.com/laughingleader/bg3modmanager |
+| BG3 Script Extender (BG3SE) | — (archive dans `Archives_installees/`) | https://github.com/Norbyte/bg3se |
