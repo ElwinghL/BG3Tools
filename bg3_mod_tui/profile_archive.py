@@ -28,6 +28,7 @@ from pathlib import Path
 
 import zstandard
 
+from bg3_mod_tui.native_mods import load_manifest as load_native_mods_manifest
 from bg3_mod_tui.profiles import (
     MANIFEST_FILENAME,
     MODSETTINGS_FILENAME,
@@ -39,12 +40,17 @@ from bg3_mod_tui.profiles import (
 
 LogFn = Callable[[str], None]
 
-ZSTD_LEVEL = 19
+# Niveau maximal (le plus compact possible) plutôt qu'un compromis
+# vitesse/ratio : cette archive est écrite une fois pour être partagée,
+# pas sur un chemin chaud — le temps de compression supplémentaire
+# (nettement plus long qu'au niveau 19) est acceptable.
+ZSTD_LEVEL = 22
 ARCHIVE_SUFFIX = ".bg3profile.tar.zst"
 
 MODS_ARCNAME = "Mods"
 NATIVE_MODS_ARCNAME = "NativeMods"
 LOOSE_MODS_ARCNAME = "DataMods"
+NATIVE_MODS_MANIFEST_ARCNAME = "native_mods_manifest.json"
 
 
 class ProfileArchiveError(RuntimeError):
@@ -91,7 +97,7 @@ def export_profile_archive(
                 for file_name in sorted(manifest_file_names(entries)):
                     source = source_dir / file_name
                     if not source.is_file():
-                        log(f"[yellow]Absent, ignoré : {source}[/yellow]")
+                        log(f"[#D8C091]Absent, ignoré : {source}[/#D8C091]")
                         missing += 1
                         continue
                     tar.add(source, arcname=f"{arc_root}/{file_name}")
@@ -100,7 +106,7 @@ def export_profile_archive(
             for relative in sorted(manifest.get("loose_files", [])):
                 source = loose_mods_dir / relative
                 if not source.is_file():
-                    log(f"[yellow]Absent, ignoré : {source}[/yellow]")
+                    log(f"[#D8C091]Absent, ignoré : {source}[/#D8C091]")
                     missing += 1
                     continue
                 tar.add(source, arcname=f"{LOOSE_MODS_ARCNAME}/{relative}")
@@ -160,7 +166,7 @@ def import_profile_archive(
             for file_name in sorted(manifest_file_names(entries)):
                 source = source_root / file_name
                 if not source.is_file():
-                    log(f"[yellow]Absent de l'archive, ignoré : {file_name}[/yellow]")
+                    log(f"[#D8C091]Absent de l'archive, ignoré : {file_name}[/#D8C091]")
                     continue
                 shutil.copy2(source, target_dir / file_name)
                 copied += 1
@@ -169,7 +175,7 @@ def import_profile_archive(
         for relative in sorted(manifest.get("loose_files", [])):
             source = loose_source_root / relative
             if not source.is_file():
-                log(f"[yellow]Absent de l'archive, ignoré : {relative}[/yellow]")
+                log(f"[#D8C091]Absent de l'archive, ignoré : {relative}[/#D8C091]")
                 continue
             target = loose_mods_dir / relative
             target.parent.mkdir(parents=True, exist_ok=True)

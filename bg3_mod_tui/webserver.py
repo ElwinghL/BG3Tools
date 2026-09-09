@@ -65,6 +65,7 @@ def start_http_server(directory: Path, port: str, *, on_line: OnLineFn) -> WebSe
     process = subprocess.Popen(
         args,
         cwd=str(directory),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

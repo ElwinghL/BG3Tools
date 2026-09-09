@@ -33,6 +33,8 @@ LogFn = Callable[[str], None]
 
 MODSETTINGS_FILENAME = "modsettings.lsx"
 MANIFEST_FILENAME = "manifest.json"
+FILE_CHOICES_FILENAME = "nexus_file_choices.json"
+_NO_PROFILE_SLUG = "_sans_profil"
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 
@@ -48,6 +50,80 @@ def slugify_profile_name(name: str) -> str:
     if not slug:
         raise ProfileError(f"Nom de profil invalide : {name!r}")
     return slug
+
+
+def _profile_choices_dir(profiles_dir: Path, profile_name: str) -> Path:
+    """Dossier où stocker les données liées au profil `profile_name` mais
+    qui ne font pas partie du manifeste (voir `load_blacklisted_files`) —
+    utilise le même slug que `save_profile`, ou un slug dédié quand aucun
+    profil n'est actif (`profile_name` vide), pour que ce cas ait lui aussi
+    sa propre blacklist plutôt que de retomber sur celle d'un profil précis."""
+    slug = slugify_profile_name(profile_name) if profile_name else _NO_PROFILE_SLUG
+    return profiles_dir / slug
+
+
+def load_blacklisted_files(profiles_dir: Path, profile_name: str) -> dict[int, dict[int, str]]:
+    """Charge, pour le profil `profile_name`, la blacklist des fichiers
+    Nexus non retenus lors d'un choix précédent parmi plusieurs variantes
+    d'un même mod (mod_id -> {file_id: file_name} à ne plus proposer au
+    téléchargement) — voir `mod_pipeline.download_mods_from_links_file`.
+    Le nom de fichier est conservé pour pouvoir l'afficher (ex: écran de
+    resélection) sans requête réseau supplémentaire. Liée au profil : deux
+    profils peuvent avoir fait des choix différents pour un même mod
+    multi-fichiers."""
+    path = _profile_choices_dir(profiles_dir, profile_name) / FILE_CHOICES_FILENAME
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return {
+        int(mod_id): {int(file_id): file_name for file_id, file_name in files.items()}
+        for mod_id, files in raw.items()
+    }
+
+
+def save_blacklisted_files(
+    profiles_dir: Path, profile_name: str, blacklist: dict[int, dict[int, str]]
+) -> None:
+    dest_dir = _profile_choices_dir(profiles_dir, profile_name)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    serializable = {
+        str(mod_id): {str(file_id): file_name for file_id, file_name in files.items()}
+        for mod_id, files in blacklist.items()
+        if files
+    }
+    (dest_dir / FILE_CHOICES_FILENAME).write_text(
+        json.dumps(serializable, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def sync_game_profile(modsettings_path: Path, name: str, source_modsettings: Path) -> Path | None:
+    """Crée/actualise `PlayerProfiles/<slug>/modsettings.lsx` dans l'AppData
+    du jeu à partir de `source_modsettings`, pour que BG3 Mod Manager, le
+    Load Order Optimizer et Para Tool proposent notre profil TUI dans leur
+    sélecteur — vérifié (chaînes dans leurs binaires : `DiscoverProfiles`,
+    `DiscoverVisibleProfiles`, `GetProfilePath`...) qu'aucun des trois ne
+    maintient de base de données de profils propre : ils découvrent tous
+    leurs profils en énumérant ce même dossier `PlayerProfiles/`.
+
+    `PlayerProfiles/` est déduit de `modsettings_path`
+    (`.../PlayerProfiles/Public/modsettings.lsx` -> `.../PlayerProfiles/`).
+    Ne fait rien (retourne None) si cette structure n'est pas reconnue, ou
+    si `source_modsettings` est introuvable — ne doit jamais faire échouer
+    la sauvegarde/restauration du profil elle-même."""
+    player_profiles_root = modsettings_path.parent.parent
+    if player_profiles_root.name != "PlayerProfiles" or not source_modsettings.is_file():
+        return None
+
+    slug = slugify_profile_name(name)
+    game_profile_dir = player_profiles_root / slug
+    game_profile_dir.mkdir(parents=True, exist_ok=True)
+    target = game_profile_dir / MODSETTINGS_FILENAME
+    if not target.is_file() or target.read_bytes() != source_modsettings.read_bytes():
+        shutil.copy2(source_modsettings, target)
+    return game_profile_dir
 
 
 def _origin_entries(files: list[str], archives: list[ArchiveEntry]) -> list[dict]:
@@ -84,6 +160,7 @@ def save_profile(
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     shutil.copy2(modsettings_path, dest_dir / MODSETTINGS_FILENAME)
+    sync_game_profile(modsettings_path, name, modsettings_path)
 
     paks = sorted(p.name for p in mods_dir.glob("*.pak")) if mods_dir.is_dir() else []
     native_mods = (
@@ -184,6 +261,7 @@ def restore_profile(
 
     modsettings_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(saved_modsettings, modsettings_path)
+    sync_game_profile(modsettings_path, name, saved_modsettings)
     log(f"modsettings.lsx restauré depuis le profil « {name} ».")
 
     linked = deploy_loose_files(loose_mods_dir, game_data_dir, log=log)

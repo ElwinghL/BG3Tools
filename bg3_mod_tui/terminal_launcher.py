@@ -1,11 +1,16 @@
 """Relance automatique du TUI dans un terminal dédié, avec une police
-Nerd Font (MesloLGS NF) correctement configurée.
+Nerd Font (MesloLGS NF) et le thème de couleurs BG3 (voir `theme.py`)
+correctement configurés.
 
-Le TUI ne peut pas imposer sa propre police au terminal qui l'affiche —
-c'est une propriété exclusive de l'émulateur de terminal, pas de
-l'application qui tourne dedans (voir README.md). La seule option est
-donc de piloter nous-mêmes un émulateur de terminal *dédié*, avec un
-profil qui lui impose la police voulue, puis de nous y relancer.
+Le TUI ne peut pas imposer sa propre police ni ses propres couleurs au
+terminal qui l'affiche — ce sont des propriétés exclusives de
+l'émulateur de terminal, pas de l'application qui tourne dedans (voir
+README.md). La seule option est donc de piloter nous-mêmes un émulateur
+de terminal *dédié*, avec un profil qui lui impose police et couleurs,
+puis de nous y relancer. Le profil (et son schéma de couleurs) est
+régénéré à chaque tentative de relance, pas seulement à la première
+création — s'il change côté `theme.py`, le profil suit au prochain
+démarrage sans étape manuelle.
 
 Un profil qui référence une police ne suffit pas si cette police n'est
 pas installée sur la machine : les fichiers .ttf sont donc embarqués dans
@@ -34,13 +39,23 @@ import sys
 from pathlib import Path
 
 from bg3_mod_tui.platform_utils import is_windows
+from bg3_mod_tui.theme import BG3_THEME
 
 SENTINEL_ENV = "BG3_MODTUI_DEDICATED_TERMINAL"
 DISABLE_ENV = "BG3_MODTUI_NO_RELAUNCH"
 
 FONT_NAME = "MesloLGS NF"
 KONSOLE_PROFILE_NAME = "BG3 Mod TUI"
+KONSOLE_COLORSCHEME_NAME = "BG3 Mod TUI"
 WT_PROFILE_NAME = "BG3 Mod TUI"
+
+
+def _hex_to_rgb_csv(hex_color: str) -> str:
+    """`"#RRGGBB"` -> `"R,G,B"` (format attendu par les fichiers
+    `.colorscheme` de Konsole)."""
+    hex_color = hex_color.lstrip("#")
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    return f"{r},{g},{b}"
 
 # Fichiers .ttf embarqués dans le dépôt (voir fonts/README.md) — installés
 # pour l'utilisateur courant si absents, pour qu'un profil de terminal qui
@@ -159,16 +174,73 @@ def _has_display() -> bool:
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
 
 
+def _ensure_konsole_colorscheme() -> str:
+    """Crée (ou met à jour) le schéma de couleurs Konsole dédié, aux
+    teintes du thème BG3 (voir `theme.py`), et retourne son nom. Konsole
+    lit les schémas sous `~/.local/share/konsole/*.colorscheme` (format
+    INI, couleurs en `R,G,B` décimal — pas en hexadécimal)."""
+    rgb = _hex_to_rgb_csv
+    schemes_dir = Path.home() / ".local" / "share" / "konsole"
+    schemes_dir.mkdir(parents=True, exist_ok=True)
+    scheme_path = schemes_dir / "bg3-mod-tui.colorscheme"
+
+    background = BG3_THEME.background
+    foreground = BG3_THEME.foreground
+    # Correspondance ANSI 0-7 avec les couleurs du thème — palette
+    # restreinte (pas de vert franc ni de vrai cyan dans la source), donc
+    # certains emplacements réutilisent la teinte la plus proche
+    # disponible (bronze/or/sarcelle) plutôt qu'une couleur hors thème.
+    ansi = {
+        0: BG3_THEME.surface,  # noir -> panneaux (fond sombre)
+        1: BG3_THEME.error,  # rouge
+        2: BG3_THEME.secondary,  # vert -> sarcelle (pas de vert dans la palette)
+        3: BG3_THEME.primary,  # jaune -> or
+        4: BG3_THEME.secondary,  # bleu -> sarcelle
+        5: BG3_THEME.accent,  # magenta -> bronze
+        6: BG3_THEME.secondary,  # cyan -> sarcelle
+        7: foreground,  # blanc
+    }
+    lines = [
+        "[Background]",
+        f"Color={rgb(background)}",
+        "",
+        "[BackgroundIntense]",
+        f"Color={rgb(background)}",
+        "",
+        "[Foreground]",
+        f"Color={rgb(foreground)}",
+        "",
+        "[ForegroundIntense]",
+        f"Color={rgb(foreground)}",
+        "",
+    ]
+    for index, hex_color in ansi.items():
+        lines += [f"[Color{index}]", f"Color={rgb(hex_color)}", ""]
+        lines += [f"[Color{index}Intense]", f"Color={rgb(hex_color)}", ""]
+    lines += [
+        "[General]",
+        f"Description={KONSOLE_COLORSCHEME_NAME}",
+        "Opacity=1",
+        "Wallpaper=",
+    ]
+    scheme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return KONSOLE_COLORSCHEME_NAME
+
+
 def _ensure_konsole_profile() -> str:
-    """Crée (ou met à jour) le profil Konsole dédié avec la police voulue,
-    et retourne son nom. Konsole lit les profils sous
+    """Crée (ou met à jour) le profil Konsole dédié avec la police et le
+    thème de couleurs BG3 (voir `_ensure_konsole_colorscheme`), et
+    retourne son nom. Konsole lit les profils sous
     `~/.local/share/konsole/*.profile` (format INI)."""
+    colorscheme_name = _ensure_konsole_colorscheme()
+
     profiles_dir = Path.home() / ".local" / "share" / "konsole"
     profiles_dir.mkdir(parents=True, exist_ok=True)
     profile_path = profiles_dir / "bg3-mod-tui.profile"
     content = (
         "[Appearance]\n"
         f"Font={FONT_NAME},11,-1,5,50,0,0,0,0,0\n"
+        f"ColorScheme={colorscheme_name}\n"
         "\n"
         "[General]\n"
         f"Name={KONSOLE_PROFILE_NAME}\n"
@@ -224,11 +296,41 @@ def _windows_terminal_settings_path() -> Path | None:
     return None
 
 
+def _windows_terminal_color_scheme() -> dict[str, str]:
+    """Schéma de couleurs Windows Terminal aux teintes du thème BG3 (voir
+    `theme.py`). Même correspondance ANSI que `_ensure_konsole_colorscheme`
+    (palette source sans vert ni cyan francs)."""
+    return {
+        "name": KONSOLE_COLORSCHEME_NAME,
+        "background": BG3_THEME.background,
+        "foreground": BG3_THEME.foreground,
+        "cursorColor": BG3_THEME.foreground,
+        "selectionBackground": BG3_THEME.accent,
+        "black": BG3_THEME.surface,
+        "brightBlack": BG3_THEME.panel,
+        "red": BG3_THEME.error,
+        "brightRed": BG3_THEME.error,
+        "green": BG3_THEME.secondary,
+        "brightGreen": BG3_THEME.secondary,
+        "yellow": BG3_THEME.primary,
+        "brightYellow": BG3_THEME.primary,
+        "blue": BG3_THEME.secondary,
+        "brightBlue": BG3_THEME.secondary,
+        "purple": BG3_THEME.accent,
+        "brightPurple": BG3_THEME.accent,
+        "cyan": BG3_THEME.secondary,
+        "brightCyan": BG3_THEME.secondary,
+        "white": BG3_THEME.foreground,
+        "brightWhite": BG3_THEME.foreground,
+    }
+
+
 def _ensure_windows_terminal_profile(command: list[str]) -> bool:
-    """Ajoute/actualise le profil "BG3 Mod TUI" (police MesloLGS NF) dans
-    `settings.json` de Windows Terminal. Retourne False si les settings
-    sont introuvables (installation non standard) — on se contente alors
-    de lancer `wt` sans profil dédié (police par défaut)."""
+    """Ajoute/actualise le profil "BG3 Mod TUI" (police MesloLGS NF, thème
+    de couleurs BG3) dans `settings.json` de Windows Terminal. Retourne
+    False si les settings sont introuvables (installation non standard)
+    — on se contente alors de lancer `wt` sans profil dédié (police et
+    couleurs par défaut)."""
     settings_path = _windows_terminal_settings_path()
     if settings_path is None:
         return False
@@ -238,11 +340,22 @@ def _ensure_windows_terminal_profile(command: list[str]) -> bool:
     except (OSError, json.JSONDecodeError):
         return False
 
+    schemes = data.setdefault("schemes", [])
+    scheme = _windows_terminal_color_scheme()
+    existing_scheme_index = next(
+        (i for i, s in enumerate(schemes) if s.get("name") == scheme["name"]), None
+    )
+    if existing_scheme_index is None:
+        schemes.append(scheme)
+    else:
+        schemes[existing_scheme_index] = scheme
+
     profiles = data.setdefault("profiles", {}).setdefault("list", [])
     existing = next((p for p in profiles if p.get("name") == WT_PROFILE_NAME), None)
     profile = existing if existing is not None else {"name": WT_PROFILE_NAME}
     profile["commandline"] = subprocess.list2cmdline(command)
     profile["font"] = {"face": FONT_NAME}
+    profile["colorScheme"] = scheme["name"]
     if existing is None:
         profiles.append(profile)
 

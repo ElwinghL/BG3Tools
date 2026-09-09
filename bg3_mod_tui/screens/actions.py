@@ -4,21 +4,25 @@ outils) plutôt qu'une liste de mods à parcourir."""
 from __future__ import annotations
 
 import os
+import threading
+import webbrowser
 from pathlib import Path
 
 from textual import on, work
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, Footer, Input, Label, ListItem, ListView, Select
+from textual.widgets import Button, Footer, Input, Label, ListItem, ListView, Select, SelectionList
 
 from bg3_mod_tui.config import ModToolsConfig, save_config
 from bg3_mod_tui.game_deploy import deploy_native_mod_loader, deploy_script_extender
-from bg3_mod_tui.inventory import build_inventory, save_inventory, scan_all_archives
+from bg3_mod_tui.inventory import NEXUS_MOD_URL, build_inventory, save_inventory, scan_all_archives
 from bg3_mod_tui.launcher import LauncherError, launch_tool, open_protontricks, resolve_wine_bin
+from bg3_mod_tui.log_format import fmt_http_log_line
 from bg3_mod_tui.linking import LinkingError, setup_links
 from bg3_mod_tui.native_mods import NativeModsManifestError, deploy_native_mods_from_manifest
-from bg3_mod_tui.platform_utils import find_proton_prefix, is_windows
+from bg3_mod_tui.platform_utils import find_proton_prefix, has_graphical_display, is_windows
 from bg3_mod_tui.profile_archive import (
     ARCHIVE_SUFFIX,
     ProfileArchiveError,
@@ -28,7 +32,9 @@ from bg3_mod_tui.profile_archive import (
 from bg3_mod_tui.profiles import (
     ProfileError,
     list_profiles,
+    load_blacklisted_files,
     restore_profile,
+    save_blacklisted_files,
     save_profile,
     slugify_profile_name,
 )
@@ -44,10 +50,43 @@ from bg3_mod_tui.providers.modio import ModIOAPIError, ModIOClient
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusClient
 from bg3_mod_tui.tools_manager import ToolsError, download_and_extract_tool, find_executables, parse_tools_table
 from bg3_mod_tui.widgets.console_log import ConsoleLog
-from bg3_mod_tui.widgets.planet_icon import PlanetIcon
 
 
 TOOL_ICON = "🛠"
+
+# Contraste renforcé pour les cases à cocher des `SelectionList` (utilisée
+# par `NexusFileSelectionScreen` et `NexusBlacklistScreen`) : le style par
+# défaut de Textual ne distingue coché/décoché que par la couleur d'un
+# glyphe "X" toujours présent (rendu quasi invisible en le calquant sur le
+# fond quand décoché) — sur ce thème sombre/bronze, l'écart entre les
+# teintes par défaut ($panel-darken-2 vs $text-success) est trop subtil
+# pour trancher au premier coup d'œil. On reprend le code couleur
+# erreur/succès du thème (voir `theme.py`) — sans ambiguïté possible :
+# décoché = rouge (`$error`), coché = sarcelle (`$success`) — jusque dans
+# les caractères latéraux de la case (`▐▌`, dont la couleur suit celle du
+# fond du bouton).
+_SELECTION_LIST_CSS = """
+SelectionList > .selection-list--button {
+    color: $error;
+    background: $panel;
+    text-style: bold;
+}
+SelectionList > .selection-list--button-highlighted {
+    color: $error-lighten-1;
+    background: $panel;
+    text-style: bold;
+}
+SelectionList > .selection-list--button-selected {
+    color: $success;
+    background: $panel;
+    text-style: bold;
+}
+SelectionList > .selection-list--button-selected-highlighted {
+    color: $success-lighten-1;
+    background: $panel;
+    text-style: bold;
+}
+"""
 
 
 class _ToolListItem(ListItem):
@@ -82,7 +121,11 @@ class ToolPickerScreen(ModalScreen[Path | None]):
     .tool-group-header {
         margin-top: 1;
         text-style: bold;
-        color: $accent;
+        /* `$text-accent` (pas `$accent` brut) : variante éclaircie générée
+           par Textual spécifiquement pour du texte sur fond sombre — le
+           bronze brut n'atteint pas le contraste AA (4.5:1) sur les
+           panneaux les plus sombres. */
+        color: $text-accent;
     }
     ListView {
         height: auto;
@@ -117,6 +160,15 @@ class ToolPickerScreen(ModalScreen[Path | None]):
         # "BG3-Load-Order-Optimizer", ...) — on regroupe par ce dossier.
         return parts[1] if len(parts) > 1 else parts[0]
 
+    @staticmethod
+    def _group_sort_key(group_name: str) -> tuple[bool, str]:
+        # ExportTools (LSLib) contient énormément d'exécutables annexes
+        # (Divine, StoryCompiler, RconClient...) qui noieraient les outils
+        # réellement utilisés au quotidien en tête de liste — on le relègue
+        # toujours en dernier plutôt que de le laisser à sa place
+        # alphabétique.
+        return (group_name == "ExportTools", group_name)
+
     def compose(self) -> ComposeResult:
         with Vertical(id="tool-picker-box"):
             yield Label("Choisir un outil à lancer", classes="title")
@@ -125,7 +177,7 @@ class ToolPickerScreen(ModalScreen[Path | None]):
                 groups.setdefault(self._group_label(exe), []).append(exe)
 
             with VerticalScroll(id="tool-groups"):
-                for group_name in sorted(groups):
+                for group_name in sorted(groups, key=self._group_sort_key):
                     yield Label(group_name, classes="tool-group-header")
                     yield ListView(
                         *[_ToolListItem(exe) for exe in sorted(groups[group_name])]
@@ -152,6 +204,208 @@ class ToolPickerScreen(ModalScreen[Path | None]):
     @on(Button.Pressed, "#tool-picker-cancel")
     def handle_cancel(self) -> None:
         self.dismiss(None)
+
+
+class NexusFileSelectionScreen(ModalScreen[list[int]]):
+    """Demande, pour un mod Nexus proposant plusieurs fichiers (parfois de
+    simples variantes alternatives dont une seule doit être installée),
+    lesquels garder : flèches pour naviguer, espace pour cocher/décocher
+    (tous cochés par défaut), Entrée ou bouton pour valider. Les fichiers
+    décochés rejoignent la blacklist du profil actif — voir
+    `mod_pipeline.download_mods_from_links_file` — et ne seront plus
+    proposés tant qu'ils ne seront pas resélectionnés (ex: depuis
+    l'inventaire)."""
+
+    BINDINGS = [Binding("enter", "confirm", "Valider", priority=True)]
+
+    CSS = _SELECTION_LIST_CSS + """
+    NexusFileSelectionScreen {
+        align: center middle;
+    }
+    #file-selection-box {
+        width: 80%;
+        max-width: 100;
+        border: round $accent;
+        padding: 1 2;
+        background: $surface;
+    }
+    #file-selection-list {
+        height: auto;
+        max-height: 20;
+        margin-top: 1;
+    }
+    #file-selection-buttons {
+        height: auto;
+        margin-top: 1;
+    }
+    #file-selection-url {
+        margin-top: 1;
+        color: $text-muted;
+    }
+    """
+
+    def __init__(self, mod_id: int, mod_name: str, candidates: list[tuple[int, str]]) -> None:
+        super().__init__()
+        self._mod_id = mod_id
+        self._mod_name = mod_name
+        self._candidates = candidates
+        self._mod_url = f"{NEXUS_MOD_URL.format(id=mod_id)}?tab=files"
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="file-selection-box"):
+            yield Label(f"Plusieurs fichiers pour « {self._mod_name} » (#{self._mod_id})", classes="title")
+            yield Label(
+                "Espace : cocher/décocher ceux à garder. Entrée : valider — "
+                "les fichiers décochés ne seront plus proposés."
+            )
+            yield SelectionList[int](
+                *[(file_name, file_id, True) for file_id, file_name in self._candidates],
+                id="file-selection-list",
+            )
+            with Horizontal(id="file-selection-buttons"):
+                if has_graphical_display():
+                    yield Button("Ouvrir la page Nexus", id="file-selection-open-url")
+                yield Button("Valider", id="file-selection-confirm", variant="primary")
+            # Page Nexus (onglet Fichiers) pour comparer les candidats avant de
+            # cocher/décocher — toujours affichée telle quelle (copiable à la
+            # main), le bouton ci-dessus n'étant qu'un raccourci quand un
+            # navigateur est disponible.
+            yield Label(self._mod_url, id="file-selection-url")
+
+    def on_mount(self) -> None:
+        self.query_one("#file-selection-list", SelectionList).focus()
+
+    def action_confirm(self) -> None:
+        self.dismiss(self.query_one("#file-selection-list", SelectionList).selected)
+
+    @on(Button.Pressed, "#file-selection-confirm")
+    def handle_confirm(self) -> None:
+        self.action_confirm()
+
+    @on(Button.Pressed, "#file-selection-open-url")
+    def handle_open_url(self) -> None:
+        webbrowser.open(self._mod_url)
+        # Cliquer sur le bouton lui donne le focus, ce qui couperait la
+        # navigation aux flèches sur la liste tant qu'on ne re-clique pas
+        # dessus — on lui rend systématiquement le focus derrière.
+        self.query_one("#file-selection-list", SelectionList).focus()
+
+
+class NexusBlacklistScreen(ModalScreen[list[tuple[int, int]] | None]):
+    """Liste les fichiers Nexus écartés (blacklist) du profil actif — voir
+    `NexusFileSelectionScreen` et `mod_pipeline.download_mods_from_links_file`
+    — pour en resélectionner certains. Rien n'est coché par défaut : seuls
+    les fichiers cochés ici sont retirés de la blacklist et seront donc
+    reproposés (avec, si le mod a de nouveau plusieurs candidats, l'écran
+    de choix qui réapparaît) au prochain téléchargement."""
+
+    BINDINGS = [
+        Binding("enter", "confirm", "Valider", priority=True),
+        Binding("o", "open_url", "Ouvrir Nexus"),
+    ]
+
+    CSS = _SELECTION_LIST_CSS + """
+    NexusBlacklistScreen {
+        align: center middle;
+    }
+    #blacklist-box {
+        width: 80%;
+        max-width: 100;
+        height: 80%;
+        border: round $accent;
+        padding: 1 2;
+        background: $surface;
+    }
+    #blacklist-list {
+        height: 1fr;
+        margin-top: 1;
+    }
+    #blacklist-url {
+        margin-top: 1;
+        color: $text-muted;
+    }
+    #blacklist-buttons {
+        height: auto;
+        margin-top: 1;
+    }
+    #blacklist-buttons Button {
+        margin-right: 1;
+    }
+    """
+
+    def __init__(self, blacklist: dict[int, dict[int, str]]) -> None:
+        super().__init__()
+        self._blacklist = blacklist
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="blacklist-box"):
+            yield Label("Fichiers Nexus écartés (profil actif)", classes="title")
+            yield Label(
+                "Espace : cocher ceux à réintégrer. Entrée : valider — ils seront "
+                "reproposés au prochain téléchargement. 'o' ou le bouton : ouvrir "
+                "la page Nexus du mod survolé, pour guider le choix."
+            )
+            options = [
+                (f"#{mod_id} — {file_name}", (mod_id, file_id), False)
+                for mod_id, files in sorted(self._blacklist.items())
+                for file_id, file_name in sorted(files.items())
+            ]
+            yield SelectionList[tuple[int, int]](*options, id="blacklist-list")
+            # Page Nexus du mod actuellement survolé — mise à jour au fil de la
+            # navigation (voir `handle_highlighted`), toujours affichée telle
+            # quelle (copiable à la main) ; le bouton n'est qu'un raccourci
+            # quand un navigateur est disponible (voir `has_graphical_display`).
+            yield Label("", id="blacklist-url")
+            with Horizontal(id="blacklist-buttons"):
+                if has_graphical_display():
+                    yield Button("Ouvrir la page Nexus", id="blacklist-open-url")
+                yield Button("Valider", id="blacklist-confirm", variant="primary")
+                yield Button("Annuler", id="blacklist-cancel")
+
+    def on_mount(self) -> None:
+        selection_list = self.query_one("#blacklist-list", SelectionList)
+        selection_list.focus()
+        self._update_url_label()
+
+    def _highlighted_mod_id(self) -> int | None:
+        highlighted = self.query_one("#blacklist-list", SelectionList).highlighted_option
+        if highlighted is None:
+            return None
+        mod_id, _file_id = highlighted.value
+        return mod_id
+
+    def _update_url_label(self) -> None:
+        mod_id = self._highlighted_mod_id()
+        url = f"{NEXUS_MOD_URL.format(id=mod_id)}?tab=files" if mod_id is not None else ""
+        self.query_one("#blacklist-url", Label).update(url)
+
+    @on(SelectionList.SelectionHighlighted, "#blacklist-list")
+    def handle_highlighted(self) -> None:
+        self._update_url_label()
+
+    def action_confirm(self) -> None:
+        self.dismiss(self.query_one("#blacklist-list", SelectionList).selected)
+
+    def action_open_url(self) -> None:
+        mod_id = self._highlighted_mod_id()
+        if mod_id is not None:
+            webbrowser.open(f"{NEXUS_MOD_URL.format(id=mod_id)}?tab=files")
+
+    @on(Button.Pressed, "#blacklist-confirm")
+    def handle_confirm(self) -> None:
+        self.action_confirm()
+
+    @on(Button.Pressed, "#blacklist-cancel")
+    def handle_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#blacklist-open-url")
+    def handle_open_url(self) -> None:
+        self.action_open_url()
+        # Cliquer sur le bouton lui donne le focus, ce qui couperait la
+        # navigation aux flèches sur la liste tant qu'on ne re-clique pas
+        # dessus — on lui rend systématiquement le focus derrière.
+        self.query_one("#blacklist-list", SelectionList).focus()
 
 
 class ProfileNamePromptScreen(ModalScreen[str | None]):
@@ -357,25 +611,26 @@ class ActionsScreen(Screen):
     #profile-select {
         width: 40;
     }
-    /* Bouton "internet" (icône planète PNG, voir icons/ et PlanetIcon) :
-       une vraie image plutôt qu'un caractère de police — résout à la fois
-       la taille (un caractère seul ne peut pas être agrandi dans un
-       terminal) et la couleur (un fichier différent par état, pas de
-       glyphe monochrome à teinter par CSS). */
+    /* Bouton "internet" : un bouton normal comme les autres (couleur selon
+       l'état via la variante warning/error/success standard de Button) —
+       icône et image abandonnées (peu lisibles/non fiables selon le
+       terminal), on garde juste le code couleur. */
     #planet-button {
         margin-left: 2;
-        width: 6;
-        height: 3;
+        width: 14;
     }
     #web-console-panel {
-        width: 40;
+        width: 30;
+        height: 1fr;
         margin-left: 2;
     }
     #web-console-label {
         height: auto;
+        text-style: bold;
+        color: $text-accent;
     }
     #web-console-log {
-        border: round $success;
+        border: round $accent;
         height: 1fr;
     }
     """
@@ -404,9 +659,10 @@ class ActionsScreen(Screen):
                 prompt="(aucun profil sauvegardé)",
                 id="profile-select",
             )
-            yield PlanetIcon(
-                state="warning" if not self._config.has_public_address() else "error",
+            yield Button(
+                "Web",
                 id="planet-button",
+                variant="warning" if not self._config.has_public_address() else "error",
             )
         with Horizontal(id="actions-body"):
             with Vertical(id="actions-menu"):
@@ -483,6 +739,16 @@ class ActionsScreen(Screen):
                         ),
                     )
                     yield Button(
+                        "Fichiers Nexus écartés...",
+                        id="action-nexus-blacklist",
+                        tooltip=(
+                            "Revoit les fichiers Nexus écartés lors d'un choix précédent "
+                            "entre plusieurs variantes d'un même mod (profil actif) — "
+                            "coche ceux à réintégrer pour qu'ils soient reproposés au "
+                            "prochain téléchargement."
+                        ),
+                    )
+                    yield Button(
                         "Déployer mods DLL",
                         id="action-native-mods",
                         tooltip=(
@@ -521,6 +787,9 @@ class ActionsScreen(Screen):
                 yield ConsoleLog(id="actions-log", wrap=True, highlight=True, markup=True)
                 yield Label("Console outils", id="tools-log-label")
                 yield ConsoleLog(id="tools-log", wrap=True, highlight=True, markup=True)
+            with Vertical(id="web-console-panel"):
+                yield Label("Console Web", id="web-console-label")
+                yield ConsoleLog(id="web-console-log", wrap=True, highlight=True, markup=True)
         yield Footer()
 
     def _log(self, message: str) -> None:
@@ -532,6 +801,25 @@ class ActionsScreen(Screen):
     @on(Button.Pressed, "#action-download-mods")
     def handle_download_mods(self) -> None:
         self.run_download_mods()
+
+    def _select_nexus_files(
+        self, mod_id: int, mod_name: str, candidates: list[tuple[int, str]]
+    ) -> list[int]:
+        """Appelé depuis le thread de téléchargement (voir
+        `run_download_mods`) : bascule sur le thread principal pour
+        afficher `NexusFileSelectionScreen` et bloque jusqu'à validation."""
+        done = threading.Event()
+        result: list[int] = []
+
+        def show_screen() -> None:
+            def on_result(chosen: list[int]) -> None:
+                result.extend(chosen)
+                done.set()
+            self.app.push_screen(NexusFileSelectionScreen(mod_id, mod_name, candidates), on_result)
+
+        self.app.call_from_thread(show_screen)
+        done.wait()
+        return result
 
     @work(exclusive=True, thread=True)
     def run_download_mods(self) -> None:
@@ -546,6 +834,9 @@ class ActionsScreen(Screen):
                 self._config.archives_dir,
                 archives_installed_dir=self._config.archives_installed_dir,
                 archives_pending_dir=self._config.archives_pending_dir,
+                profiles_dir=self._config.profiles_dir,
+                profile_name=self._config.active_profile,
+                select_files=self._select_nexus_files,
                 log=log,
             )
             log(
@@ -554,9 +845,9 @@ class ActionsScreen(Screen):
                 f"{len(report['failed'])} échec(s)."
             )
         except NexusAPIError as exc:
-            log(f"[red]Erreur (Nexus) : {exc}[/red]")
+            log(f"[#C46F6F]Erreur (Nexus) : {exc}[/#C46F6F]")
         except Exception as exc:
-            log(f"[red]Erreur inattendue (Nexus) : {exc}[/red]")
+            log(f"[#C46F6F]Erreur inattendue (Nexus) : {exc}[/#C46F6F]")
 
         log("=== Récupération des mods abonnés sur mod.io ===")
         try:
@@ -574,9 +865,9 @@ class ActionsScreen(Screen):
                 f"{len(report['failed'])} échec(s)."
             )
         except ModIOAPIError as exc:
-            log(f"[red]Erreur (mod.io) : {exc}[/red]")
+            log(f"[#C46F6F]Erreur (mod.io) : {exc}[/#C46F6F]")
         except Exception as exc:
-            log(f"[red]Erreur inattendue (mod.io) : {exc}[/red]")
+            log(f"[#C46F6F]Erreur inattendue (mod.io) : {exc}[/#C46F6F]")
 
     @on(Button.Pressed, "#action-clean-paks")
     def handle_clean_paks(self) -> None:
@@ -586,7 +877,11 @@ class ActionsScreen(Screen):
     def run_clean_paks(self) -> None:
         def log(msg): return self.app.call_from_thread(self._log, msg)
         log("=== Nettoyage des .pak de Mods/ ===")
-        clean_pak_files(self._config.managed_mods_link, log=log)
+        clean_pak_files(
+            self._config.managed_mods_link,
+            native_mods_managed_dir=self._config.native_mods_managed_dir,
+            log=log,
+        )
 
     @on(Button.Pressed, "#action-sync-modsettings")
     def handle_sync_modsettings(self) -> None:
@@ -601,7 +896,7 @@ class ActionsScreen(Screen):
             for step in report.steps:
                 log(step)
         except LinkingError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
     @on(Button.Pressed, "#action-extract")
     def handle_extract(self) -> None:
@@ -647,7 +942,7 @@ class ActionsScreen(Screen):
                 log=log,
             )
         except NativeModsManifestError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
             return
         log(
             f"Terminé : {len(report['deployed'])} déployé(s), "
@@ -666,7 +961,7 @@ class ActionsScreen(Screen):
         try:
             entries = parse_tools_table(self._config.tools_md_file)
         except ToolsError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
             return
         for entry in entries:
             download_and_extract_tool(
@@ -684,7 +979,7 @@ class ActionsScreen(Screen):
         executables = find_executables(self._config.tools_dir)
         if not executables:
             self._tool_log(
-                "[yellow]Aucun exécutable trouvé sous Tools/.[/yellow]")
+                "[#D8C091]Aucun exécutable trouvé sous Tools/.[/#D8C091]")
             return
 
         def on_picked(exe_path: Path | None) -> None:
@@ -704,7 +999,7 @@ class ActionsScreen(Screen):
                 exe_path, reference_path=self._config.appdata_path, log_dir=log_dir)
             log(f"Lancé : {exe_path.name} (sortie journalisée dans {log_dir / (exe_path.stem + '.log')})")
         except LauncherError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
     @on(Button.Pressed, "#action-protontricks")
     def handle_protontricks(self) -> None:
@@ -719,7 +1014,7 @@ class ActionsScreen(Screen):
             log(
                 f"protontricks ouvert (préfixe BG3, sortie journalisée dans {log_dir / 'protontricks.log'}).")
         except LauncherError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
     @on(Button.Pressed, "#action-inventory")
     def handle_inventory(self) -> None:
@@ -729,19 +1024,44 @@ class ActionsScreen(Screen):
     def run_inventory(self) -> None:
         def log(msg): return self.app.call_from_thread(self._log, msg)
         log("=== Génération de l'inventaire des mods ===")
-        inventory = build_inventory(
-            mods_dir=self._config.managed_mods_link,
-            archives_dir=self._config.archives_dir,
-            archives_installed_dir=self._config.archives_installed_dir,
-            archives_pending_dir=self._config.archives_pending_dir,
-        )
-        save_inventory(inventory, self._config.inventory_file)
+        try:
+            inventory = build_inventory(
+                mods_dir=self._config.managed_mods_link,
+                archives_dir=self._config.archives_dir,
+                archives_installed_dir=self._config.archives_installed_dir,
+                archives_pending_dir=self._config.archives_pending_dir,
+                on_progress=log,
+            )
+            save_inventory(inventory, self._config.inventory_file)
+        except OSError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return
         counts = inventory["counts"]
         log(
             f"{counts['paks']} .pak, {counts['archives']} archive(s) "
             f"({counts['archives_with_nexus_id']} avec ID Nexus identifié) "
             f"-> {self._config.inventory_file}"
         )
+
+    @on(Button.Pressed, "#action-nexus-blacklist")
+    def handle_nexus_blacklist(self) -> None:
+        blacklist = load_blacklisted_files(self._config.profiles_dir, self._config.active_profile)
+        if not blacklist:
+            self._log("Aucun fichier Nexus écarté pour le profil actif.")
+            return
+
+        def on_result(chosen: list[tuple[int, int]] | None) -> None:
+            if not chosen:
+                return
+            for mod_id, file_id in chosen:
+                blacklist.get(mod_id, {}).pop(file_id, None)
+            save_blacklisted_files(self._config.profiles_dir, self._config.active_profile, blacklist)
+            self._log(
+                f"{len(chosen)} fichier(s) Nexus retiré(s) de la blacklist — "
+                "seront reproposés au prochain téléchargement."
+            )
+
+        self.app.push_screen(NexusBlacklistScreen(blacklist), on_result)
 
     def _reset_profile_select(self, to_value: str | None = None) -> None:
         """Recharge les options du sélecteur de profil et le repositionne
@@ -800,29 +1120,29 @@ class ActionsScreen(Screen):
 
             if report.paks_missing:
                 log(
-                    f"[yellow]{len(report.paks_missing)} .pak du profil absent(s) de Mods/ : "
-                    f"{', '.join(report.paks_missing)}[/yellow]"
+                    f"[#D8C091]{len(report.paks_missing)} .pak du profil absent(s) de Mods/ : "
+                    f"{', '.join(report.paks_missing)}[/#D8C091]"
                 )
             if report.paks_extra:
                 log(
-                    f"[yellow]{len(report.paks_extra)} .pak présent(s) dans Mods/ mais absent(s) "
-                    f"du profil : {', '.join(report.paks_extra)}[/yellow]"
+                    f"[#D8C091]{len(report.paks_extra)} .pak présent(s) dans Mods/ mais absent(s) "
+                    f"du profil : {', '.join(report.paks_extra)}[/#D8C091]"
                 )
             if not report.paks_missing and not report.paks_extra:
                 log("Les .pak de Mods/ correspondent exactement au profil.")
             if report.native_mods_missing:
                 log(
-                    f"[yellow]{len(report.native_mods_missing)} mod(s) DLL du profil absent(s) de "
-                    f"bin/NativeMods/ : {', '.join(report.native_mods_missing)}[/yellow]"
+                    f"[#D8C091]{len(report.native_mods_missing)} mod(s) DLL du profil absent(s) de "
+                    f"bin/NativeMods/ : {', '.join(report.native_mods_missing)}[/#D8C091]"
                 )
             if report.native_mods_extra:
                 log(
-                    f"[yellow]{len(report.native_mods_extra)} mod(s) DLL présent(s) dans "
-                    f"bin/NativeMods/ mais absent(s) du profil : {', '.join(report.native_mods_extra)}[/yellow]"
+                    f"[#D8C091]{len(report.native_mods_extra)} mod(s) DLL présent(s) dans "
+                    f"bin/NativeMods/ mais absent(s) du profil : {', '.join(report.native_mods_extra)}[/#D8C091]"
                 )
             log(f"Profil « {name} » restauré ({report.loose_files_linked} fichier(s) loose reliés).")
         except ProfileError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
     @work(exclusive=True, thread=True)
     def run_save_profile(self, name: str) -> None:
@@ -848,14 +1168,14 @@ class ActionsScreen(Screen):
             save_config(self._config)
             self.app.call_from_thread(self._reset_profile_select, name)
         except ProfileError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
             self.app.call_from_thread(self._reset_profile_select)
 
     @on(Button.Pressed, "#action-export-profile")
     def handle_export_profile(self) -> None:
         name = self._config.active_profile
         if not name:
-            self._log("[yellow]Aucun profil actif à exporter.[/yellow]")
+            self._log("[#D8C091]Aucun profil actif à exporter.[/#D8C091]")
             return
         self.run_export_profile(name)
 
@@ -877,7 +1197,7 @@ class ActionsScreen(Screen):
             )
             log(f"Archive prête à être partagée : {dest_path}")
         except ProfileError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
     @on(Button.Pressed, "#action-import-profile")
     def handle_import_profile(self) -> None:
@@ -901,7 +1221,7 @@ class ActionsScreen(Screen):
                 log=log,
             )
         except ProfileArchiveError as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
             return
 
         self.app.call_from_thread(self._reset_profile_select, name)
@@ -918,7 +1238,7 @@ class ActionsScreen(Screen):
         try:
             prefix = find_proton_prefix(self._config.appdata_path)
             if prefix is None:
-                log("[red]Impossible de déterminer le préfixe Proton de BG3.[/red]")
+                log("[#C46F6F]Impossible de déterminer le préfixe Proton de BG3.[/#C46F6F]")
                 return
             wine_bin = resolve_wine_bin(prefix)
             appid = prefix.parent.name
@@ -933,7 +1253,7 @@ class ActionsScreen(Screen):
             )
             log("Terminé.")
         except (LauncherError, WinePrefixError) as exc:
-            log(f"[red]Erreur : {exc}[/red]")
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
     @on(Button.Pressed, "#action-quit")
     def handle_quit(self) -> None:
@@ -955,7 +1275,7 @@ class ActionsScreen(Screen):
         except Exception:
             pass
 
-    @on(PlanetIcon.Clicked, "#planet-button")
+    @on(Button.Pressed, "#planet-button")
     def handle_planet_button(self) -> None:
         if self._web_server_handle is not None and self._web_server_handle.is_running:
             self._stop_web_server()
@@ -978,15 +1298,7 @@ class ActionsScreen(Screen):
         self._start_web_server()
 
     def _start_web_server(self) -> None:
-        actions_body = self.query_one("#actions-body", Horizontal)
-        if not self.query("#web-console-panel"):
-            panel = Vertical(id="web-console-panel")
-            actions_body.mount(panel)
-            panel.mount(Label("Console Web", id="web-console-label"))
-            panel.mount(ConsoleLog(id="web-console-log",
-                        wrap=True, highlight=True, markup=True))
-
-        button = self.query_one("#planet-button", PlanetIcon)
+        button = self.query_one("#planet-button", Button)
         web_root = self._config.web_root_dir
         web_root.mkdir(parents=True, exist_ok=True)
         try:
@@ -994,14 +1306,14 @@ class ActionsScreen(Screen):
                 web_root,
                 self._config.public_port,
                 on_line=lambda line: self.app.call_from_thread(
-                    self._web_log, line),
+                    self._web_log, fmt_http_log_line(line)),
             )
         except (ValueError, OSError) as exc:
-            self._web_log(f"[red]Échec du démarrage du serveur : {exc}[/red]")
+            self._web_log(f"[#C46F6F]Échec du démarrage du serveur : {exc}[/#C46F6F]")
             return
 
         self._web_server_handle = handle
-        button.set_state("success")
+        button.variant = "success"
 
         if self._config.public_url:
             link = f"{self._config.public_url.rstrip('/')}:{self._config.public_port}/"
@@ -1014,9 +1326,5 @@ class ActionsScreen(Screen):
         self._web_log("Arrêt du serveur...")
         self._stop_web_server_if_running()
 
-        button = self.query_one("#planet-button", PlanetIcon)
-        button.set_state("warning" if not self._config.has_public_address() else "error")
-
-        panel = self.query("#web-console-panel")
-        if panel:
-            panel.first().remove()
+        button = self.query_one("#planet-button", Button)
+        button.variant = "warning" if not self._config.has_public_address() else "error"

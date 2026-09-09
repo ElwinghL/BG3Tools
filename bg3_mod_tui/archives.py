@@ -61,7 +61,11 @@ def _extract_via_binary(binary: str, args: list[str], archive: Path) -> None:
             f"d'extraire '{archive.name}'."
         )
     proc = subprocess.Popen(
-        args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        args,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
     )
     with _active_processes_lock:
         _active_processes.add(proc)

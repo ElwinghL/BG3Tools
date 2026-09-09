@@ -11,6 +11,17 @@ def is_windows() -> bool:
     return sys.platform == "win32"
 
 
+def has_graphical_display() -> bool:
+    """Indique si un environnement de bureau graphique semble disponible,
+    pour proposer un bouton "ouvrir dans le navigateur" plutôt qu'un
+    simple lien à copier à la main (cas d'une session headless/SSH, où
+    `webbrowser.open` échouerait silencieusement ou ouvrirait un
+    navigateur texte inattendu)."""
+    if is_windows():
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def is_admin() -> bool:
     """Indique si le processus courant a les privilèges nécessaires pour
     créer des liens symboliques / hardlinks.
@@ -87,8 +98,15 @@ def find_proton_prefix(start_path: Path) -> Path | None:
     Proton de BG3 (un dossier `pfx` contenant `drive_c`). Utilisé pour
     restreindre le lancement d'outils Windows, sous Linux, au préfixe de
     BG3 plutôt qu'à un Wine générique.
+
+    `start_path` est résolu (`.resolve()`) avant la recherche : un raccourci
+    pratique comme `~/ProtonGames/<jeu>/` pointe souvent (lien symbolique)
+    directement vers `.../pfx/drive_c/users/steamuser`, sans qu'aucun
+    segment du chemin *non résolu* ne s'appelle littéralement `pfx` — la
+    recherche échouerait alors à tort sans passer par le chemin réel.
     """
-    for parent in (start_path, *start_path.parents):
+    resolved = start_path.resolve()
+    for parent in (resolved, *resolved.parents):
         if parent.name == "pfx" and (parent / "drive_c").is_dir():
             return parent
     return None

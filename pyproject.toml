@@ -9,7 +9,6 @@ dependencies = [
     "python-dotenv>=1.0",
     "tomlkit>=0.12",
     "zstandard>=0.22",
-    "textual-image>=0.13",
 ]
 
 [project.scripts]

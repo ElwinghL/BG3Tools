@@ -44,3 +44,17 @@ BG3_THEME = Theme(
     panel="#241F17",
     dark=True,
 )
+
+# Couleurs de texte accessibles (contraste WCAG >= 4.5:1 sur les trois
+# fonds sombres du thème — background/surface/panel) pour les lignes de
+# log colorées par statut (succès/erreur/avertissement). Reprend les
+# teintes que `ColorSystem` calcule pour `$text-success`/`$text-error`/
+# `$text-warning` à partir du thème ci-dessus — copiées ici en littéral
+# parce que les lignes de log passent par du balisage Rich (`[red]...`),
+# qui ne connaît pas les variables CSS de Textual. Les couleurs nommées
+# Rich standard ("red"/"green"/"yellow") ont été mesurées bien trop
+# sombres sur nos fonds (ex: "red" ~1.6:1, largement sous le minimum
+# WCAG de 3:1) : illisibles, pas juste ternes.
+LOG_COLOR_SUCCESS = "#89A8B1"
+LOG_COLOR_ERROR = "#C46F6F"
+LOG_COLOR_WARNING = "#D8C091"

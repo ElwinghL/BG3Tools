@@ -85,10 +85,10 @@ class MainScreen(Screen):
             client = NexusClient(api_key)
             mods = client.tracked_mods()
         except NexusAPIError as exc:
-            self.app.call_from_thread(status.update, f"[red]{exc}[/red]")
+            self.app.call_from_thread(status.update, f"[#C46F6F]{exc}[/#C46F6F]")
             return
         except Exception as exc:  # erreurs réseau, etc.
-            self.app.call_from_thread(status.update, f"[red]Erreur réseau : {exc}[/red]")
+            self.app.call_from_thread(status.update, f"[#C46F6F]Erreur réseau : {exc}[/#C46F6F]")
             return
 
         self._nexus_mods = mods
@@ -114,10 +114,10 @@ class MainScreen(Screen):
             )
             mods = client.subscribed_mods()
         except ModIOAPIError as exc:
-            self.app.call_from_thread(status.update, f"[red]{exc}[/red]")
+            self.app.call_from_thread(status.update, f"[#C46F6F]{exc}[/#C46F6F]")
             return
         except Exception as exc:
-            self.app.call_from_thread(status.update, f"[red]Erreur réseau : {exc}[/red]")
+            self.app.call_from_thread(status.update, f"[#C46F6F]Erreur réseau : {exc}[/#C46F6F]")
             return
 
         self._modio_mods = mods
@@ -150,6 +150,6 @@ class MainScreen(Screen):
             target_dir = self._config.managed_mods_link
             path = download_file(mod.download_url, target_dir)
         except Exception as exc:
-            self.app.call_from_thread(status.update, f"[red]Échec du téléchargement : {exc}[/red]")
+            self.app.call_from_thread(status.update, f"[#C46F6F]Échec du téléchargement : {exc}[/#C46F6F]")
             return
-        self.app.call_from_thread(status.update, f"[green]Téléchargé : {path}[/green]")
+        self.app.call_from_thread(status.update, f"[#89A8B1]Téléchargé : {path}[/#89A8B1]")

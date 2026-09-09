@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from bg3_mod_tui.archives import ArchiveError, extract_archive, is_supported_archive
-from bg3_mod_tui.downloader import _filename_from_url, download_file
+from bg3_mod_tui.downloader import download_file, resolve_remote_filename
 from bg3_mod_tui.game_deploy import deploy_loose_files
 from bg3_mod_tui.inventory import known_mod_ids
 from bg3_mod_tui.native_mods import (
@@ -26,6 +26,7 @@ from bg3_mod_tui.log_format import (
     STATUS_SUCCES,
     fmt_row,
 )
+from bg3_mod_tui.profiles import load_blacklisted_files, save_blacklisted_files
 from bg3_mod_tui.providers.modio import ModIOAPIError, ModIOClient
 from bg3_mod_tui.providers.nexus import (
     NexusAPIError,
@@ -35,6 +36,12 @@ from bg3_mod_tui.providers.nexus import (
 )
 
 LogFn = Callable[[str], None]
+# Reçoit (mod_id, nom du mod, [(file_id, file_name), ...] variantes encore
+# candidates) quand un mod a plusieurs fichiers éligibles à choisir parmi
+# — doit retourner les file_id à conserver (les autres rejoignent la
+# blacklist du profil actif). Une liste vide est un choix valide (le mod
+# entier est alors blacklisté).
+SelectFilesFn = Callable[[int, str, list[tuple[int, str]]], list[int]]
 
 _INTERNAL_DIR_NAMES = {"_a_traiter", "_installees"}
 
@@ -60,12 +67,25 @@ def download_mods_from_links_file(
     *,
     archives_installed_dir: Path | None = None,
     archives_pending_dir: Path | None = None,
+    profiles_dir: Path | None = None,
+    profile_name: str = "",
+    select_files: SelectFilesFn | None = None,
     log: LogFn = lambda _msg: None,
 ) -> dict[str, list]:
-    """Télécharge, pour chaque mod listé dans `links_file`, la dernière
-    version de chacune de ses variantes ('MAIN'/'UPDATE'/'OPTIONAL', une
-    par nom de fichier distinct) vers `dest_dir`. Nécessite un compte
-    Nexus Premium pour le téléchargement direct via l'API.
+    """Télécharge, pour chaque mod listé dans `links_file`, ses fichiers
+    éligibles ('MAIN'/'UPDATE'/'OPTIONAL', une variante distincte par nom
+    de fichier) vers `dest_dir`. Nécessite un compte Nexus Premium pour le
+    téléchargement direct via l'API.
+
+    Quand un mod a plusieurs variantes candidates (après exclusion de
+    celles déjà blacklistées pour le profil `profile_name`, voir
+    `profiles.load_blacklisted_files`), `select_files` est appelé pour
+    demander lesquelles garder — les autres rejoignent la blacklist (elles
+    ne seront plus proposées tant qu'elles n'auront pas été resélectionnées,
+    ex: depuis l'inventaire). Sans `select_files`, toutes les variantes
+    candidates sont téléchargées (comportement historique, utile en
+    contexte non-interactif). Une seule variante candidate est téléchargée
+    directement, sans demander (rien d'ambigu à trancher).
 
     Un mod est considéré comme déjà présent s'il a une archive dans
     `dest_dir` OU dans `archives_installed_dir`/`archives_pending_dir` (une
@@ -82,6 +102,9 @@ def download_mods_from_links_file(
         dest_dir, *(d for d in (archives_installed_dir, archives_pending_dir) if d is not None)
     )
 
+    blacklist = load_blacklisted_files(profiles_dir, profile_name) if profiles_dir is not None else {}
+    blacklist_dirty = False
+
     report: dict[str, list] = {"downloaded": [], "skipped": [], "failed": []}
 
     for mod_id in mod_ids:
@@ -91,6 +114,7 @@ def download_mods_from_links_file(
             version = info.version
         except NexusAPIError:
             label = str(mod_id)
+            info = None
             version = ""
 
         if mod_id in already_present_ids:
@@ -99,7 +123,31 @@ def download_mods_from_links_file(
             continue
         try:
             files = client.latest_files(mod_id)
-            for file_id, _file_name in files:
+            excluded_ids = set(blacklist.get(mod_id, {}))
+            candidates = [(fid, fname) for fid, fname in files if fid not in excluded_ids]
+
+            if not candidates:
+                log(fmt_row(label, STATUS_IGNORE, version=version, detail="toutes les variantes sont blacklistées"))
+                report["skipped"].append(mod_id)
+                continue
+
+            if len(candidates) > 1 and select_files is not None:
+                mod_name = info.name if info is not None else label
+                chosen_ids = set(select_files(mod_id, mod_name, candidates))
+                rejected = {fid: fname for fid, fname in candidates if fid not in chosen_ids}
+                if rejected:
+                    blacklist.setdefault(mod_id, {}).update(rejected)
+                    blacklist_dirty = True
+                to_download = [pair for pair in candidates if pair[0] in chosen_ids]
+            else:
+                to_download = candidates
+
+            if not to_download:
+                log(fmt_row(label, STATUS_IGNORE, version=version, detail="aucune variante retenue"))
+                report["skipped"].append(mod_id)
+                continue
+
+            for file_id, _file_name in to_download:
                 url = client.download_link(mod_id, file_id)
                 path = download_file(url, dest_dir)
                 log(fmt_row(label, STATUS_SUCCES, version=version, detail=path.name))
@@ -110,6 +158,9 @@ def download_mods_from_links_file(
         except Exception as exc:
             log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
             report["failed"].append((mod_id, str(exc)))
+
+    if blacklist_dirty and profiles_dir is not None:
+        save_blacklisted_files(profiles_dir, profile_name, blacklist)
 
     done_ids = set(report["downloaded"]) | set(report["skipped"])
     if done_ids:
@@ -148,7 +199,13 @@ def download_subscribed_modio_mods(
             report["failed"].append((mod.name, "pas de fichier disponible"))
             continue
 
-        target_name = _filename_from_url(mod.download_url)
+        try:
+            target_name = resolve_remote_filename(mod.download_url)
+        except Exception as exc:
+            log(fmt_row(mod.name, STATUS_ECHEC, detail=f"URL invalide : {exc}"))
+            report["failed"].append((mod.name, str(exc)))
+            continue
+
         if (dest_dir / target_name).exists():
             log(fmt_row(mod.name, STATUS_IGNORE, detail="déjà présent"))
             report["skipped"].append(mod.name)
@@ -165,17 +222,48 @@ def download_subscribed_modio_mods(
     return report
 
 
-def clean_pak_files(mods_dir: Path, *, log: LogFn = lambda _msg: None) -> list[str]:
-    """Supprime les fichiers .pak présents directement dans `mods_dir`."""
+def _protected_inodes(managed_native_dir: Path | None) -> set[tuple[int, int]]:
+    """(st_dev, st_ino) de chaque fichier sous `managed_native_dir` — sert
+    à repérer, parmi les .pak de Mods/, ceux qui sont en réalité des
+    hardlinks vers un mod natif géré (voir `native_mods.py`) plutôt que
+    de simples .pak copiés par `extract_archives_to_mods`."""
+    if managed_native_dir is None or not managed_native_dir.is_dir():
+        return set()
+    inodes = set()
+    for path in managed_native_dir.rglob("*"):
+        if path.is_file():
+            stat = path.stat()
+            inodes.add((stat.st_dev, stat.st_ino))
+    return inodes
+
+
+def clean_pak_files(
+    mods_dir: Path,
+    *,
+    native_mods_managed_dir: Path | None = None,
+    log: LogFn = lambda _msg: None,
+) -> list[str]:
+    """Supprime les fichiers .pak présents directement dans `mods_dir`,
+    sauf ceux qui sont des hardlinks vers un mod natif géré
+    (`native_mods_managed_dir`, voir `native_mods.py`) — les supprimer
+    romprait le lien sans que le manifeste ne le recrée automatiquement au
+    prochain passage (il ne retraite que les archives encore en attente)."""
     if not mods_dir.is_dir():
         log(f"Dossier Mods introuvable : {mods_dir}")
         return []
+    protected = _protected_inodes(native_mods_managed_dir)
     removed = []
+    kept = 0
     for pak in mods_dir.glob("*.pak"):
+        stat = pak.stat()
+        if (stat.st_dev, stat.st_ino) in protected:
+            kept += 1
+            log(f"Conservé (mod natif) : {pak.name}")
+            continue
         pak.unlink()
         removed.append(pak.name)
         log(f"Supprimé : {pak.name}")
-    log(f"{len(removed)} fichier(s) .pak supprimé(s).")
+    log(f"{len(removed)} fichier(s) .pak supprimé(s), {kept} conservé(s) (mods natifs).")
     return removed
 
 
@@ -282,7 +370,7 @@ def extract_archives_to_mods(
         try:
             native_manifest = load_native_mods_manifest(native_mods_manifest_path)
         except NativeModsManifestError as exc:
-            log(f"[red]Manifeste des mods natifs ignoré : {exc}[/red]")
+            log(f"[#C46F6F]Manifeste des mods natifs ignoré : {exc}[/#C46F6F]")
             can_handle_native = False
 
     def _try_deploy_native(archive_path: Path) -> bool:

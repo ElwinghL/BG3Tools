@@ -111,7 +111,7 @@ class DirectoryPickerScreen(ModalScreen[str | None]):
         path = Path(raw).expanduser()
         current_status = self.query_one("#picker-current", Label)
         if not path.is_dir():
-            current_status.update(f"[red]Dossier introuvable : {path}[/red]")
+            current_status.update(f"[#C46F6F]Dossier introuvable : {path}[/#C46F6F]")
             return
         self.query_one("#picker-tree", VisibleDirectoryTree).path = str(path)
         self._set_selected(path)

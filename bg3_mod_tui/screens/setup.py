@@ -104,16 +104,16 @@ class SetupScreen(Screen):
         status = self.query_one("#status", Static)
 
         if not install_dir or not appdata_dir:
-            status.update("[red]Les deux emplacements sont requis.[/red]")
+            status.update("[#C46F6F]Les deux emplacements sont requis.[/#C46F6F]")
             return
 
         install_path = Path(install_dir)
         appdata_path = Path(appdata_dir)
         if not install_path.is_dir():
-            status.update(f"[red]Dossier d'installation introuvable : {install_path}[/red]")
+            status.update(f"[#C46F6F]Dossier d'installation introuvable : {install_path}[/#C46F6F]")
             return
         if not appdata_path.is_dir():
-            status.update(f"[red]Dossier AppData introuvable : {appdata_path}[/red]")
+            status.update(f"[#C46F6F]Dossier AppData introuvable : {appdata_path}[/#C46F6F]")
             return
 
         self._config.bg3_install_dir = str(install_path)
@@ -123,8 +123,8 @@ class SetupScreen(Screen):
 
         if is_windows() and not can_create_links_without_admin():
             status.update(
-                "[yellow]Privilèges administrateur requis sur Windows pour "
-                "créer les liens. Relance en tant qu'administrateur ?[/yellow]"
+                "[#D8C091]Privilèges administrateur requis sur Windows pour "
+                "créer les liens. Relance en tant qu'administrateur ?[/#D8C091]"
             )
             self._show_elevate_prompt()
             return
@@ -147,18 +147,18 @@ class SetupScreen(Screen):
             self.app.exit()
         else:
             status.update(
-                "[red]Impossible de relancer automatiquement. Relance le "
+                "[#C46F6F]Impossible de relancer automatiquement. Relance le "
                 "programme manuellement via clic droit -> Exécuter en tant "
-                "qu'administrateur.[/red]"
+                "qu'administrateur.[/#C46F6F]"
             )
 
     def _run_linking(self, status: Static) -> None:
         try:
             report = setup_links(self._config)
         except LinkingError as exc:
-            status.update(f"[red]{exc}[/red]")
+            status.update(f"[#C46F6F]{exc}[/#C46F6F]")
             return
 
         save_config(self._config)
-        status.update("[green]Configuration terminée :[/green]\n" + "\n".join(report.steps))
+        status.update("[#89A8B1]Configuration terminée :[/#89A8B1]\n" + "\n".join(report.steps))
         self.set_timer(1.5, lambda: self._on_complete(self._config))

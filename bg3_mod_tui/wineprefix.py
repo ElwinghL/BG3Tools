@@ -48,6 +48,7 @@ def _run_wine_reg(
         return subprocess.run(
             [wine_bin, "reg", *args],
             env=env,
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             errors="replace",
@@ -104,7 +105,14 @@ def run_winetricks_verbs(
 
     args = [protontricks_bin, appid, "-q", *verbs]
     try:
-        result = subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=timeout)
+        result = subprocess.run(
+            args,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=timeout,
+        )
     except subprocess.TimeoutExpired as exc:
         raise WinePrefixError(
             f"Timeout ({timeout}s) lors de l'installation de {', '.join(verbs)} via protontricks."
@@ -155,9 +163,9 @@ def optimize_prefix_for_tools(
 
     if clear_global_windows_version_override(wine_bin, prefix):
         log(
-            "[yellow]Un override de version Windows global résiduel a été "
+            "[#D8C091]Un override de version Windows global résiduel a été "
             "détecté et supprimé (BG3 utilisera de nouveau la version par "
-            "défaut du préfixe).[/yellow]"
+            "défaut du préfixe).[/#D8C091]"
         )
     else:
         log("Aucun override de version Windows global résiduel — préfixe propre.")

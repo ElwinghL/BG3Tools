@@ -9,9 +9,19 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+ProgressFn = Callable[[str], None]
+_NOOP_PROGRESS: ProgressFn = lambda _msg: None
+
+# Fréquence (en nombre de .pak traités) des lignes de progression pendant
+# l'association pak<->archive — cette boucle est en O(paks * archives) et
+# peut prendre un moment sur un stockage lent, d'où le besoin d'un signe de
+# vie régulier plutôt qu'un silence total jusqu'au résultat final.
+_PAK_PROGRESS_EVERY = 25
 
 NEXUS_MOD_URL = "https://www.nexusmods.com/baldursgate3/mods/{id}"
 
@@ -175,17 +185,27 @@ def match_archive_origin(file_stem: str, archives: list[ArchiveEntry]) -> dict |
 
 
 def scan_all_archives(
-    *, archives_dir: Path, archives_installed_dir: Path, archives_pending_dir: Path
+    *,
+    archives_dir: Path,
+    archives_installed_dir: Path,
+    archives_pending_dir: Path,
+    on_progress: ProgressFn = _NOOP_PROGRESS,
 ) -> list[ArchiveEntry]:
     """Recense toutes les archives connues (disponibles, installées, à
     traiter), avec ID/version/URL Nexus reconstruits quand possible —
     utilisé pour retrouver l'origine d'un .pak/DLL déployé (voir
     `match_archive_origin`)."""
-    return (
-        _scan_archives(archives_dir, "disponible")
-        + _scan_archives(archives_installed_dir, "installee")
-        + _scan_archives(archives_pending_dir, "a_traiter")
-    )
+    archives: list[ArchiveEntry] = []
+    for directory, status, label in (
+        (archives_dir, "disponible", "disponibles"),
+        (archives_installed_dir, "installee", "installées"),
+        (archives_pending_dir, "a_traiter", "à traiter"),
+    ):
+        on_progress(f"Scan des archives {label} ({directory})...")
+        found = _scan_archives(directory, status)
+        on_progress(f"  {len(found)} archive(s) {label}.")
+        archives.extend(found)
+    return archives
 
 
 def build_inventory(
@@ -194,20 +214,27 @@ def build_inventory(
     archives_dir: Path,
     archives_installed_dir: Path,
     archives_pending_dir: Path,
+    on_progress: ProgressFn = _NOOP_PROGRESS,
 ) -> dict:
     """Construit l'inventaire complet : archives connues (disponibles,
     installées, à traiter) avec ID/version/URL Nexus reconstruits quand
     possible, et .pak actuellement déployés dans le dossier Mods du jeu,
-    associés au mieux à leur archive d'origine."""
+    associés au mieux à leur archive d'origine. `on_progress` (optionnel)
+    reçoit des lignes de progression régulières — utile pour distinguer un
+    traitement en cours (association pak<->archive en O(paks*archives),
+    potentiellement lente sur un stockage lent) d'un blocage."""
     archives = scan_all_archives(
         archives_dir=archives_dir,
         archives_installed_dir=archives_installed_dir,
         archives_pending_dir=archives_pending_dir,
+        on_progress=on_progress,
     )
 
     paks: list[PakEntry] = []
     if mods_dir.is_dir():
-        for path in sorted(mods_dir.glob("*.pak")):
+        pak_paths = sorted(mods_dir.glob("*.pak"))
+        on_progress(f"Association de {len(pak_paths)} .pak à leur archive d'origine...")
+        for index, path in enumerate(pak_paths, start=1):
             paks.append(
                 PakEntry(
                     file=path.name,
@@ -216,6 +243,8 @@ def build_inventory(
                     matched_archive=_match_pak_to_archive(path.stem, archives),
                 )
             )
+            if index % _PAK_PROGRESS_EVERY == 0 or index == len(pak_paths):
+                on_progress(f"  {index}/{len(pak_paths)} .pak traités...")
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
