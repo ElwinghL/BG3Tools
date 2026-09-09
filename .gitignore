@@ -1,9 +1,6 @@
 # Secrets
 .env
 
-# Liste perso de liens Nexus à traiter (contenu qui change en continu)
-/nexus_links_to_add.md
-
 # BG3 Mod TUI - config locale et dossier géré (chemins/liens spécifiques
 # à la machine, ne doivent pas être versionnés)
 /bg3modtools.toml
