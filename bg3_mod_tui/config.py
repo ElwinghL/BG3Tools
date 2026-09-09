@@ -14,6 +14,13 @@ MANAGED_DIR_NAME = "BG3_Managed"
 MODS_SUBDIR = "Mods"
 PLAYER_PROFILES_MODSETTINGS = Path("PlayerProfiles") / "Public" / "modsettings.lsx"
 
+TOOLS_DIR_NAME = "Tools"
+ARCHIVES_DIR_NAME = "Archives_installees"
+ARCHIVES_PENDING_SUBDIR = "_a_traiter"
+ARCHIVES_INSTALLED_SUBDIR = "_installees"
+NEXUS_LINKS_FILE_NAME = "nexus_links_to_add.md"
+TOOLS_MD_FILE_NAME = "TOOLS.md"
+
 
 @dataclass
 class ModToolsConfig:
@@ -23,6 +30,10 @@ class ModToolsConfig:
     @property
     def install_path(self) -> Path:
         return Path(self.bg3_install_dir)
+
+    @property
+    def game_bin_dir(self) -> Path:
+        return self.install_path / "bin"
 
     @property
     def appdata_path(self) -> Path:
@@ -47,6 +58,38 @@ class ModToolsConfig:
     @property
     def managed_modsettings_path(self) -> Path:
         return self.managed_dir / "modsettings.lsx"
+
+    @property
+    def logs_dir(self) -> Path:
+        return self.managed_dir / "logs"
+
+    @property
+    def project_root(self) -> Path:
+        return CONFIG_PATH.parent
+
+    @property
+    def tools_dir(self) -> Path:
+        return self.project_root / TOOLS_DIR_NAME
+
+    @property
+    def archives_dir(self) -> Path:
+        return self.tools_dir / ARCHIVES_DIR_NAME
+
+    @property
+    def archives_pending_dir(self) -> Path:
+        return self.archives_dir / ARCHIVES_PENDING_SUBDIR
+
+    @property
+    def archives_installed_dir(self) -> Path:
+        return self.archives_dir / ARCHIVES_INSTALLED_SUBDIR
+
+    @property
+    def nexus_links_file(self) -> Path:
+        return self.project_root / NEXUS_LINKS_FILE_NAME
+
+    @property
+    def tools_md_file(self) -> Path:
+        return self.tools_dir / TOOLS_MD_FILE_NAME
 
     def is_complete(self) -> bool:
         return bool(self.bg3_install_dir and self.bg3_appdata_dir)

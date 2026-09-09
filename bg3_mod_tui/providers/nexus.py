@@ -9,12 +9,44 @@ site, que ce TUI ne peut pas contourner.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
 
 import httpx
 
 API_BASE = "https://api.nexusmods.com/v1"
 GAME_DOMAIN = "baldursgate3"
+
+_MOD_URL_RE = re.compile(r"nexusmods\.com/baldursgate3/mods/(\d+)")
+
+
+def parse_mod_links_file(path: Path) -> list[int]:
+    """Extrait les identifiants de mods Nexus (Baldur's Gate 3) d'un fichier
+    listant une URL de mod par ligne (voir `nexus_links_to_add.md`)."""
+    if not path.is_file():
+        raise NexusAPIError(f"Fichier de liens introuvable : {path}")
+    mod_ids: list[int] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        match = _MOD_URL_RE.search(line)
+        if match:
+            mod_ids.append(int(match.group(1)))
+    return mod_ids
+
+
+def remove_mod_links(path: Path, mod_ids: set[int]) -> None:
+    """Retire de `path` les lignes correspondant aux mods de `mod_ids`
+    (les autres lignes, y compris vides ou non reconnues, sont conservées)."""
+    if not mod_ids or not path.is_file():
+        return
+    lines = path.read_text(encoding="utf-8").splitlines()
+    kept = []
+    for line in lines:
+        match = _MOD_URL_RE.search(line)
+        if match and int(match.group(1)) in mod_ids:
+            continue
+        kept.append(line)
+    path.write_text("\n".join(kept) + ("\n" if kept else ""), encoding="utf-8")
 
 
 class NexusAPIError(RuntimeError):
@@ -68,6 +100,44 @@ class NexusClient:
             version=data.get("version", ""),
             summary=data.get("summary", ""),
         )
+
+    def latest_files(self, mod_id: int) -> list[tuple[int, str]]:
+        """Retourne, pour chaque variante distincte d'un mod (son `name`
+        Nexus — ex: différentes couleurs/options proposées en fichiers
+        'OPTIONAL'), le fichier le plus récent (file_id, file_name).
+
+        Une même variante peut avoir plusieurs uploads dans le temps (une
+        'UPDATE' remplaçant une 'MAIN' du même nom) : on ne garde que le
+        plus récent de chacune, jamais un vieil upload. Des variantes avec
+        des noms différents (ex: 'MAIN' + plusieurs 'OPTIONAL' distinctes)
+        sont en revanche toutes retournées, chacune à sa version la plus
+        récente — le tri entre elles (lesquelles garder dans le load
+        order) se fait ensuite manuellement. Seuls 'OLD_VERSION' et
+        'MISCELLANEOUS' sont exclus. Lève `NexusAPIError` si aucun fichier
+        n'est disponible."""
+        with httpx.Client(base_url=API_BASE, headers=self._headers, timeout=15) as client:
+            resp = client.get(f"/games/{GAME_DOMAIN}/mods/{mod_id}/files.json")
+        if resp.status_code != 200:
+            raise NexusAPIError(
+                f"Impossible de récupérer les fichiers du mod {mod_id} ({resp.status_code})."
+            )
+        files = resp.json().get("files", [])
+        eligible = [f for f in files if f.get("category_name") in ("MAIN", "UPDATE", "OPTIONAL")]
+        candidates = eligible or files
+        if not candidates:
+            raise NexusAPIError(f"Aucun fichier disponible pour le mod {mod_id}.")
+
+        by_variant: dict[str, dict] = {}
+        for f in candidates:
+            key = f.get("name") or f.get("file_name") or str(f.get("file_id"))
+            current = by_variant.get(key)
+            if current is None or f.get("uploaded_timestamp", 0) > current.get("uploaded_timestamp", 0):
+                by_variant[key] = f
+
+        return [
+            (f["file_id"], f.get("file_name", f"mod_{mod_id}.zip"))
+            for f in by_variant.values()
+        ]
 
     def download_link(self, mod_id: int, file_id: int) -> str:
         """Nécessite un compte Nexus Premium ; sinon lève NexusAPIError."""

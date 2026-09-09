@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from textual.app import App
 
 from bg3_mod_tui.config import ModToolsConfig, load_config
-from bg3_mod_tui.screens.main import MainScreen
+from bg3_mod_tui.screens.actions import ActionsScreen
 from bg3_mod_tui.screens.setup import SetupScreen
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -16,7 +16,7 @@ ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 class BG3ModTUIApp(App):
     """Point d'entrée : lance l'assistant de configuration si nécessaire,
-    puis l'écran principal de navigation des mods."""
+    puis le menu d'actions (téléchargement, nettoyage, extraction, outils)."""
 
     TITLE = "BG3 Mod TUI"
 
@@ -24,10 +24,10 @@ class BG3ModTUIApp(App):
         load_dotenv(ENV_PATH)
         config = load_config()
         if config.is_valid():
-            self.push_screen(MainScreen(config))
+            self.push_screen(ActionsScreen(config))
         else:
             self.push_screen(SetupScreen(config, self._go_to_main))
 
     def _go_to_main(self, config: ModToolsConfig) -> None:
         self.pop_screen()
-        self.push_screen(MainScreen(config))
+        self.push_screen(ActionsScreen(config))

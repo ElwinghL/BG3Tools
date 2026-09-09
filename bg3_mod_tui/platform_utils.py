@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 
 def is_windows() -> bool:
@@ -79,6 +80,82 @@ def can_create_links_without_admin() -> bool:
     if not is_windows():
         return True
     return is_admin() or windows_dev_mode_enabled()
+
+
+def find_proton_prefix(start_path: Path) -> Path | None:
+    """Recherche, parmi les dossiers parents de `start_path`, le préfixe
+    Proton de BG3 (un dossier `pfx` contenant `drive_c`). Utilisé pour
+    restreindre le lancement d'outils Windows, sous Linux, au préfixe de
+    BG3 plutôt qu'à un Wine générique.
+    """
+    for parent in (start_path, *start_path.parents):
+        if parent.name == "pfx" and (parent / "drive_c").is_dir():
+            return parent
+    return None
+
+
+def _steam_root_candidates() -> list[Path]:
+    home = Path.home()
+    candidates = [
+        home / ".local/share/Steam",
+        home / ".steam/steam",
+        home / ".steam/root",
+    ]
+    return [c for c in candidates if c.is_dir()]
+
+
+def find_proton_dir(prefix: Path) -> Path | None:
+    """Retrouve le dossier d'installation de la version de Proton associée
+    au préfixe `prefix` (ex: `compatdata/<appid>/pfx`), en lisant
+    `compatdata/<appid>/config_info` (première ligne = nom de version, ex.
+    "GE-Proton11-1") puis en cherchant un dossier Proton dont le fichier
+    `version` correspond, sous compatibilitytools.d (Proton custom/GE) et
+    steamapps/common (Proton officiel)."""
+    appid_dir = prefix.parent
+    config_info = appid_dir / "config_info"
+    if not config_info.is_file():
+        return None
+    try:
+        lines = config_info.read_text(encoding="utf-8", errors="ignore").splitlines()
+        version_name = lines[0].strip() if lines else ""
+    except OSError:
+        return None
+    if not version_name:
+        return None
+
+    search_roots: list[Path] = []
+    for steam_root in _steam_root_candidates():
+        search_roots.append(steam_root / "compatibilitytools.d")
+        search_roots.append(steam_root / "steamapps" / "common")
+    steamapps_dir = appid_dir.parent.parent  # <library>/steamapps
+    if steamapps_dir.name == "steamapps":
+        search_roots.append(steamapps_dir / "common")
+
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+        for entry in root.iterdir():
+            version_file = entry / "version"
+            if not entry.is_dir() or not version_file.is_file():
+                continue
+            try:
+                content = version_file.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            if version_name in content:
+                return entry
+    return None
+
+
+def find_proton_wine_bin(prefix: Path) -> Path | None:
+    """Retrouve le binaire `wine` fourni par la version de Proton associée
+    à `prefix`, plutôt qu'un `wine` système générique (souvent absent, ou
+    d'une version incompatible avec le préfixe)."""
+    proton_dir = find_proton_dir(prefix)
+    if proton_dir is None:
+        return None
+    wine_bin = proton_dir / "files" / "bin" / "wine"
+    return wine_bin if wine_bin.is_file() else None
 
 
 def default_env_appdata() -> str | None:

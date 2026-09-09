@@ -19,8 +19,7 @@ __pycache__/
 # Outils tiers téléchargés : on garde la structure des dossiers (.gitkeep)
 # mais on ignore les fichiers eux-mêmes (binaires/archives, pas notre code).
 
-/Tools/Archives_installees/*.zip
-/Tools/Archives_installees/*.rar
+/Tools/Archives_installees/**
 
 /Tools/BG3-Load-Order-Optimizer/**/*.dll
 /Tools/BG3-Load-Order-Optimizer/**/*.exe
@@ -35,9 +34,11 @@ __pycache__/
 /Tools/BG3ModManager_Latest/*.old-*
 
 /Tools/Para-Tools/*.App
+/Tools/Para-Tools/*.App.exe
 /Tools/Para-Tools/*.pdb
 
 /Tools/BG3 Script Extender/*.dll
+/Tools/BG3 Script Extender/ScriptExtenderSettings.json
 
 /Tools/ExportTools/**/*.dll
 /Tools/ExportTools/**/*.exe
