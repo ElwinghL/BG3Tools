@@ -54,3 +54,8 @@ __pycache__/
 /Tools/ExportTools/**/*.config
 
 /Tools/Native Mod Loader/bin/*.dll
+
+# Sources téléchargées depuis GitHub (pas de release/.pak fourni — voir
+# compat_framework.py, qui reconstruit le .pak localement à partir
+# d'elles via Divine.exe) : pas notre code.
+/Tools/BG3-Compatibility-Framework/**

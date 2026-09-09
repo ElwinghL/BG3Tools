@@ -24,6 +24,7 @@ import shutil
 import tarfile
 import tempfile
 from collections.abc import Callable
+from io import BytesIO
 from pathlib import Path
 
 import zstandard
@@ -51,10 +52,36 @@ MODS_ARCNAME = "Mods"
 NATIVE_MODS_ARCNAME = "NativeMods"
 LOOSE_MODS_ARCNAME = "DataMods"
 NATIVE_MODS_MANIFEST_ARCNAME = "native_mods_manifest.json"
+INVENTORY_ARCNAME = "mods_inventory.json"
 
 
 class ProfileArchiveError(RuntimeError):
     """Erreur d'export/import — message destiné à l'utilisateur."""
+
+
+def _load_native_mods_manifest_for_export(native_mods_manifest_path: Path) -> dict[str, str]:
+    """Contenu intégral de `native_mods_manifest.json` (mapping archive ->
+    destination sous BG3_Managed, voir `native_mods.py`), pas seulement le
+    sous-ensemble utile à ce profil : embarqué tel quel pour que les deux
+    machines finissent avec un manifeste identique après import (mêmes
+    mods natifs connus, mêmes destinations) plutôt que de diverger au fil
+    des échanges de profils — négligeable en taille face aux .pak/DLL déjà
+    inclus, donc sans impact sur la compacité de l'archive."""
+    try:
+        return load_native_mods_manifest(native_mods_manifest_path)
+    except Exception:
+        return {}
+
+
+def _add_json_file(tar: tarfile.TarFile, arcname: str, data: dict) -> None:
+    """Ajoute `data` au tar sous `arcname` sans passer par un fichier
+    temporaire sur disque (source déjà en mémoire, contrairement aux
+    autres membres de l'archive qui sont de vrais fichiers ajoutés via
+    `tar.add`)."""
+    encoded = json.dumps(data, indent=2, ensure_ascii=False).encode("utf-8")
+    info = tarfile.TarInfo(arcname)
+    info.size = len(encoded)
+    tar.addfile(info, BytesIO(encoded))
 
 
 def export_profile_archive(
@@ -65,14 +92,23 @@ def export_profile_archive(
     loose_mods_dir: Path,
     native_mods_dir: Path,
     dest_path: Path,
+    native_mods_manifest_path: Path | None = None,
+    inventory_path: Path | None = None,
     log: LogFn = lambda _msg: None,
 ) -> Path:
     """Exporte le profil `name` (déjà sauvegardé via `save_profile`) vers
     une archive `.tar.zst` autonome sous `dest_path` : modsettings.lsx,
-    manifeste, et le contenu réel de chaque .pak (`mods_dir`), DLL
+    manifeste, le contenu réel de chaque .pak (`mods_dir`), DLL
     (`native_mods_dir`) et fichier loose (`loose_mods_dir`) listé dans le
-    manifeste. Un fichier attendu mais absent est journalisé et ignoré
-    (pas d'échec global) — l'archive reste utile même incomplète."""
+    manifeste. Si fournis, `native_mods_manifest_path`
+    (`native_mods_manifest.json`) et `inventory_path`
+    (`mods_inventory.json`) sont aussi embarqués intégralement (pas
+    filtrés au profil) : l'objectif est que les deux machines finissent
+    identiques après import, pas seulement le strict nécessaire au
+    profil — ces deux fichiers sont de toute façon négligeables en taille
+    face aux .pak/DLL déjà inclus. Un fichier attendu mais absent est
+    journalisé et ignoré (pas d'échec global) — l'archive reste utile même
+    incomplète."""
     try:
         profile_dir = find_profile_dir(profiles_dir, name)
     except ProfileError:
@@ -112,6 +148,21 @@ def export_profile_archive(
                 tar.add(source, arcname=f"{LOOSE_MODS_ARCNAME}/{relative}")
                 included += 1
 
+            if native_mods_manifest_path is not None:
+                native_manifest = _load_native_mods_manifest_for_export(native_mods_manifest_path)
+                if native_manifest:
+                    _add_json_file(tar, NATIVE_MODS_MANIFEST_ARCNAME, native_manifest)
+                    included += 1
+
+            if inventory_path is not None and inventory_path.is_file():
+                try:
+                    inventory = json.loads(inventory_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    log(f"[#D8C091]Inventaire ignoré (invalide) : {exc}[/#D8C091]")
+                else:
+                    _add_json_file(tar, INVENTORY_ARCNAME, inventory)
+                    included += 1
+
     log(f"Archive créée : {dest_path} ({included} fichier(s), {missing} absent(s)).")
     return dest_path
 
@@ -123,15 +174,20 @@ def import_profile_archive(
     mods_dir: Path,
     loose_mods_dir: Path,
     native_mods_dir: Path,
+    native_mods_manifest_path: Path | None = None,
     log: LogFn = lambda _msg: None,
 ) -> str:
     """Importe une archive créée par `export_profile_archive` : extrait
     son contenu vers les dossiers gérés (`mods_dir`, `native_mods_dir`,
     `loose_mods_dir`), puis enregistre le profil sous `profiles_dir` comme
     s'il avait été sauvegardé localement (mêmes modsettings.lsx +
-    manifeste). Ne l'active pas — l'appelant doit ensuite appeler
-    `restore_profile` pour ça (même flux que pour un profil sauvegardé
-    localement). Retourne le nom du profil importé. Lève
+    manifeste). Si l'archive embarque un `native_mods_manifest.json` (voir
+    `_profile_native_mods_manifest`) et que `native_mods_manifest_path` est
+    fourni, ses entrées sont fusionnées dans le manifeste local — sans
+    écraser une entrée déjà présente (une éventuelle destination
+    personnalisée localement prime). Ne l'active pas — l'appelant doit
+    ensuite appeler `restore_profile` pour ça (même flux que pour un
+    profil sauvegardé localement). Retourne le nom du profil importé. Lève
     `ProfileArchiveError` si l'archive est invalide."""
     if not archive_path.is_file():
         raise ProfileArchiveError(f"Archive introuvable : {archive_path}")
@@ -186,6 +242,22 @@ def import_profile_archive(
         dest_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(modsettings_path, dest_dir / MODSETTINGS_FILENAME)
         shutil.copy2(manifest_path, dest_dir / MANIFEST_FILENAME)
+
+        native_manifest_arc = tmp_path / NATIVE_MODS_MANIFEST_ARCNAME
+        if native_mods_manifest_path is not None and native_manifest_arc.is_file():
+            imported_entries = json.loads(native_manifest_arc.read_text(encoding="utf-8"))
+            local_manifest = load_native_mods_manifest(native_mods_manifest_path)
+            added = 0
+            for archive_name, relative_dest in imported_entries.items():
+                if archive_name not in local_manifest:
+                    local_manifest[archive_name] = relative_dest
+                    added += 1
+            if added:
+                native_mods_manifest_path.write_text(
+                    json.dumps(local_manifest, indent=4, ensure_ascii=False) + "\n",
+                    encoding="utf-8",
+                )
+                log(f"{added} entrée(s) ajoutée(s) à {native_mods_manifest_path.name}.")
 
     log(f"Profil « {name} » importé ({copied} fichier(s) copié(s)).")
     return name

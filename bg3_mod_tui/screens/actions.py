@@ -15,13 +15,24 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Footer, Input, Label, ListItem, ListView, Select, SelectionList
 
+from bg3_mod_tui.compat_framework import CompatibilityFrameworkError, build_pak as build_compat_framework_pak
 from bg3_mod_tui.config import ModToolsConfig, save_config
 from bg3_mod_tui.game_deploy import deploy_native_mod_loader, deploy_script_extender
-from bg3_mod_tui.inventory import NEXUS_MOD_URL, build_inventory, save_inventory, scan_all_archives
+from bg3_mod_tui.inventory import (
+    NEXUS_MOD_URL,
+    build_inventory,
+    find_orphaned_archives,
+    save_inventory,
+    scan_all_archives,
+)
 from bg3_mod_tui.launcher import LauncherError, launch_tool, open_protontricks, resolve_wine_bin
 from bg3_mod_tui.log_format import fmt_http_log_line
 from bg3_mod_tui.linking import LinkingError, setup_links
-from bg3_mod_tui.native_mods import NativeModsManifestError, deploy_native_mods_from_manifest
+from bg3_mod_tui.native_mods import (
+    NativeModsManifestError,
+    deploy_native_mods_from_manifest,
+    load_manifest as load_native_mods_manifest,
+)
 from bg3_mod_tui.platform_utils import find_proton_prefix, has_graphical_display, is_windows
 from bg3_mod_tui.profile_archive import (
     ARCHIVE_SUFFIX,
@@ -31,6 +42,7 @@ from bg3_mod_tui.profile_archive import (
 )
 from bg3_mod_tui.profiles import (
     ProfileError,
+    ensure_default_profile,
     list_profiles,
     load_blacklisted_files,
     restore_profile,
@@ -53,6 +65,17 @@ from bg3_mod_tui.widgets.console_log import ConsoleLog
 
 
 TOOL_ICON = "🛠"
+
+
+def _human_size(size_bytes: int) -> str:
+    """Formate une taille en octets en unité lisible (Ko/Mo/Go), pour le
+    rapport d'archives orphelines (`run_orphaned_archives`)."""
+    size = float(size_bytes)
+    for unit in ("o", "Ko", "Mo", "Go"):
+        if size < 1024 or unit == "Go":
+            return f"{size:.1f} {unit}" if unit != "o" else f"{int(size)} {unit}"
+        size /= 1024
+    return f"{size:.1f} Go"
 
 # Contraste renforcé pour les cases à cocher des `SelectionList` (utilisée
 # par `NexusFileSelectionScreen` et `NexusBlacklistScreen`) : le style par
@@ -643,6 +666,7 @@ class ActionsScreen(Screen):
         self._web_server_handle = None
 
     def _profile_select_options(self) -> list[tuple[str, str]]:
+        ensure_default_profile(self._config.profiles_dir)
         options = [(name, name)
                    for name in list_profiles(self._config.profiles_dir)]
         options.append(("+ Nouveau profil...", NEW_PROFILE_OPTION))
@@ -651,6 +675,7 @@ class ActionsScreen(Screen):
     def compose(self) -> ComposeResult:
         with Horizontal(id="profile-bar"):
             yield Label("Profil :")
+            ensure_default_profile(self._config.profiles_dir)
             profiles = list_profiles(self._config.profiles_dir)
             active = self._config.active_profile if self._config.active_profile in profiles else Select.NULL
             yield Select(
@@ -711,6 +736,17 @@ class ActionsScreen(Screen):
                         tooltip="Télécharge ou met à jour les outils listés dans Tools/TOOLS.md (BG3 Mod Manager, Load Order Optimizer, Script Extender, ExportTools/LSLib, Para Tool...).",
                     )
                     yield Button(
+                        "Compiler Compat. Framework",
+                        id="action-compat-framework",
+                        tooltip=(
+                            "BG3 Compatibility Framework n'a ni release GitHub avec .pak "
+                            "tout fait, ni .pak commité dans son dépôt (juste les "
+                            "sources) : ce bouton l'empaquette en .pak via Divine.exe "
+                            "(LSLib) et le dépose dans Mods/ — nécessite d'avoir "
+                            "téléchargé l'outil (MAJ des outils) au préalable."
+                        ),
+                    )
+                    yield Button(
                         "Lancer un outil...",
                         id="action-launch-tool",
                         tooltip=(
@@ -736,6 +772,17 @@ class ActionsScreen(Screen):
                             "Génère un inventaire JSON (mods_inventory.json) listant les "
                             ".pak de Mods/ et toutes les archives connues, avec leur "
                             "origine Nexus (ID/version/URL) reconstruite quand possible."
+                        ),
+                    )
+                    yield Button(
+                        "Archives orphelines...",
+                        id="action-orphaned-archives",
+                        tooltip=(
+                            "Liste les archives de _installees qu'aucun .pak/DLL "
+                            "actuellement déployé ne référence (mod probablement "
+                            "désinstallé depuis) — rapport dans "
+                            "archives_orphelines.md, rien n'est supprimé "
+                            "automatiquement."
                         ),
                     )
                     yield Button(
@@ -945,9 +992,9 @@ class ActionsScreen(Screen):
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
             return
         log(
-            f"Terminé : {len(report['deployed'])} déployé(s), "
-            f"{len(report['skipped'])} ignoré(s) (absent de _a_traiter), "
-            f"{len(report['failed'])} échec(s)."
+            f"Terminé : {len(report['deployed'])} déployé(s) cette fois-ci, "
+            f"{len(report['skipped'])} ignoré(s) (déjà déployé ou pas encore téléchargé "
+            f"— voir le détail ci-dessus), {len(report['failed'])} échec(s)."
         )
 
     @on(Button.Pressed, "#action-tools")
@@ -973,6 +1020,24 @@ class ActionsScreen(Screen):
         deploy_script_extender(self._config.tools_dir,
                                self._config.game_bin_dir, log=log)
         log("Terminé.")
+
+    @on(Button.Pressed, "#action-compat-framework")
+    def handle_compat_framework(self) -> None:
+        self.run_build_compat_framework()
+
+    @work(exclusive=True, thread=True)
+    def run_build_compat_framework(self) -> None:
+        log = lambda msg: self.app.call_from_thread(self._log, msg)
+        log("=== Compilation de BG3 Compatibility Framework (Divine.exe) ===")
+        try:
+            build_compat_framework_pak(
+                self._config.tools_dir,
+                self._config.managed_mods_link,
+                reference_path=self._config.appdata_path,
+                log=log,
+            )
+        except CompatibilityFrameworkError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
     @on(Button.Pressed, "#action-launch-tool")
     def handle_launch_tool(self) -> None:
@@ -1041,6 +1106,73 @@ class ActionsScreen(Screen):
             f"{counts['paks']} .pak, {counts['archives']} archive(s) "
             f"({counts['archives_with_nexus_id']} avec ID Nexus identifié) "
             f"-> {self._config.inventory_file}"
+        )
+
+    @on(Button.Pressed, "#action-orphaned-archives")
+    def handle_orphaned_archives(self) -> None:
+        self.run_orphaned_archives()
+
+    @work(exclusive=True, thread=True)
+    def run_orphaned_archives(self) -> None:
+        def log(msg): return self.app.call_from_thread(self._log, msg)
+        log("=== Recherche des archives orphelines (_installees) ===")
+        try:
+            inventory = build_inventory(
+                mods_dir=self._config.managed_mods_link,
+                archives_dir=self._config.archives_dir,
+                archives_installed_dir=self._config.archives_installed_dir,
+                archives_pending_dir=self._config.archives_pending_dir,
+                on_progress=log,
+            )
+            save_inventory(inventory, self._config.inventory_file)
+        except OSError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return
+
+        try:
+            native_manifest = load_native_mods_manifest(self._config.native_mods_manifest_file)
+        except NativeModsManifestError as exc:
+            log(f"[#D8C091]Manifeste des mods natifs ignoré : {exc}[/#D8C091]")
+            native_manifest = {}
+
+        orphans = find_orphaned_archives(inventory, native_manifest)
+        if not orphans:
+            log("Aucune archive orpheline : chaque archive de _installees correspond à un .pak/DLL actuellement déployé.")
+            return
+
+        orphans.sort(key=lambda a: a["size_bytes"], reverse=True)
+        total_bytes = sum(a["size_bytes"] for a in orphans)
+
+        report_path = self._config.project_root / "archives_orphelines.md"
+        lines = [
+            "# Archives potentiellement orphelines\n",
+            (
+                f"{len(orphans)} archive(s) dans `_installees` sans .pak/DLL "
+                f"actuellement déployé correspondant ({_human_size(total_bytes)} au total).\n"
+            ),
+            (
+                "Association par nom (best-effort) : à vérifier avant "
+                "suppression, pas une liste garantie sans faux positif — "
+                "voir `inventory.find_orphaned_archives`.\n"
+            ),
+            "| Archive | Taille | Origine | Modifiée |",
+            "|---|---|---|---|",
+        ]
+        for archive in orphans:
+            origin = (
+                f"[{archive['mod_name_guess']}]({archive['nexus_url']})"
+                if archive.get("nexus_url")
+                else (archive.get("mod_name_guess") or "?")
+            )
+            lines.append(
+                f"| {archive['file']} | {_human_size(archive['size_bytes'])} | "
+                f"{origin} | {archive['modified'][:10]} |"
+            )
+        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+        log(
+            f"{len(orphans)} archive(s) orpheline(s) ({_human_size(total_bytes)} à "
+            f"potentiellement récupérer) -> {report_path}"
         )
 
     @on(Button.Pressed, "#action-nexus-blacklist")
@@ -1184,7 +1316,11 @@ class ActionsScreen(Screen):
         def log(msg): return self.app.call_from_thread(self._log, msg)
         log(f"=== Export du profil « {name} » ===")
         try:
-            dest_path = self._config.project_root / \
+            # Publiée sous www-data (servie par le bouton "Web") plutôt que
+            # dans le dossier du projet — nom déterministe (slug du profil,
+            # sans horodatage) : un nouvel export du même profil remplace
+            # l'ancien plutôt que de s'accumuler à côté.
+            dest_path = self._config.web_root_dir / \
                 f"{slugify_profile_name(name)}{ARCHIVE_SUFFIX}"
             export_profile_archive(
                 name,
@@ -1192,6 +1328,8 @@ class ActionsScreen(Screen):
                 mods_dir=self._config.managed_mods_link,
                 loose_mods_dir=self._config.loose_mods_managed_dir,
                 native_mods_dir=self._config.native_mods_deployed_dir,
+                native_mods_manifest_path=self._config.native_mods_manifest_file,
+                inventory_path=self._config.inventory_file,
                 dest_path=dest_path,
                 log=log,
             )
@@ -1218,6 +1356,7 @@ class ActionsScreen(Screen):
                 mods_dir=self._config.managed_mods_link,
                 loose_mods_dir=self._config.loose_mods_managed_dir,
                 native_mods_dir=self._config.native_mods_deployed_dir,
+                native_mods_manifest_path=self._config.native_mods_manifest_file,
                 log=log,
             )
         except ProfileArchiveError as exc:

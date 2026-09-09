@@ -199,8 +199,15 @@ def download_subscribed_modio_mods(
             report["failed"].append((mod.name, "pas de fichier disponible"))
             continue
 
+        # mod.io sert tous les téléchargements depuis une URL générique
+        # (littéralement `.../download`, sans nom de fichier) : sans nom de
+        # secours distinctif, tous les mods sans Content-Disposition
+        # résoudraient au même nom de fichier et se feraient passer pour
+        # des doublons les uns des autres (voir `downloader._resolve_filename`).
+        fallback_stem = f"{mod.name}-modio{mod.mod_id}"
+
         try:
-            target_name = resolve_remote_filename(mod.download_url)
+            target_name = resolve_remote_filename(mod.download_url, fallback_stem=fallback_stem)
         except Exception as exc:
             log(fmt_row(mod.name, STATUS_ECHEC, detail=f"URL invalide : {exc}"))
             report["failed"].append((mod.name, str(exc)))
@@ -212,7 +219,7 @@ def download_subscribed_modio_mods(
             continue
 
         try:
-            path = download_file(mod.download_url, dest_dir)
+            path = download_file(mod.download_url, dest_dir, fallback_stem=fallback_stem)
             log(fmt_row(mod.name, STATUS_SUCCES, detail=path.name))
             report["downloaded"].append(mod.name)
         except Exception as exc:

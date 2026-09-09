@@ -150,7 +150,16 @@ def deploy_native_mods_from_manifest(
     for archive_name, relative_dest in manifest.items():
         archive_path = pending_dir / archive_name
         if not archive_path.is_file():
-            log(f"IGNORÉ  {archive_name} : absent de {pending_dir.name}.")
+            if (installed_dir / archive_name).is_file():
+                # Déjà traitée par un passage précédent (déplacée vers
+                # `installed_dir` en fin de fonction) — les fichiers restent
+                # déployés (hardlinks persistants), rien à refaire. À
+                # distinguer d'une archive jamais vue : "ignoré" pourrait
+                # sinon laisser croire, à tort, que le mod natif n'est pas
+                # (ou plus) déployé.
+                log(f"IGNORÉ  {archive_name} : déjà déployé (voir {installed_dir.name}).")
+            else:
+                log(f"IGNORÉ  {archive_name} : absent de {pending_dir.name}.")
             report["skipped"].append(archive_name)
             continue
 

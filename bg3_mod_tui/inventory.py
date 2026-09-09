@@ -259,6 +259,30 @@ def build_inventory(
     }
 
 
+def find_orphaned_archives(inventory: dict, native_manifest: dict[str, str] | None = None) -> list[dict]:
+    """Archives installées (`_installees`, voir `scan_all_archives`) qu'aucun
+    .pak actuellement dans `Mods/` (`inventory["paks"][i]["matched_archive"]`,
+    voir `_match_pak_to_archive`) ni entrée de `native_mods_manifest.json`
+    (`native_manifest`) ne référence — candidates à la suppression pour
+    libérer de l'espace, le mod correspondant ayant vraisemblablement été
+    désinstallé depuis (.pak supprimé via "Nettoyer les .pak", ou jamais
+    extrait avec succès).
+
+    Best-effort, pas une liste garantie sans faux positif : repose sur
+    l'association heuristique par nom normalisé de `_match_pak_to_archive`
+    (limite documentée sur cette fonction) — à vérifier avant suppression,
+    pas à supprimer en masse aveuglément."""
+    matched = {p["matched_archive"] for p in inventory["paks"] if p.get("matched_archive")}
+    native_archives = set((native_manifest or {}).keys())
+    return [
+        archive
+        for archive in inventory["archives"]
+        if archive["status"] == "installee"
+        and archive["file"] not in matched
+        and archive["file"] not in native_archives
+    ]
+
+
 def save_inventory(inventory: dict, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(inventory, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")

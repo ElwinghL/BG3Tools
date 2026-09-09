@@ -36,6 +36,34 @@ MANIFEST_FILENAME = "manifest.json"
 FILE_CHOICES_FILENAME = "nexus_file_choices.json"
 _NO_PROFILE_SLUG = "_sans_profil"
 
+# Profil "Default" : un modsettings.lsx strictement vanilla (uniquement le
+# module de base du jeu, aucun mod) — sert de réinitialisation rapide et
+# de socle sans mods pour comparer/déboguer, sans jamais toucher au profil
+# actif (Public) tant qu'on ne le restaure pas explicitement. Contrairement
+# aux autres profils (propres à chaque joueur, jamais suivis par git), sa
+# source est versionnée sous bg3_mod_tui/default_profile/ car son contenu
+# est par construction toujours identique (zéro mod) — voir
+# `ensure_default_profile`.
+DEFAULT_PROFILE_NAME = "Default"
+_DEFAULT_PROFILE_SOURCE = Path(__file__).resolve().parent / "default_profile"
+
+
+def ensure_default_profile(profiles_dir: Path) -> None:
+    """Installe le profil "Default" (vanilla, voir `DEFAULT_PROFILE_NAME`)
+    sous `profiles_dir` s'il est absent, depuis la source versionnée
+    `bg3_mod_tui/default_profile/`. Best-effort : ne fait rien si cette
+    source est introuvable (ne doit jamais faire échouer l'appelant)."""
+    if not _DEFAULT_PROFILE_SOURCE.is_dir():
+        return
+    dest_dir = profiles_dir / slugify_profile_name(DEFAULT_PROFILE_NAME)
+    if (dest_dir / MANIFEST_FILENAME).is_file():
+        return
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for name in (MODSETTINGS_FILENAME, MANIFEST_FILENAME):
+        src = _DEFAULT_PROFILE_SOURCE / name
+        if src.is_file():
+            shutil.copy2(src, dest_dir / name)
+
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 
 

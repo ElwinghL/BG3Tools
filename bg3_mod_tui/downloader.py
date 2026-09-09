@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterator
 from email.message import Message
 from pathlib import Path
@@ -36,6 +37,18 @@ def _filename_from_url(url: str) -> str:
     return name or "mod_download.bin"
 
 
+_UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _sanitize_filename(name: str) -> str:
+    """Rend `name` sûr comme nom de fichier (retire les caractères
+    interdits/problématiques sous Windows et Linux) — utilisé pour dériver
+    un nom de fichier d'un texte libre (ex: nom de mod), pas d'un nom déjà
+    fourni par le serveur."""
+    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", name).strip()
+    return cleaned or "mod_download"
+
+
 # Signatures binaires (nombre magique en tête de fichier) des formats
 # d'archive supportés (voir `archives.is_supported_archive`) — utilisées en
 # dernier recours (voir `_resolve_filename`) quand ni l'en-tête
@@ -63,41 +76,65 @@ def _sniff_archive_extension(data: bytes) -> str | None:
 
 
 def _resolve_filename(
-    url: str, resp: httpx.Response, body: Iterator[bytes]
+    url: str,
+    resp: httpx.Response,
+    body: Iterator[bytes],
+    *,
+    fallback_stem: str | None = None,
 ) -> tuple[str, bytes]:
     """Détermine le nom de fichier à utiliser pour la sauvegarde : en
     priorité l'en-tête `Content-Disposition` de la réponse (le plus
-    fiable), sinon le dernier segment de l'URL. Si le nom obtenu n'a
-    toujours pas d'extension d'archive reconnue, consomme le premier
-    morceau de `body` (le même itérateur que l'appelant utilisera ensuite
-    pour écrire le fichier — `Response.iter_bytes()` ne peut être itéré
-    qu'une seule fois) pour renifler la signature du format et compléter
-    le nom. Retourne `(nom de fichier, octets déjà consommés de `body`,
-    à réécrire en tête du fichier si le téléchargement se poursuit)`."""
-    name = (
-        _filename_from_content_disposition(resp.headers.get("content-disposition"))
-        or _filename_from_url(url)
-    )
+    fiable — un vrai nom de fichier fourni par le serveur). À défaut, si
+    l'appelant connaît un nom significatif pour ce téléchargement
+    (`fallback_stem`, ex: le nom du mod), on le préfère au dernier segment
+    de l'URL : ce segment est parfois un point de terminaison générique
+    partagé par tous les téléchargements (mod.io : littéralement
+    `.../download` pour chaque mod) — l'utiliser tel quel ferait porter le
+    même nom de fichier à des mods différents, et le second serait alors
+    pris pour un doublon du premier déjà téléchargé. Sans `fallback_stem`
+    non plus, on retombe sur ce segment d'URL.
+
+    Si le nom obtenu n'a toujours pas d'extension d'archive reconnue,
+    consomme le premier morceau de `body` (le même itérateur que
+    l'appelant utilisera ensuite pour écrire le fichier —
+    `Response.iter_bytes()` ne peut être itéré qu'une seule fois) pour
+    renifler la signature du format et compléter le nom. Retourne
+    `(nom de fichier, octets déjà consommés de `body`, à réécrire en tête
+    du fichier si le téléchargement se poursuit)`."""
+    name = _filename_from_content_disposition(resp.headers.get("content-disposition"))
+    if name is None:
+        if fallback_stem:
+            url_name = _filename_from_url(url)
+            suffix = Path(url_name).suffix
+            name = f"{_sanitize_filename(fallback_stem)}{suffix}"
+        else:
+            name = _filename_from_url(url)
+
     if is_supported_archive(Path(name)):
         return name, b""
 
     peeked = next(body, b"")
     sniffed = _sniff_archive_extension(peeked)
     if sniffed:
-        name = f"{Path(name).stem or 'mod_download'}{sniffed}"
+        stem = _sanitize_filename(fallback_stem) if fallback_stem else (Path(name).stem or "mod_download")
+        name = f"{stem}{sniffed}"
     return name, peeked
 
 
-def resolve_remote_filename(url: str) -> str:
+def resolve_remote_filename(url: str, *, fallback_stem: str | None = None) -> str:
     """Résout par avance le nom de fichier réel d'une URL de téléchargement
     (voir `_resolve_filename`) sans télécharger le corps de la réponse
     (au-delà du minimum nécessaire au reniflage de signature) — permet de
     vérifier si un fichier est déjà présent avant de lancer un
     téléchargement complet, pour des URL génériques (ex: `.../download`)
-    où le nom réel n'est connu qu'une fois la réponse du serveur reçue."""
+    où le nom réel n'est connu qu'une fois la réponse du serveur reçue.
+    `fallback_stem` doit être le même qu'au `download_file` correspondant,
+    sous peine de vérifier la présence du mauvais nom de fichier."""
     with httpx.stream("GET", url, timeout=15, follow_redirects=True) as resp:
         resp.raise_for_status()
-        name, _peeked = _resolve_filename(url, resp, resp.iter_bytes(chunk_size=65536))
+        name, _peeked = _resolve_filename(
+            url, resp, resp.iter_bytes(chunk_size=65536), fallback_stem=fallback_stem
+        )
         return name
 
 
@@ -105,10 +142,17 @@ def download_file(
     url: str,
     destination_dir: Path,
     *,
+    fallback_stem: str | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> Path:
     """Télécharge `url` dans `destination_dir` en streaming, avec suivi de
     progression optionnel. Retourne le chemin du fichier téléchargé.
+
+    `fallback_stem` (voir `_resolve_filename`) devrait être fourni pour
+    toute URL générique partagée entre plusieurs téléchargements (ex: nom
+    du mod pour mod.io) — sans quoi plusieurs mods distincts risquent de
+    résoudre au même nom de fichier et de se faire mutuellement passer
+    pour "déjà présents".
 
     Refuse (`DownloadError`, sans rien écrire sur le disque) tout fichier
     dont le nom résolu n'a pas une extension d'archive reconnue
@@ -124,7 +168,7 @@ def download_file(
         resp.raise_for_status()
 
         body = resp.iter_bytes(chunk_size=65536)
-        filename, peeked = _resolve_filename(url, resp, body)
+        filename, peeked = _resolve_filename(url, resp, body, fallback_stem=fallback_stem)
         target = destination_dir / filename
         if not is_supported_archive(target):
             raise DownloadError(
