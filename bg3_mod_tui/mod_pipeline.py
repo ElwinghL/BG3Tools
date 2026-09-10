@@ -623,6 +623,13 @@ def extract_archives_to_mods(
     présents, l'archive est tout de même déplacée vers `installed_dir`
     (rien à en tirer de plus dans `archives_dir`).
 
+    Une erreur d'écriture lors de la copie d'un .pak vers `mods_dir` (ex:
+    jeu en cours d'exécution, fichier verrouillé — cas fréquent lors d'une
+    mise à jour mod.io pendant une session de jeu, voir TODO "Priorisation
+    Nexus / Mod.io") est reportée dans `"failed"` sans interrompre le
+    traitement des autres archives ; l'archive concernée n'est PAS déplacée
+    vers `installed_dir` et sera retentée au passage suivant.
+
     Retourne {"installed": [...], "pending": [...], "skipped": [...],
     "failed": [(name, err)]}.
     """
@@ -718,11 +725,51 @@ def extract_archives_to_mods(
             if paks:
                 new_paks = [pak for pak in paks if not (mods_dir / pak.name).exists()]
                 duplicate_paks = [pak for pak in paks if pak not in new_paks]
+                # Sous-tâche 2 du TODO "Priorisation Nexus / Mod.io" : la
+                # copie vers `mods_dir` peut échouer en écriture (jeu en
+                # cours d'exécution -> .pak déjà verrouillé par le
+                # processus BG3/Proton, cas fréquent lors d'une mise à jour
+                # pendant une session de jeu, mod.io comme Nexus). Avant ce
+                # correctif, `shutil.copy2` non protégé faisait planter
+                # toute la boucle `extract_archives_to_mods` (les archives
+                # suivantes n'étaient même pas traitées). On isole
+                # maintenant chaque échec par .pak : les autres archives de
+                # la file continuent d'être traitées normalement.
+                copied_paks: list[Path] = []
+                failed_paks: list[tuple[Path, OSError]] = []
                 for pak in new_paks:
-                    shutil.copy2(pak, mods_dir / pak.name)
+                    try:
+                        shutil.copy2(pak, mods_dir / pak.name)
+                    except OSError as exc:
+                        failed_paks.append((pak, exc))
+                    else:
+                        copied_paks.append(pak)
 
-                if new_paks:
-                    detail = f"{len(new_paks):>2} .pak installé(s)"
+                if failed_paks:
+                    names = ", ".join(pak.name for pak in failed_paks)
+                    log(
+                        fmt_row(
+                            archive.name,
+                            STATUS_ECHEC,
+                            detail=(
+                                f"écriture impossible pour {len(failed_paks)} .pak "
+                                f"({names}) — jeu probablement en cours d'exécution, "
+                                "réessayer plus tard"
+                            ),
+                        )
+                    )
+                    for pak, exc in failed_paks:
+                        report["failed"].append((f"{archive.name} ({pak.name})", str(exc)))
+                    # Archive volontairement PAS déplacée vers `installed_dir` :
+                    # elle reste dans `archives_dir` pour être retentée au
+                    # prochain passage. Les .pak déjà copiés avec succès ne
+                    # seront pas recopiés (voir `new_paks`, filtré sur
+                    # l'existence dans `mods_dir`), donc aucune perte ni
+                    # double-écriture au prochain essai.
+                    continue
+
+                if copied_paks:
+                    detail = f"{len(copied_paks):>2} .pak installé(s)"
                     if duplicate_paks:
                         detail += f", {len(duplicate_paks)} déjà présent(s) ignoré(s)"
                     log(fmt_row(archive.name, STATUS_SUCCES, detail=detail))

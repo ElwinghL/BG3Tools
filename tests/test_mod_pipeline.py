@@ -184,6 +184,53 @@ def test_extract_archives_to_mods_archive_corrompue_est_signalee_en_echec(tmp_pa
     assert (dirs["pending_dir"] / "Corrompu.zip").is_file()
 
 
+def test_extract_archives_to_mods_erreur_ecriture_pak_est_reportee_sans_planter(tmp_path, monkeypatch):
+    # Sous-tâche 2 du TODO "Priorisation Nexus / Mod.io" : une erreur
+    # d'écriture (jeu en cours d'exécution, .pak verrouillé) sur un .pak ne
+    # doit pas interrompre le traitement des autres archives, et l'archive
+    # fautive doit rester en place (pas déplacée vers `installed_dir`) pour
+    # être retentée au passage suivant.
+    dirs = _make_pipeline_dirs(tmp_path)
+    _make_zip(dirs["archives_dir"] / "Verrouille.zip", ("Verrouille.pak", b"donnees"))
+    _make_zip(dirs["archives_dir"] / "OK.zip", ("OK.pak", b"donnees ok"))
+
+    import shutil
+
+    real_copy2 = shutil.copy2
+
+    def _copy2_qui_echoue_pour_verrouille(src, dst, *args, **kwargs):
+        if Path(src).name == "Verrouille.pak":
+            raise PermissionError("fichier verrouillé par le jeu")
+        return real_copy2(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(
+        "bg3_mod_tui.mod_pipeline.shutil.copy2", _copy2_qui_echoue_pour_verrouille
+    )
+
+    report = extract_archives_to_mods(
+        dirs["archives_dir"],
+        dirs["mods_dir"],
+        dirs["pending_dir"],
+        dirs["installed_dir"],
+    )
+
+    # L'archive verrouillée est en échec, mais n'a pas empêché "OK.zip"
+    # d'être traité normalement.
+    assert report["installed"] == ["OK.zip"]
+    assert len(report["failed"]) == 1
+    assert report["failed"][0][0] == "Verrouille.zip (Verrouille.pak)"
+
+    # Pas de faux-succès : le .pak verrouillé n'existe pas dans mods_dir,
+    # et l'archive reste dans archives_dir (pas déplacée vers installed_dir)
+    # pour être retentée au prochain passage.
+    assert not (dirs["mods_dir"] / "Verrouille.pak").exists()
+    assert (dirs["archives_dir"] / "Verrouille.zip").is_file()
+    assert not (dirs["installed_dir"] / "Verrouille.zip").exists()
+
+    assert (dirs["mods_dir"] / "OK.pak").is_file()
+    assert (dirs["installed_dir"] / "OK.zip").is_file()
+
+
 def _make_zip_bytes(*entries: tuple[str, bytes]) -> bytes:
     import io
 
