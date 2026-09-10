@@ -52,10 +52,9 @@
 
 ### 10. Build de classes (page web autonome)
 
-- **10a.** Générateur de build classe/sous-classe niveau 1→20 (aucune classe doublon)
-- **10b.** Exportable, autonome (indépendant profil/mods)
-- **10c.** Visualisation graph Mermaid intégrée
-- **10d.** Affichage gains par niveau + changement de classe autorisé (progression continue)
+- ~~**10a-10d.**~~ — fait : `bg3_mod_tui/class_builder.py` + `class_data.py`, génère un `.html` autonome (CSS/JS inline, logique de sélection côté client), règle "continuation illimitée d'une classe déjà prise, mais un seul nouveau choix par classe" en Python (testée) et miroir JS, graph Mermaid via CDN jsDelivr (seule dépendance externe, avec repli texte brut si le CDN est inaccessible)
+  - pas encore câblé dans l'UI Textual (choix assumé, brique livrée seule d'abord)
+  - données de classes/sous-classes BG3 approximatives (base D&D 5e + connaissance générale BG3, pas vérifiées contre les fiches patch officielles) ; niveaux 13-20 partiellement extrapolés (BG3 plafonne réellement à 12)
 
 ### 11. Console extender intercepter/flux
 
