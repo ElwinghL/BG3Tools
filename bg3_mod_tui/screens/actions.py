@@ -973,6 +973,7 @@ class ActionsScreen(Screen):
         log(
             f"Terminé : {len(report['installed'])} installée(s), "
             f"{len(report['pending'])} à traiter manuellement, "
+            f"{len(report['skipped'])} ignorée(s) (.pak déjà présent(s)), "
             f"{len(report['failed'])} échec(s)."
         )
 
