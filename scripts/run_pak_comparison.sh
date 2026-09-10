@@ -3,6 +3,11 @@
 # Rust release, Divine.exe per-file) sur un même dossier de mods, puis
 # affiche les temps totaux et croise l'exactitude via `diff`.
 #
+# La liste des .pak est figée une seule fois au lancement (pas un `--dir`
+# refait à chaque étape) et transmise telle quelle aux 4 runs, pour rester
+# cohérent même si le contenu du dossier change en cours de route. Chaque
+# .pak est hashé intégralement (pas d'échantillon de contenu limité).
+#
 # Mode batch Divine.exe volontairement exclu (voir .claude/TODO.md #19 —
 # extract-packages plante sous LSLib upstream, correctif en attente
 # d'intégration côté Tools/ExportTools).
@@ -29,26 +34,42 @@ RUST_VARIANT="${2:-release}"
 DIVINE_EXE="Tools/ExportTools/dist/Tools/Divine.exe"
 REPORTS_DIR="reports"
 
-DIR_ARGS=()
-if [ -n "$MODS_DIR" ]; then
-    DIR_ARGS=(--dir "$MODS_DIR")
+# Dossier résolu une seule fois (config bg3modtools.toml si non fourni en argument).
+if [ -z "$MODS_DIR" ]; then
+    MODS_DIR="$(uv run python -c 'from bg3_mod_tui.config import load_config; print(load_config().appdata_mods_dir)')"
 fi
 
+# Liste des .pak figée ICI, une seule fois, plutôt que de laisser chacun des
+# 4 runs suivants refaire son propre `--dir` (donc son propre scan) : si le
+# contenu du dossier change entre deux runs (mod ajouté/retiré pendant le
+# bench), les 4 outils doivent quand même comparer exactement le même lot.
+mapfile -t PAK_FILES < <(find "$MODS_DIR" -maxdepth 1 -name '*.pak' | sort)
+if [ "${#PAK_FILES[@]}" -eq 0 ]; then
+    echo "Aucun .pak trouvé dans $MODS_DIR" >&2
+    exit 1
+fi
+echo "Dossier : $MODS_DIR (${#PAK_FILES[@]} .pak figés au lancement)"
+
+# Pas de plafond d'échantillonnage : on hash TOUTES les entrées de chaque
+# .pak (pas un sous-ensemble de 60) — _pick_sample_names retourne tout dès
+# que le total d'entrées est sous le plafond, donc une valeur large suffit.
+SAMPLE_CAP=1000000
+
 echo "=== 1/4 Python ==="
-uv run python scripts/compare_pak_reader.py run --tool python "${DIR_ARGS[@]}"
+uv run python scripts/compare_pak_reader.py run --tool python --sample "$SAMPLE_CAP" "${PAK_FILES[@]}"
 
 echo "=== 2/4 Divine.exe (per-file) ==="
-uv run python scripts/compare_pak_reader.py run --tool divine "${DIR_ARGS[@]}" \
+uv run python scripts/compare_pak_reader.py run --tool divine --sample "$SAMPLE_CAP" "${PAK_FILES[@]}" \
     --divine-exe "$DIVINE_EXE"
 
 echo "=== 3/4 Rust (debug) ==="
 uv run maturin develop --manifest-path rust/pak_reader_rs/Cargo.toml
-uv run python scripts/compare_pak_reader.py run --tool rust "${DIR_ARGS[@]}" \
+uv run python scripts/compare_pak_reader.py run --tool rust --sample "$SAMPLE_CAP" "${PAK_FILES[@]}" \
     --out "$REPORTS_DIR/rust_debug_report.json"
 
 echo "=== 4/4 Rust (release) ==="
 uv run maturin develop --release --manifest-path rust/pak_reader_rs/Cargo.toml
-uv run python scripts/compare_pak_reader.py run --tool rust "${DIR_ARGS[@]}" \
+uv run python scripts/compare_pak_reader.py run --tool rust --sample "$SAMPLE_CAP" "${PAK_FILES[@]}" \
     --out "$REPORTS_DIR/rust_release_report.json"
 
 echo
