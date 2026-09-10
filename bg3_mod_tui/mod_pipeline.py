@@ -56,6 +56,21 @@ SelectFilesFn = Callable[[int, str, list[tuple[int, str]]], list[int]]
 # Voir `extract_archives_to_mods`.
 SelectNestedArchivesFn = Callable[[str, list[Path]], list[Path]]
 
+# Sous-tâche 5c du TODO "Téléchargements parallèles" : remonte la
+# progression d'UN téléchargement identifié par `slot_id` (une chaîne
+# arbitraire mais stable pour la durée du téléchargement — ex:
+# "nexus-42-1337" ou "modio-5990151", voir les appelants) vers une console
+# dédiée affichant une ligne par thread de téléchargement actif (voir
+# `widgets/download_console.py`). Reçoit (slot_id, libellé lisible du mod,
+# octets déjà téléchargés, taille totale en octets ou None si inconnue —
+# ex: réponse HTTP sans Content-Length). `downloaded=None` signale la fin du
+# téléchargement (succès ou échec) : le slot correspondant doit être retiré
+# de l'affichage, `total` est alors ignoré. Callback appelé directement
+# depuis le thread de téléchargement concerné — à l'appelant de rejoindre le
+# thread UI si nécessaire (voir `ActionsScreen`, qui passe par
+# `app.call_from_thread`).
+DownloadProgressFn = Callable[[str, str, int | None, int | None], None]
+
 _INTERNAL_DIR_NAMES = {"_a_traiter", "_installees"}
 
 # Nexus limite le nombre de téléchargements simultanés autorisés pour un
@@ -102,6 +117,7 @@ def download_mods_from_links_file(
     profiles_dir: Path | None = None,
     profile_name: str = "",
     select_files: SelectFilesFn | None = None,
+    on_download_progress: DownloadProgressFn | None = None,
     log: LogFn = lambda _msg: None,
 ) -> dict[str, list]:
     """Télécharge, pour chaque mod listé dans `links_file`, ses fichiers
@@ -137,6 +153,11 @@ def download_mods_from_links_file(
     que le pool de téléchargement ne démarre — afficher plusieurs wizards à
     la fois n'aurait pas de sens (un seul écran modal visible à la fois de
     toute façon) et risquerait une vraie course sur `push_screen`.
+
+    `on_download_progress` (sous-tâche 5c), si fourni, reçoit la progression
+    de chaque téléchargement individuel — un slot par fichier (`nexus-
+    <mod_id>-<file_id>`), voir `DownloadProgressFn` — pour une console
+    dédiée affichant une ligne par thread actif.
 
     Retourne {"downloaded": [...], "skipped": [...], "failed": [(id, err)]}.
     """
@@ -221,9 +242,21 @@ def download_mods_from_links_file(
         mod_id, label, version, to_download = job
         try:
             for file_id, _file_name in to_download:
-                url = client.download_link(mod_id, file_id)
-                path = download_file(url, dest_dir)
-                log(fmt_row(label, STATUS_SUCCES, version=version, detail=path.name))
+                slot_id = f"nexus-{mod_id}-{file_id}"
+
+                def _progress(downloaded: int, total_bytes: int | None, _slot=slot_id) -> None:
+                    if on_download_progress:
+                        on_download_progress(_slot, label, downloaded, total_bytes)
+
+                try:
+                    url = client.download_link(mod_id, file_id)
+                    path = download_file(
+                        url, dest_dir, on_progress=_progress if on_download_progress else None
+                    )
+                    log(fmt_row(label, STATUS_SUCCES, version=version, detail=path.name))
+                finally:
+                    if on_download_progress:
+                        on_download_progress(slot_id, label, None, None)
             with report_lock:
                 report["downloaded"].append(mod_id)
         except NexusAPIError as exc:
@@ -334,6 +367,7 @@ def download_subscribed_modio_mods(
     *,
     archives_installed_dir: Path | None = None,
     archives_pending_dir: Path | None = None,
+    on_download_progress: DownloadProgressFn | None = None,
     log: LogFn = lambda _msg: None,
 ) -> dict[str, list]:
     """Télécharge, pour chaque mod auquel le compte mod.io est abonné, son
@@ -359,6 +393,11 @@ def download_subscribed_modio_mods(
     détail du choix de cette borne). L'agrégation du rapport (`report`) est
     protégée par un verrou (`report_lock`) : plusieurs threads de
     téléchargement peuvent terminer en même temps et y ajouter une entrée.
+
+    `on_download_progress` (sous-tâche 5c), si fourni, reçoit la progression
+    de chaque téléchargement — un slot par mod (`modio-<mod_id>`), voir
+    `DownloadProgressFn` — pour une console dédiée affichant une ligne par
+    thread actif.
 
     Retourne {"downloaded": [...], "skipped": [...], "failed": [(name, err)]}.
     """
@@ -404,6 +443,7 @@ def download_subscribed_modio_mods(
         # résoudraient au même nom de fichier et se feraient passer pour
         # des doublons les uns des autres (voir `downloader._resolve_filename`).
         fallback_stem = f"{mod.name}-modio{mod.mod_id}"
+        slot_id = f"modio-{mod.mod_id}"
 
         try:
             target_name = resolve_remote_filename(mod.download_url, fallback_stem=fallback_stem)
@@ -419,8 +459,17 @@ def download_subscribed_modio_mods(
                 report["skipped"].append(mod.name)
             return
 
+        def _progress(downloaded: int, total_bytes: int | None) -> None:
+            if on_download_progress:
+                on_download_progress(slot_id, mod.name, downloaded, total_bytes)
+
         try:
-            path = download_file(mod.download_url, dest_dir, fallback_stem=fallback_stem)
+            path = download_file(
+                mod.download_url,
+                dest_dir,
+                fallback_stem=fallback_stem,
+                on_progress=_progress if on_download_progress else None,
+            )
             log(fmt_row(mod.name, STATUS_SUCCES, detail=path.name))
             with report_lock:
                 report["downloaded"].append(mod.name)
@@ -428,6 +477,9 @@ def download_subscribed_modio_mods(
             log(fmt_row(mod.name, STATUS_ECHEC, detail=str(exc)))
             with report_lock:
                 report["failed"].append((mod.name, str(exc)))
+        finally:
+            if on_download_progress:
+                on_download_progress(slot_id, mod.name, None, None)
 
     if to_fetch:
         max_workers = min(len(to_fetch), MODIO_MAX_DOWNLOAD_THREADS)
