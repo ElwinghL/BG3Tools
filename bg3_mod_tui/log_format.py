@@ -38,8 +38,16 @@ def _pad(text: str, width: int) -> str:
     stocké comme lettre + diacritique combinant redevient un seul
     caractère précomposé) puis on mesure/tronque/complète en largeur
     d'affichage via `rich.cells.cell_len` (les caractères larges type CJK
-    ou emoji comptent pour 2 colonnes)."""
-    text = unicodedata.normalize("NFC", str(text))
+    ou emoji comptent pour 2 colonnes).
+
+    Certains titres de mods (Nexus/mod.io) contiennent un espace de tête
+    accidentel de la part de l'auteur (ex: " NPC Redesign - Paladins of
+    Tyr", vérifié jusque dans le nom du fichier téléchargé) : préservé
+    tel quel, il décale visuellement le nom d'une colonne et, la largeur
+    totale étant fixe, désaligne d'autant les colonnes suivantes. On le
+    retire donc avant de mesurer/compléter — un espace de tête/fin n'a de
+    toute façon aucune valeur informative ici."""
+    text = unicodedata.normalize("NFC", str(text)).strip()
     if cell_len(text) > width:
         limit = max(width - 1, 0)
         truncated = ""
