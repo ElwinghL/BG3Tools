@@ -46,7 +46,7 @@
 
 ### 9. Fusion bouton "Mise à jour outils" + "Compil Compat Framework" + "ModFixerFork"
 
-- **9a.** Unified button lançant les trois séquences dans l'ordre avec barre de progression globale
+- ~~**9a.** Unified button lançant les trois séquences dans l'ordre avec barre de progression globale~~ — fait : bouton "Tout mettre à jour (outils + Compat Framework + Mod Fixer)" (`ActionsScreen.run_update_all`, mêmes `resource_tags` que les 3 actions individuelles qu'il enchaîne — conservées telles quelles, pas de suppression) ; corps de chaque étape factorisé en méthode `_*_task(log) -> bool` (même principe que `_restore_profile_task`) réutilisée à la fois par son bouton dédié et par la séquence unifiée ; enchaînement/progression "[i/3]"/arrêt-au-premier-échec extrait en fonction pure `_run_task_sequence` (testée dans `tests/test_actions_task_tabs.py`, même esprit que `_resource_conflict`) — arrêt choisi plutôt que "continuer coûte que coûte" car Compat Framework et Mod Fixer dépendent explicitement de Divine.exe téléchargé par la 1ère étape
 
 ## P3 — Annexe (avant V2/V3/V4)
 

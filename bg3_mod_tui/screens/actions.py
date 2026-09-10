@@ -790,6 +790,39 @@ def _resource_conflict(
     return requested & held
 
 
+def _run_task_sequence(
+    steps: list[tuple[str, Callable[[Callable[[str], None]], bool]]],
+    log: Callable[[str], None],
+) -> bool:
+    """Enchaîne `steps` (couples libellé + fonction "tâche" acceptant `log`
+    et retournant `True`/`False` selon son succès) dans l'ordre, en
+    journalisant une progression "[i/total]" avant chacune et en
+    s'arrêtant à la première étape en échec (voir `ActionsScreen.
+    run_update_all`, seul appelant actuel — le bouton "Tout mettre à jour").
+
+    Factorisée en fonction MODULE-LEVEL pure (aucune dépendance à `self`),
+    sur le même principe que `_resource_conflict` ci-dessus, pour rester
+    testable sans app Textual (voir `tests/test_actions_task_tabs.py`) :
+    seul CET enchaînement/arrêt-au-premier-échec est testé ainsi, les
+    fonctions `task` elles-mêmes (ex: `_download_tools_task`) restant
+    couplées à `self._config` et non testées ici.
+
+    Retourne `True` si toutes les étapes ont réussi, `False` dès qu'une a
+    échoué."""
+    total = len(steps)
+    for index, (label, task) in enumerate(steps, start=1):
+        log(f"[bold]===== [{index}/{total}] {label} =====[/bold]")
+        if not task(log):
+            log(
+                f"[#C46F6F]« {label} » a échoué : arrêt de la séquence "
+                f"« Tout mettre à jour » ({index}/{total} étape(s) "
+                f"tentée(s), les suivantes dépendent de celle-ci).[/#C46F6F]"
+            )
+            return False
+    log(f"===== Terminé : {total}/{total} étapes réussies. =====")
+    return True
+
+
 class ActionsScreen(Screen):
     """Menu d'actions pour préparer/installer les mods BG3."""
 
@@ -999,6 +1032,18 @@ class ActionsScreen(Screen):
                             "toutes dans ModFixer.pak.orig. Effet non garanti à 100% (voir "
                             "mod_fixer_fork.py) et de toute façon plus nécessaire depuis le "
                             "Patch 7 de BG3 selon Nexus."
+                        ),
+                    )
+                    yield Button(
+                        "Tout mettre à jour (outils + Compat Framework + Mod Fixer)",
+                        id="action-update-all",
+                        tooltip=(
+                            "Enchaîne dans l'ordre les 3 actions ci-dessus : "
+                            "MAJ des outils, puis Compiler Compat. Framework, "
+                            "puis Forker Mod Fixer — avec une progression "
+                            "[i/3] dans le log. S'arrête à la première étape "
+                            "en échec (les suivantes dépendent de Divine.exe "
+                            "téléchargé par la 1ère)."
                         ),
                     )
                     yield Button(
@@ -1668,12 +1713,21 @@ class ActionsScreen(Screen):
 
     @work(exclusive=True, thread=True, group="run_download_tools")
     def run_download_tools(self, log: Callable[[str], None]) -> None:
+        self._download_tools_task(log)
+
+    def _download_tools_task(self, log: Callable[[str], None]) -> bool:
+        """Corps effectif de la MAJ des outils — factorisé (même principe
+        que `_restore_profile_task`) pour être appelé à la fois par
+        `run_download_tools` (worker dédié, bouton "MAJ des outils") et par
+        `run_update_all` en première étape de la séquence unifiée. Retourne
+        `True` en cas de succès, `False` sinon (utilisé par `run_update_all`
+        pour décider d'enchaîner ou d'arrêter la séquence)."""
         log("=== Téléchargement/mise à jour des outils (TOOLS.md) ===")
         try:
             entries = parse_tools_table(self._config.tools_md_file)
         except ToolsError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
-            return
+            return False
         for entry in entries:
             download_and_extract_tool(
                 entry, self._config.project_root, log=log)
@@ -1684,6 +1738,7 @@ class ActionsScreen(Screen):
         deploy_script_extender(self._config.tools_dir,
                                self._config.game_bin_dir, log=log)
         log("Terminé.")
+        return True
 
     @on(Button.Pressed, "#action-compat-framework")
     def handle_compat_framework(self) -> None:
@@ -1698,6 +1753,14 @@ class ActionsScreen(Screen):
 
     @work(exclusive=True, thread=True, group="run_build_compat_framework")
     def run_build_compat_framework(self, log: Callable[[str], None]) -> None:
+        self._build_compat_framework_task(log)
+
+    def _build_compat_framework_task(self, log: Callable[[str], None]) -> bool:
+        """Corps effectif de la compilation de Compat. Framework —
+        factorisé pour être appelé par `run_build_compat_framework` (bouton
+        dédié) et par `run_update_all` (2ème étape de la séquence unifiée).
+        Retourne `True`/`False` selon le succès (voir
+        `_download_tools_task`)."""
         log("=== Compilation de BG3 Compatibility Framework (Divine.exe) ===")
         try:
             build_compat_framework_pak(
@@ -1708,6 +1771,8 @@ class ActionsScreen(Screen):
             )
         except CompatibilityFrameworkError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return False
+        return True
 
     @on(Button.Pressed, "#action-mod-fixer-fork")
     def handle_mod_fixer_fork(self) -> None:
@@ -1721,6 +1786,14 @@ class ActionsScreen(Screen):
 
     @work(exclusive=True, thread=True, group="run_build_mod_fixer_fork")
     def run_build_mod_fixer_fork(self, log: Callable[[str], None]) -> None:
+        self._build_mod_fixer_fork_task(log)
+
+    def _build_mod_fixer_fork_task(self, log: Callable[[str], None]) -> bool:
+        """Corps effectif du fork de Mod Fixer — factorisé pour être
+        appelé par `run_build_mod_fixer_fork` (bouton dédié) et par
+        `run_update_all` (3ème et dernière étape de la séquence unifiée).
+        Retourne `True`/`False` selon le succès (voir
+        `_download_tools_task`)."""
         log("=== Fork de Mod Fixer avec meta.lsx (Divine.exe) ===")
         try:
             build_mod_fixer_fork(
@@ -1731,6 +1804,38 @@ class ActionsScreen(Screen):
             )
         except ModFixerForkError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return False
+        return True
+
+    @on(Button.Pressed, "#action-update-all")
+    def handle_update_all(self) -> None:
+        # Enchaîne les 3 étapes ci-dessus dans l'ordre (MAJ des outils ->
+        # Compat. Framework -> Mod Fixer Fork) : mêmes ressources qu'elles
+        # cumulent toutes les 3, pour que le verrouillage empêche aussi bien
+        # une des 3 actions individuelles qu'une autre exécution de la
+        # séquence complète de démarrer en même temps.
+        self._start_task(
+            title="Tout mettre à jour (outils + Compat Framework + Mod Fixer)",
+            resource_tags=frozenset({"tools-dir", "game-bin-dir", "mods-dir"}),
+            launch=self.run_update_all,
+        )
+
+    @work(exclusive=True, thread=True, group="run_update_all")
+    def run_update_all(self, log: Callable[[str], None]) -> None:
+        """Enchaîne dans l'ordre les 3 étapes "MAJ des outils" -> "Compiler
+        Compat. Framework" -> "Forker Mod Fixer", en réutilisant leurs
+        méthodes `_*_task` déjà factorisées (aucune logique dupliquée). La
+        progression "[i/3]" et l'arrêt à la première étape en échec sont
+        délégués à `_run_task_sequence` (fonction module-level, voir son
+        docstring pour le choix de s'arrêter plutôt que d'enchaîner coûte
+        que coûte — les étapes 2 et 3 dépendent explicitement de Divine.exe
+        téléchargé par la 1ère)."""
+        steps: list[tuple[str, Callable[[Callable[[str], None]], bool]]] = [
+            ("MAJ des outils", self._download_tools_task),
+            ("Compiler Compat. Framework", self._build_compat_framework_task),
+            ("Forker Mod Fixer", self._build_mod_fixer_fork_task),
+        ]
+        _run_task_sequence(steps, log)
 
     @on(Button.Pressed, "#action-launch-tool")
     def handle_launch_tool(self) -> None:
