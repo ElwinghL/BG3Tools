@@ -1260,7 +1260,14 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-download-mods")
     def handle_download_mods(self) -> None:
-        self.run_download_mods()
+        # Touche archives_dir/_installees/_a_traiter (téléchargement +
+        # nettoyage des doublons en préambule) : incompatible avec
+        # `run_extract`, qui déplace/nettoie ces mêmes dossiers.
+        self._start_task(
+            title="Télécharger les mods",
+            resource_tags=frozenset({"archives"}),
+            launch=self.run_download_mods,
+        )
 
     def _select_nexus_files(
         self, mod_id: int, mod_name: str, candidates: list[tuple[int, str]]
@@ -1339,10 +1346,8 @@ class ActionsScreen(Screen):
                 f"({_human_size(total_freed)} récupéré(s))."
             )
 
-    @work(exclusive=True, thread=True)
-    def run_download_mods(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
-
+    @work(exclusive=True, thread=True, group="run_download_mods")
+    def run_download_mods(self, log: Callable[[str], None]) -> None:
         self.app.call_from_thread(
             self.query_one("#downloads-progress", DownloadProgressConsole).clear
         )
@@ -1402,11 +1407,16 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-clean-paks")
     def handle_clean_paks(self) -> None:
-        self.run_clean_paks()
+        # Supprime les .pak de Mods/ et les mods DLL déployés : incompatible
+        # avec toute autre action qui écrit dans ces mêmes dossiers.
+        self._start_task(
+            title="Nettoyer les .pak",
+            resource_tags=frozenset({"mods-dir", "native-mods"}),
+            launch=self.run_clean_paks,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_clean_paks(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_clean_paks")
+    def run_clean_paks(self, log: Callable[[str], None]) -> None:
         log("=== Nettoyage des .pak de Mods/ ===")
         clean_pak_files(
             self._config.managed_mods_link,
@@ -1416,11 +1426,17 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-sync-modsettings")
     def handle_sync_modsettings(self) -> None:
-        self.run_sync_modsettings()
+        # Relit Mods/ pour recalculer l'ordre de charge et écrit
+        # modsettings.lsx : incompatible avec toute action qui restructure
+        # Mods/ pendant la lecture, ou qui écrit modsettings.lsx.
+        self._start_task(
+            title="Sync. modsettings.lsx",
+            resource_tags=frozenset({"mods-dir", "modsettings"}),
+            launch=self.run_sync_modsettings,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_sync_modsettings(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_sync_modsettings")
+    def run_sync_modsettings(self, log: Callable[[str], None]) -> None:
         log("=== Synchronisation de modsettings.lsx ===")
         try:
             report = setup_links(self._config)
@@ -1431,12 +1447,18 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-extract")
     def handle_extract(self) -> None:
-        self.run_extract()
+        # Nettoie/déplace des archives (comme le téléchargement) ET écrit
+        # dans Mods/, DataMods/, Data/ (comme le nettoyage/déploiement de
+        # mods DLL) : incompatible avec toutes les actions qui touchent
+        # l'un ou l'autre.
+        self._start_task(
+            title="Extraire vers Mods/",
+            resource_tags=frozenset({"mods-dir", "archives", "native-mods"}),
+            launch=self.run_extract,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_extract(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
-
+    @work(exclusive=True, thread=True, group="run_extract")
+    def run_extract(self, log: Callable[[str], None]) -> None:
         self._cleanup_duplicate_archives(log)
 
         log("=== Extraction des archives vers Mods/ ===")
@@ -1462,11 +1484,17 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-native-mods")
     def handle_native_mods(self) -> None:
-        self.run_native_mods()
+        # Lit archives (_a_traiter/_installees) et écrit dans le dossier
+        # géré des mods DLL : incompatible avec les actions qui écrivent
+        # dans l'un ou l'autre.
+        self._start_task(
+            title="Déployer mods DLL",
+            resource_tags=frozenset({"native-mods", "archives"}),
+            launch=self.run_native_mods,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_native_mods(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_native_mods")
+    def run_native_mods(self, log: Callable[[str], None]) -> None:
         log("=== Déploiement des mods DLL (manifest natif) ===")
         try:
             report = deploy_native_mods_from_manifest(
@@ -1488,11 +1516,18 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-tools")
     def handle_tools(self) -> None:
-        self.run_download_tools()
+        # Écrit dans Tools/ (peut remplacer Divine.exe/LSLib en cours de
+        # route) et dans bin/ du jeu : incompatible avec toute action qui
+        # lit Tools/ (compilation Compat. Framework/Mod Fixer) ou écrit
+        # dans bin/.
+        self._start_task(
+            title="MAJ des outils",
+            resource_tags=frozenset({"tools-dir", "game-bin-dir"}),
+            launch=self.run_download_tools,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_download_tools(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_download_tools")
+    def run_download_tools(self, log: Callable[[str], None]) -> None:
         log("=== Téléchargement/mise à jour des outils (TOOLS.md) ===")
         try:
             entries = parse_tools_table(self._config.tools_md_file)
@@ -1512,11 +1547,17 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-compat-framework")
     def handle_compat_framework(self) -> None:
-        self.run_build_compat_framework()
+        # Lit Divine.exe sous Tools/ et écrit le .pak résultant dans Mods/ :
+        # incompatible avec la MAJ des outils (pourrait remplacer Divine.exe
+        # en cours de lecture) et avec toute action qui écrit dans Mods/.
+        self._start_task(
+            title="Compiler Compat. Framework",
+            resource_tags=frozenset({"mods-dir", "tools-dir"}),
+            launch=self.run_build_compat_framework,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_build_compat_framework(self) -> None:
-        log = lambda msg: self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_build_compat_framework")
+    def run_build_compat_framework(self, log: Callable[[str], None]) -> None:
         log("=== Compilation de BG3 Compatibility Framework (Divine.exe) ===")
         try:
             build_compat_framework_pak(
@@ -1530,11 +1571,16 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-mod-fixer-fork")
     def handle_mod_fixer_fork(self) -> None:
-        self.run_build_mod_fixer_fork()
+        # Même raison que "Compiler Compat. Framework" : lit Divine.exe
+        # sous Tools/, écrit dans Mods/.
+        self._start_task(
+            title="Forker Mod Fixer",
+            resource_tags=frozenset({"mods-dir", "tools-dir"}),
+            launch=self.run_build_mod_fixer_fork,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_build_mod_fixer_fork(self) -> None:
-        log = lambda msg: self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_build_mod_fixer_fork")
+    def run_build_mod_fixer_fork(self, log: Callable[[str], None]) -> None:
         log("=== Fork de Mod Fixer avec meta.lsx (Divine.exe) ===")
         try:
             build_mod_fixer_fork(
@@ -1590,11 +1636,18 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-inventory")
     def handle_inventory(self) -> None:
-        self.run_inventory()
+        # Lecture seule de Mods/ et des archives, écrit uniquement son
+        # propre fichier (inventory.json) : peut tourner aux côtés de
+        # n'importe quelle autre tâche (l'inventaire reflètera juste l'état
+        # au moment du scan, ce qui est acceptable pour un rapport).
+        self._start_task(
+            title="Inventaire des mods",
+            resource_tags=frozenset(),
+            launch=self.run_inventory,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_inventory(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_inventory")
+    def run_inventory(self, log: Callable[[str], None]) -> None:
         log("=== Génération de l'inventaire des mods ===")
         try:
             inventory = build_inventory(
@@ -1617,11 +1670,17 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-orphaned-archives")
     def handle_orphaned_archives(self) -> None:
-        self.run_orphaned_archives()
+        # Même raisonnement que "Inventaire des mods" : lecture seule des
+        # .pak déployés/archives, écrit son propre rapport
+        # (archives_orphelines.md).
+        self._start_task(
+            title="Archives orphelines...",
+            resource_tags=frozenset(),
+            launch=self.run_orphaned_archives,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_orphaned_archives(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_orphaned_archives")
+    def run_orphaned_archives(self, log: Callable[[str], None]) -> None:
         log("=== Recherche des archives orphelines (_installees) ===")
         try:
             inventory = build_inventory(
@@ -1655,7 +1714,7 @@ class ActionsScreen(Screen):
                 f"ces {len(candidates)} candidat(e)s par UUID plutôt que par nom "
                 f"seul (peu fiable, voir tooltip).[/#D8C091]"
             )
-            self._write_orphans_report(candidates, verified=False)
+            self._write_orphans_report(candidates, verified=False, log=log)
             return
 
         log(
@@ -1723,7 +1782,7 @@ class ActionsScreen(Screen):
             f"nom de fichier différent), {len(unverifiable)} non vérifiable(s) "
             f"(pas de .pak dedans)."
         )
-        self._write_orphans_report(confirmed, verified=True, unverifiable=unverifiable)
+        self._write_orphans_report(confirmed, verified=True, unverifiable=unverifiable, log=log)
 
     def _flush_orphans_progress(
         self,
@@ -1764,9 +1823,8 @@ class ActionsScreen(Screen):
         *,
         verified: bool,
         unverifiable: list[dict] | None = None,
+        log: Callable[[str], None],
     ) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
-
         if not orphans and not unverifiable:
             log("Aucune archive orpheline confirmée.")
             return
@@ -1831,15 +1889,22 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-orphan-paks")
     def handle_resolve_pak_origins(self) -> None:
-        self.run_resolve_pak_origins()
+        # Lecture seule de Mods/ et des archives ; n'écrit que le petit
+        # fichier d'origines manuelles propre au profil actif (via
+        # `save_manual_origin`, dans `_prompt_manual_pak_origins`) — pas
+        # Mods/ lui-même.
+        self._start_task(
+            title="Origine des .pak isolés...",
+            resource_tags=frozenset(),
+            launch=self.run_resolve_pak_origins,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_resolve_pak_origins(self) -> None:
+    @work(exclusive=True, thread=True, group="run_resolve_pak_origins")
+    def run_resolve_pak_origins(self, log: Callable[[str], None]) -> None:
         """Enchaîne les trois mécanismes de `pak_origin` sur les .pak
         isolés de Mods/ (voir le docstring de ce module) : nom, puis UUID
         réel, puis — en dernier recours — un lien saisi par l'utilisateur
         (mémorisé ensuite via `save_manual_origin`)."""
-        def log(msg): return self.app.call_from_thread(self._log, msg)
         log("=== Origine des .pak isolés ===")
         try:
             inventory = build_inventory(
@@ -1947,17 +2012,22 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-nexus-updates")
     def handle_nexus_updates(self) -> None:
-        self.run_nexus_updates()
+        # Lecture seule (archives locales + API Nexus), écrit son propre
+        # rapport (nexus_updates.md).
+        self._start_task(
+            title="Vérifier les mises à jour Nexus...",
+            resource_tags=frozenset(),
+            launch=self.run_nexus_updates,
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_nexus_updates(self) -> None:
+    @work(exclusive=True, thread=True, group="run_nexus_updates")
+    def run_nexus_updates(self, log: Callable[[str], None]) -> None:
         """Sous-tâche 3 du TODO "Priorisation Nexus / Mod.io" : compare
         chaque archive Nexus connue localement à la version actuellement
         publiée sur Nexus (voir `mod_pipeline.check_nexus_updates`).
         Lecture seule — ne télécharge ni ne modifie rien, seulement un
         rapport (`nexus_updates.md`, même emplacement que
         `archives_orphelines.md`)."""
-        def log(msg): return self.app.call_from_thread(self._log, msg)
         log("=== Vérification des mises à jour Nexus ===")
         try:
             archives = scan_all_archives(
@@ -1982,11 +2052,11 @@ class ActionsScreen(Screen):
             return
 
         report = check_nexus_updates(client, known, log=log)
-        self._write_nexus_updates_report(report)
+        self._write_nexus_updates_report(report, log=log)
 
-    def _write_nexus_updates_report(self, report: dict[str, list]) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
-
+    def _write_nexus_updates_report(
+        self, report: dict[str, list], *, log: Callable[[str], None]
+    ) -> None:
         outdated = report["outdated"]
         report_dir = profile_data_dir(self._config.profiles_dir, self._config.active_profile)
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -2048,6 +2118,11 @@ class ActionsScreen(Screen):
         profiles = list_profiles(self._config.profiles_dir)
         select.value = target if target in profiles else Select.NULL
 
+    # Ressources écrites par la restauration/l'import d'un profil : Mods/,
+    # les mods DLL déployés et modsettings.lsx — la même exigence de
+    # sérialisation que pour "Extraire vers Mods/" ou "Nettoyer les .pak".
+    _PROFILE_WRITE_TAGS = frozenset({"mods-dir", "native-mods", "modsettings"})
+
     @on(Select.Changed, "#profile-select")
     def handle_profile_changed(self, event: Select.Changed) -> None:
         value = event.value
@@ -2057,7 +2132,11 @@ class ActionsScreen(Screen):
         if value == NEW_PROFILE_OPTION:
             def on_name(name: str | None) -> None:
                 if name:
-                    self.run_save_profile(name)
+                    self._start_task(
+                        title=f"Sauvegarder profil « {name} »",
+                        resource_tags=frozenset(),
+                        launch=lambda log: self.run_save_profile(name, log),
+                    )
                 else:
                     self._reset_profile_select()
 
@@ -2074,11 +2153,26 @@ class ActionsScreen(Screen):
             # depuis la dernière restauration.
             return
 
-        self.run_restore_profile(str(value))
+        name = str(value)
+        self._start_task(
+            title=f"Restaurer profil « {name} »",
+            resource_tags=self._PROFILE_WRITE_TAGS,
+            launch=lambda log: self.run_restore_profile(name, log),
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_restore_profile(self, name: str) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_restore_profile")
+    def run_restore_profile(self, name: str, log: Callable[[str], None]) -> None:
+        self._restore_profile_task(name, log)
+
+    def _restore_profile_task(self, name: str, log: Callable[[str], None]) -> None:
+        """Corps effectif de la restauration d'un profil — factorisé pour
+        être appelé à la fois par `run_restore_profile` (worker dédié,
+        déclenché par le sélecteur de profil) et directement par
+        `run_import_profile` en fin d'import (même thread, même onglet de
+        log : l'import d'un profil se termine toujours par sa
+        restauration, ce n'est pas une tâche indépendante qui devrait
+        passer par sa propre vérification de ressources/son propre
+        onglet)."""
         log(f"=== Restauration du profil « {name} » ===")
         try:
             report = restore_profile(
@@ -2121,9 +2215,8 @@ class ActionsScreen(Screen):
         except ProfileError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
-    @work(exclusive=True, thread=True)
-    def run_save_profile(self, name: str) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_save_profile")
+    def run_save_profile(self, name: str, log: Callable[[str], None]) -> None:
         log(f"=== Sauvegarde du profil « {name} » ===")
         try:
             archives = scan_all_archives(
@@ -2154,11 +2247,16 @@ class ActionsScreen(Screen):
         if not name:
             self._log("[#D8C091]Aucun profil actif à exporter.[/#D8C091]")
             return
-        self.run_export_profile(name)
+        # Lecture seule (profil + Mods/), écrit une archive isolée sous
+        # web_root_dir : peut tourner en parallèle de tout.
+        self._start_task(
+            title="Exporter le profil actif",
+            resource_tags=frozenset(),
+            launch=lambda log: self.run_export_profile(name, log),
+        )
 
-    @work(exclusive=True, thread=True)
-    def run_export_profile(self, name: str) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_export_profile")
+    def run_export_profile(self, name: str, log: Callable[[str], None]) -> None:
         log(f"=== Export du profil « {name} » ===")
         try:
             # Publiée sous www-data (servie par le bouton "Web") plutôt que
@@ -2186,13 +2284,20 @@ class ActionsScreen(Screen):
     def handle_import_profile(self) -> None:
         def on_path(path_str: str | None) -> None:
             if path_str:
-                self.run_import_profile(Path(path_str).expanduser())
+                archive_path = Path(path_str).expanduser()
+                # Mêmes ressources que la restauration : l'import se
+                # termine toujours par une restauration (voir
+                # `run_import_profile`).
+                self._start_task(
+                    title="Importer un profil...",
+                    resource_tags=self._PROFILE_WRITE_TAGS,
+                    launch=lambda log: self.run_import_profile(archive_path, log),
+                )
 
         self.app.push_screen(ImportArchivePromptScreen(), on_path)
 
-    @work(exclusive=True, thread=True)
-    def run_import_profile(self, archive_path: Path) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+    @work(exclusive=True, thread=True, group="run_import_profile")
+    def run_import_profile(self, archive_path: Path, log: Callable[[str], None]) -> None:
         log(f"=== Import du profil depuis {archive_path} ===")
         try:
             name = import_profile_archive(
@@ -2209,7 +2314,11 @@ class ActionsScreen(Screen):
             return
 
         self.app.call_from_thread(self._reset_profile_select, name)
-        self.app.call_from_thread(self.run_restore_profile, name)
+        # Poursuite directe (même thread, même onglet de log, même
+        # réservation de ressources) plutôt qu'un nouveau worker
+        # `run_restore_profile` : voir le docstring de
+        # `_restore_profile_task`.
+        self._restore_profile_task(name, log)
 
     @on(Button.Pressed, "#action-optimize-prefix")
     def handle_optimize_prefix(self) -> None:
