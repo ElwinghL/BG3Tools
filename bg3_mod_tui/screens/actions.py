@@ -7,6 +7,7 @@ import os
 import threading
 import webbrowser
 from pathlib import Path
+from typing import Callable, NamedTuple
 
 from textual import on, work
 from textual.app import ComposeResult
@@ -25,6 +26,7 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
+from textual.worker import Worker
 
 from bg3_mod_tui.compat_framework import (
     CompatibilityFrameworkError,
@@ -750,6 +752,42 @@ class ManualPakOriginPromptScreen(ModalScreen[str | None]):
 NEW_PROFILE_OPTION = "__new_profile__"
 
 
+class _ActiveTask(NamedTuple):
+    """Une tâche "Tâches" actuellement en cours d'exécution, indexée par
+    son `Worker` Textual (voir `ActionsScreen._start_task` et
+    `ActionsScreen.on_worker_state_changed`, sous-tâche 7b du TODO
+    "Vue par onglets").
+
+    - `resource_tags` : les ressources (fichiers/dossiers) que la tâche
+      écrit — voir `_resource_conflict` ; un ensemble vide signifie que la
+      tâche ne fait que lire/écrire des fichiers qui lui sont propres
+      (rapport isolé, etc.) et peut tourner aux côtés de n'importe quelle
+      autre tâche.
+    - `tab_id` : l'onglet de `#logs-tabs` où cette tâche écrit ses logs
+      (l'onglet "Tâches" principal si aucune autre tâche n'était active à
+      son lancement, sinon un onglet dynamique dédié — voir
+      `_acquire_task_console`).
+    """
+
+    resource_tags: frozenset[str]
+    tab_id: str
+
+
+def _resource_conflict(
+    active_resource_tags: list[frozenset[str]], requested: frozenset[str]
+) -> frozenset[str]:
+    """Étiquettes de `requested` déjà détenues par une tâche active
+    (`active_resource_tags`, une liste des `resource_tags` de chaque
+    tâche actuellement en cours) — fonction pure, testable sans app
+    Textual (voir `tests/test_actions_task_tabs.py`). Un ensemble vide en
+    retour signifie qu'aucune ressource commune n'empêche de lancer la
+    nouvelle tâche."""
+    held: frozenset[str] = frozenset()
+    for tags in active_resource_tags:
+        held |= tags
+    return requested & held
+
+
 class ActionsScreen(Screen):
     """Menu d'actions pour préparer/installer les mods BG3."""
 
@@ -826,6 +864,14 @@ class ActionsScreen(Screen):
         super().__init__()
         self._config = config
         self._web_server_handle = None
+        # Onglets de logs dynamiques + verrouillage par ressource pour les
+        # tâches "Tâches" (voir `_start_task`, `_acquire_task_console`,
+        # sous-tâche 7b du TODO "Vue par onglets"). Copie d'instance de
+        # `_LOG_TAB_LABELS` (plutôt que de muter l'attribut de classe) :
+        # chaque onglet dynamique y ajoute son propre libellé de base.
+        self._log_tab_labels: dict[str, str] = dict(self._LOG_TAB_LABELS)
+        self._active_tasks: dict[Worker, _ActiveTask] = {}
+        self._dynamic_task_tab_seq = 0
 
     def _profile_select_options(self) -> list[tuple[str, str]]:
         ensure_default_profile(self._config.profiles_dir)
@@ -1055,7 +1101,10 @@ class ActionsScreen(Screen):
     def _mark_log_tab_active(self, tab_id: str) -> None:
         """Ajoute un indicateur "●" au libellé de l'onglet `tab_id` si ce
         n'est pas l'onglet actuellement affiché, pour signaler discrètement
-        qu'une console en arrière-plan a reçu un nouveau message."""
+        qu'une console en arrière-plan a reçu un nouveau message. Fonctionne
+        aussi bien pour les 4 onglets statiques que pour un onglet dynamique
+        de tâche (voir `_acquire_task_console`), tant que son libellé de
+        base est enregistré dans `self._log_tab_labels`."""
         try:
             tabbed_content = self.query_one("#logs-tabs", TabbedContent)
         except Exception:
@@ -1066,7 +1115,7 @@ class ActionsScreen(Screen):
             tab = tabbed_content.get_tab(tab_id)
         except Exception:
             return
-        base_label = self._LOG_TAB_LABELS.get(tab_id, str(tab.label))
+        base_label = self._log_tab_labels.get(tab_id, str(tab.label))
         tab.label = f"{base_label} ●"
 
     def _clear_log_tab_indicator(self, tab_id: str) -> None:
@@ -1075,11 +1124,131 @@ class ActionsScreen(Screen):
             tab = tabbed_content.get_tab(tab_id)
         except Exception:
             return
-        tab.label = self._LOG_TAB_LABELS.get(tab_id, str(tab.label))
+        tab.label = self._log_tab_labels.get(tab_id, str(tab.label))
 
     @on(TabbedContent.TabActivated, "#logs-tabs")
     def handle_log_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         self._clear_log_tab_indicator(event.pane.id or "")
+
+    def _acquire_task_console(self, title: str) -> tuple[Callable[[str], None], str]:
+        """Choisit la console où une tâche "Tâches" doit écrire ses logs
+        (appelée UNIQUEMENT depuis le thread UI, avant de lancer le worker
+        — voir `_start_task`) :
+
+        - Si aucune tâche n'est actuellement active (`self._active_tasks`
+          vide), la tâche utilise la console principale `#actions-log`
+          (onglet "Tâches" existant), comme avant ce mécanisme.
+        - Sinon (une tâche tourne déjà), un nouvel onglet est créé
+          dynamiquement (`TabbedContent.add_pane`) avec sa propre
+          `ConsoleLog`, pour ne pas mélanger deux flux de logs différents
+          dans une seule console. Son libellé reprend le nom de l'action
+          (`title`) suivi d'un numéro de séquence, ex. "Extraire vers
+          Mods/ (2)".
+
+        Ces onglets dynamiques ne sont PAS fermés/supprimés
+        automatiquement à la fin de la tâche : Textual permet de le faire
+        (`TabbedContent.remove_pane`), mais rien ne presse l'utilisateur de
+        les voir disparaître — il peut encore vouloir relire le log après
+        coup. Les garder indéfiniment (jusqu'à la fermeture de l'appli) est
+        le choix le plus simple ; un bouton de fermeture par onglet est un
+        raffinement d'UI non demandé par le TODO, laissé pour plus tard si
+        le besoin s'en fait sentir.
+
+        Retourne une fonction `log` sûre à appeler depuis n'importe quel
+        thread (elle fait elle-même le `call_from_thread`, comme `_log`/
+        `_tool_log`) et l'id de l'onglet utilisé.
+        """
+        if not self._active_tasks:
+            return self._log, "actions-log-tab"
+
+        self._dynamic_task_tab_seq += 1
+        seq = self._dynamic_task_tab_seq
+        tab_id = f"dyn-task-log-tab-{seq}"
+        console_id = f"dyn-task-log-{seq}"
+        label = f"{title} ({seq})"
+        self._log_tab_labels[tab_id] = label
+
+        tabbed_content = self.query_one("#logs-tabs", TabbedContent)
+        tabbed_content.add_pane(
+            TabPane(
+                label,
+                ConsoleLog(id=console_id, wrap=True, highlight=True, markup=True),
+                id=tab_id,
+            )
+        )
+
+        def write(message: str) -> None:
+            try:
+                self.query_one(f"#{console_id}", ConsoleLog).write(message)
+            except Exception:
+                return
+            self._mark_log_tab_active(tab_id)
+
+        def log(message: str) -> None:
+            self.app.call_from_thread(write, message)
+
+        return log, tab_id
+
+    def _start_task(
+        self,
+        *,
+        title: str,
+        resource_tags: frozenset[str],
+        launch: Callable[[Callable[[str], None]], "Worker | None"],
+    ) -> None:
+        """Point d'entrée commun à tous les boutons/évènements "Tâches" qui
+        lancent un worker `@work` écrivant dans la console des tâches (voir
+        les `handle_*` correspondants). Deux responsabilités :
+
+        1. Détection "une tâche tourne déjà" + routage vers la bonne
+           console (`_acquire_task_console`) : le mécanisme retenu est un
+           simple dictionnaire `self._active_tasks` (worker -> ressources
+           tenues + onglet), peuplé ici et vidé par
+           `on_worker_state_changed` dès que le `Worker` Textual associé
+           atteint un état terminal (succès, erreur ou annulation). C'est
+           plus robuste qu'un compteur manuel incrémenté/décrémenté à la
+           main dans chacune des ~15 méthodes `run_*` (un `return`
+           anticipé ou une exception non prévue oublierait de le
+           décrémenter) : on s'appuie sur le cycle de vie déjà fiable des
+           workers Textual, qui poste toujours un `Worker.StateChanged`
+           terminal quel que soit le chemin de sortie du thread.
+        2. Verrouillage par ressource pour la sous-tâche 3 du TODO : si
+           `resource_tags` n'est pas vide et qu'une tâche déjà active
+           déclare au moins une étiquette en commun (voir
+           `_resource_conflict`), la nouvelle tâche n'est PAS lancée — un
+           message l'explique dans la console principale. Ça évite deux
+           écritures concurrentes dans les mêmes fichiers (Mods/,
+           modsettings.lsx, mods DLL...), ce que la création d'un onglet
+           séparé ne résout pas à elle seule (le TODO le souligne
+           explicitement). Les actions à lecture seule (rapport isolé,
+           scan sans écriture dans Mods/) déclarent `resource_tags=
+           frozenset()` et tournent donc toujours librement en parallèle.
+        """
+        conflict = _resource_conflict(
+            [task.resource_tags for task in self._active_tasks.values()], resource_tags
+        )
+        if conflict:
+            self._log(
+                f"[#D8C091]« {title} » différée : {', '.join(sorted(conflict))} "
+                f"déjà utilisé(e) par une tâche en cours — relance une fois "
+                f"celle-ci terminée.[/#D8C091]"
+            )
+            return
+
+        log, tab_id = self._acquire_task_console(title)
+        worker = launch(log)
+        if worker is not None:
+            self._active_tasks[worker] = _ActiveTask(resource_tags=resource_tags, tab_id=tab_id)
+
+    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
+        """Libère la réservation de ressources d'une tâche "Tâches" dès que
+        son `Worker` associé se termine (voir `_start_task`). Ignore les
+        workers qui ne sont pas gérés par ce mécanisme (ex: "Lancer un
+        outil...", "Optimiser le préfixe...") — ils ne sont simplement pas
+        dans `self._active_tasks`."""
+        if not event.worker.is_finished:
+            return
+        self._active_tasks.pop(event.worker, None)
 
     def _log(self, message: str) -> None:
         self.query_one("#actions-log", ConsoleLog).write(message)
