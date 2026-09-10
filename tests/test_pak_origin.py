@@ -8,10 +8,15 @@ heuristique), `match_orphan_by_uuid` (étape 2, fiable, via un faux
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import bg3_mod_tui.pak_origin as pak_origin
 from bg3_mod_tui.inventory import ArchiveEntry
 from bg3_mod_tui.pak_origin import (
     find_orphaned_paks,
     match_orphan_by_name,
+    match_orphan_by_uuid,
+    resolve_archive_path,
 )
 
 
@@ -64,3 +69,78 @@ def test_match_orphan_by_name_aucune_archive_locale_ne_correspond():
 
 def test_match_orphan_by_name_dossier_d_archives_vide():
     assert match_orphan_by_name("Isole.pak", []) is None
+
+
+def _dirs(tmp_path: Path) -> dict[str, Path]:
+    dirs = {
+        "archives_dir": tmp_path / "a_traiter_racine",
+        "archives_installed_dir": tmp_path / "_installees",
+        "archives_pending_dir": tmp_path / "_a_traiter",
+    }
+    for d in dirs.values():
+        d.mkdir()
+    return dirs
+
+
+def test_resolve_archive_path_choisit_le_bon_dossier_selon_le_statut(tmp_path):
+    dirs = _dirs(tmp_path)
+    archive = _archive("Mod.zip", status="installee")
+    assert resolve_archive_path(archive, **dirs) == dirs["archives_installed_dir"] / "Mod.zip"
+
+
+def test_match_orphan_by_uuid_trouve_l_archive_au_meme_uuid(tmp_path, monkeypatch):
+    dirs = _dirs(tmp_path)
+    archive = _archive(
+        "ArchiveConnue-42-1-0-1690000000.zip",
+        status="a_traiter",
+        mod_name_guess="ArchiveConnue",
+        nexus_mod_id=42,
+    )
+    (dirs["archives_pending_dir"] / archive.file).write_bytes(b"contenu factice")
+    pak_path = tmp_path / "Isole.pak"
+    pak_path.write_bytes(b"contenu factice")
+
+    monkeypatch.setattr(
+        pak_origin, "read_pak_identity", lambda *a, **k: ("uuid-1234", "Isolé")
+    )
+    monkeypatch.setattr(
+        pak_origin,
+        "archive_pak_identities",
+        lambda *a, **k: [("uuid-1234", "ArchiveConnue")],
+    )
+
+    result = match_orphan_by_uuid(
+        pak_path, [archive], divine_exe=Path("Divine.exe"), reference_path=tmp_path, **dirs
+    )
+    assert result is not None
+    assert result["archive"] == archive.file
+    assert result["pak_uuid"] == "uuid-1234"
+
+
+def test_match_orphan_by_uuid_aucune_archive_ne_partage_l_uuid(tmp_path, monkeypatch):
+    dirs = _dirs(tmp_path)
+    archive = _archive("Autre.zip", status="disponible")
+    (dirs["archives_dir"] / archive.file).write_bytes(b"contenu factice")
+    pak_path = tmp_path / "Isole.pak"
+    pak_path.write_bytes(b"contenu factice")
+
+    monkeypatch.setattr(pak_origin, "read_pak_identity", lambda *a, **k: ("uuid-1234", "Isolé"))
+    monkeypatch.setattr(pak_origin, "archive_pak_identities", lambda *a, **k: [("uuid-autre", "Autre")])
+
+    result = match_orphan_by_uuid(
+        pak_path, [archive], divine_exe=Path("Divine.exe"), reference_path=tmp_path, **dirs
+    )
+    assert result is None
+
+
+def test_match_orphan_by_uuid_pak_sans_meta_lsx_exploitable(tmp_path, monkeypatch):
+    dirs = _dirs(tmp_path)
+    pak_path = tmp_path / "Isole.pak"
+    pak_path.write_bytes(b"contenu factice")
+
+    monkeypatch.setattr(pak_origin, "read_pak_identity", lambda *a, **k: None)
+
+    result = match_orphan_by_uuid(
+        pak_path, [], divine_exe=Path("Divine.exe"), reference_path=tmp_path, **dirs
+    )
+    assert result is None
