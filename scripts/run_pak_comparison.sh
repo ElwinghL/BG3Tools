@@ -14,6 +14,12 @@
 
 set -euo pipefail
 
+# Cache uv (~/.cache/uv) et .venv du projet souvent sur des filesystems
+# différents ici (ex: btrfs vs ext4) — un hardlink ne peut pas traverser
+# ça, uv bascule sur une copie complète avec un warning à chaque run.
+# Copie explicitement demandée : même résultat, juste sans le warning.
+export UV_LINK_MODE=copy
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$ROOT_DIR"
