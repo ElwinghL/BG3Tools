@@ -438,7 +438,7 @@ def extract_archives_to_mods(
             if paks:
                 for pak in paks:
                     shutil.copy2(pak, _unique_destination(mods_dir, pak.name))
-                log(fmt_row(archive.name, STATUS_SUCCES, detail=f"{len(paks)} .pak installé(s)"))
+                log(fmt_row(archive.name, STATUS_SUCCES, detail=f"{len(paks):>2} .pak installé(s)"))
                 dest = _unique_destination(installed_dir, archive.name)
                 shutil.move(str(archive), str(dest))
                 report["installed"].append(archive.name)
