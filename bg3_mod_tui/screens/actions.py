@@ -43,6 +43,7 @@ from bg3_mod_tui.inventory import (
 from bg3_mod_tui.launcher import LauncherError, launch_tool, open_protontricks, resolve_wine_bin
 from bg3_mod_tui.log_format import fmt_http_log_line
 from bg3_mod_tui.linking import LinkingError, setup_links
+from bg3_mod_tui.mod_fixer_fork import ModFixerForkError, build_fork as build_mod_fixer_fork
 from bg3_mod_tui.native_mods import (
     NativeModsManifestError,
     deploy_native_mods_from_manifest,
@@ -817,6 +818,21 @@ class ActionsScreen(Screen):
                         ),
                     )
                     yield Button(
+                        "Forker Mod Fixer",
+                        id="action-mod-fixer-fork",
+                        tooltip=(
+                            "Mod Fixer (Nexus #141) n'a pas de meta.lsx (il patche "
+                            "directement le module Gustav), d'où le warning "
+                            "\"no meta.lsx\"/\"no valid load-order UUID\" dans les "
+                            "validateurs de load order — bénin mais gênant à distinguer "
+                            "d'un vrai problème. Ce bouton reconstruit ModFixerFork.pak "
+                            "(module séparé, meta.lsx propre) via Divine.exe à partir de "
+                            "ModFixer.pak déjà déployé, sans le toucher — effet non "
+                            "garanti à 100% (voir mod_fixer_fork.py) et de toute façon "
+                            "plus nécessaire depuis le Patch 7 de BG3 selon Nexus."
+                        ),
+                    )
+                    yield Button(
                         "Lancer un outil...",
                         id="action-launch-tool",
                         tooltip=(
@@ -1198,6 +1214,24 @@ class ActionsScreen(Screen):
                 log=log,
             )
         except CompatibilityFrameworkError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+
+    @on(Button.Pressed, "#action-mod-fixer-fork")
+    def handle_mod_fixer_fork(self) -> None:
+        self.run_build_mod_fixer_fork()
+
+    @work(exclusive=True, thread=True)
+    def run_build_mod_fixer_fork(self) -> None:
+        log = lambda msg: self.app.call_from_thread(self._log, msg)
+        log("=== Fork de Mod Fixer avec meta.lsx (Divine.exe) ===")
+        try:
+            build_mod_fixer_fork(
+                self._config.managed_mods_link,
+                self._config.tools_dir,
+                reference_path=self._config.appdata_path,
+                log=log,
+            )
+        except ModFixerForkError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
     @on(Button.Pressed, "#action-launch-tool")
