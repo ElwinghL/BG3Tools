@@ -88,6 +88,7 @@ from bg3_mod_tui.mod_pipeline import (
 from bg3_mod_tui.providers.modio import ModIOAPIError, ModIOClient
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusClient
 from bg3_mod_tui.tools_manager import ToolsError, download_and_extract_tool, find_executables, parse_tools_table
+from bg3_mod_tui.usage_stats import increment_usage_stat
 from bg3_mod_tui.widgets.console_log import ConsoleLog
 from bg3_mod_tui.widgets.download_console import DownloadProgressConsole
 
@@ -822,6 +823,12 @@ class ActionsScreen(Screen):
 
     BINDINGS = [("q", "quit_app", "Quitter")]
 
+    # Bouton d'action à ne PAS suivre par `usage_stats` malgré son id
+    # préfixé "action-" : "Quitter" n'est pas une action métier du menu
+    # (téléchargement, nettoyage, outil...) et n'a pas vocation à devenir
+    # une quick action.
+    _UNTRACKED_ACTION_ID = "action-quit"
+
     def __init__(self, config: ModToolsConfig) -> None:
         super().__init__()
         self._config = config
@@ -1088,6 +1095,36 @@ class ActionsScreen(Screen):
     def _tool_log(self, message: str) -> None:
         self.query_one("#tools-log", ConsoleLog).write(message)
         self._mark_log_tab_active("tools-log-tab")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Hook générique de suivi d'usage (sous-tâche "Compteur
+        d'utilisation par bouton/outil/profil", voir `usage_stats.py`) :
+        incrémente le compteur persistant de CHAQUE bouton d'action réel
+        (id `action-*`, hors `_UNTRACKED_ACTION_ID`) sans dupliquer les
+        ~30 handlers `@on(Button.Pressed, "#action-xxx")` déjà en place
+        un par un.
+
+        Choix délibéré plutôt qu'un décorateur à ajouter sur chacun d'eux :
+        Textual invoque, pour un même widget, TOUS les handlers qui
+        correspondent à un message donné — les méthodes décorées `@on`
+        (sélecteur par sélecteur) ET la méthode "par convention de nommage"
+        `on_<event>` — indépendamment les unes des autres (voir
+        `MessagePump._get_dispatch_methods`/`_on_message` dans
+        `textual.message_pump`, vérifié dans les sources de la version
+        installée). Cette méthode ne fait donc jamais `event.stop()` ni
+        `event.prevent_default()` : même si elle le faisait, ça n'empêche
+        ni le déclenchement des autres handlers de CE widget (déjà
+        déterminé avant l'appel), ni celui du handler spécifique de
+        l'action pressée — seule la PROPAGATION vers un widget parent
+        serait coupée, ce qui n'a aucune incidence ici (aucun handler ne
+        fait remonter l'événement plus haut que `ActionsScreen`). Risque de
+        régression donc nul sur les handlers existants."""
+        button_id = event.button.id or ""
+        if not button_id.startswith("action-") or button_id == self._UNTRACKED_ACTION_ID:
+            return
+        increment_usage_stat(
+            self._config.profiles_dir, self._config.active_profile, button_id
+        )
 
     @on(Button.Pressed, "#action-download-mods")
     def handle_download_mods(self) -> None:
