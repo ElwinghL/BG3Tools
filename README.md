@@ -67,6 +67,8 @@ Une clé API Nexus Mods (`NEXUS_API_KEY`) et/ou mod.io (`MODIO_API_KEY`,
 - `nexus_links_to_add.md` — liste de travail perso (liens/IDs Nexus à
   traiter) ; suivi par git comme gabarit vide, contenu réel local
   uniquement (`git update-index --skip-worktree`).
+- `THIRD_PARTY_LICENSES.md` — licences des dépendances Python et des
+  outils/mods tiers utilisés par ModTools.
 
 ## Développement
 
