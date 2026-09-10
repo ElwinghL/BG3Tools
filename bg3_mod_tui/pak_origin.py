@@ -20,8 +20,12 @@ croissante) — voir `screens/actions.py` pour leur enchaînement :
 
 from __future__ import annotations
 
+import json
+import re
 import tempfile
 from collections.abc import Callable
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from bg3_mod_tui.inventory import ArchiveEntry, match_archive_origin
@@ -30,9 +34,12 @@ from bg3_mod_tui.pak_metadata import (
     archive_pak_identities,
     read_pak_identity,
 )
+from bg3_mod_tui.profiles import profile_data_dir
 
 LogFn = Callable[[str], None]
 _NOOP_LOG: LogFn = lambda _msg: None
+
+MANUAL_ORIGINS_FILENAME = "origines_manuelles_pak.json"
 
 
 def find_orphaned_paks(paks: list[dict]) -> list[dict]:
@@ -144,3 +151,107 @@ def match_orphan_by_uuid(
                 "pak_uuid": pak_uuid,
             }
     return None
+
+
+# Lien direct vers un mod Nexus (même convention que
+# `providers.nexus._MOD_URL_RE`).
+_NEXUS_URL_RE = re.compile(r"nexusmods\.com/baldursgate3/mods/(\d+)")
+
+# Lien direct vers un mod mod.io : "https://mod.io/g/baldursgate3/m/<slug>"
+# (vérifié en ligne sur mod.io/g/baldursgate3 — les mods y sont bien listés
+# sous ce schéma). Contrairement à Nexus, cette URL n'encode aucun ID
+# numérique (juste un slug texte) : `providers.modio.ModIOClient` n'expose
+# par ailleurs aucune recherche par nom/slug (seulement des lookups par ID
+# déjà connu), donc aucun moyen local de retrouver l'ID numérique qu'elle
+# utilise à partir de ce lien seul — le slug et l'URL complète sont
+# mémorisés tels quels, à défaut de mieux, pour un rapprochement manuel
+# ultérieur.
+_MODIO_URL_RE = re.compile(r"mod\.io/g/[^/]+/m/([a-z0-9][a-z0-9-]*)", re.IGNORECASE)
+
+
+@dataclass
+class ManualPakOrigin:
+    """Origine indiquée manuellement par l'utilisateur pour un .pak isolé
+    (étape 3, dernier recours après échec de `match_orphan_by_name` et
+    `match_orphan_by_uuid`) — mémorisée pour ne plus être redemandée aux
+    scans suivants (voir `load_manual_origins`/`save_manual_origin`)."""
+
+    pak_file: str
+    url: str
+    source: str  # "nexus" | "modio"
+    nexus_mod_id: int | None = None
+    modio_slug: str | None = None
+    recorded_at: str = ""
+
+
+def parse_manual_origin_link(url: str) -> dict | None:
+    """Reconnaît un lien Nexus ou mod.io pointant vers un mod BG3 et en
+    extrait ce qui est exploitable localement (voir `_MODIO_URL_RE` pour la
+    limite côté mod.io : pas d'ID numérique dans son URL, juste un slug).
+    Retourne None si `url` ne correspond à aucune des deux conventions
+    connues (lien mal collé, autre site...)."""
+    nexus_match = _NEXUS_URL_RE.search(url)
+    if nexus_match:
+        return {"source": "nexus", "nexus_mod_id": int(nexus_match.group(1)), "modio_slug": None}
+    modio_match = _MODIO_URL_RE.search(url)
+    if modio_match:
+        return {"source": "modio", "nexus_mod_id": None, "modio_slug": modio_match.group(1)}
+    return None
+
+
+def load_manual_origins(profiles_dir: Path, profile_name: str) -> dict[str, ManualPakOrigin]:
+    """Charge, pour le profil `profile_name`, les origines de .pak isolés
+    indiquées manuellement lors de scans précédents (pak_file ->
+    ManualPakOrigin) — voir `save_manual_origin`. Comme
+    `profiles.load_blacklisted_files`, un fichier absent ou corrompu vaut
+    simplement "rien de mémorisé" plutôt qu'une erreur."""
+    path = profile_data_dir(profiles_dir, profile_name) / MANUAL_ORIGINS_FILENAME
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    origins: dict[str, ManualPakOrigin] = {}
+    for pak_file, entry in raw.items():
+        try:
+            origins[pak_file] = ManualPakOrigin(pak_file=pak_file, **entry)
+        except TypeError:
+            # Entrée corrompue/champ inattendu (édition manuelle du JSON) :
+            # ignorée plutôt que de faire échouer le chargement de tout le
+            # fichier pour les autres .pak.
+            continue
+    return origins
+
+
+def save_manual_origin(
+    profiles_dir: Path, profile_name: str, pak_file: str, url: str
+) -> ManualPakOrigin | None:
+    """Enregistre l'origine indiquée manuellement pour `pak_file` (étape 3)
+    dans le fichier JSON du profil actif, pour ne plus la redemander aux
+    scans suivants (voir `load_manual_origins`). Retourne None (et n'écrit
+    rien) si `url` ne correspond à aucun lien Nexus/mod.io reconnu par
+    `parse_manual_origin_link`."""
+    parsed = parse_manual_origin_link(url)
+    if parsed is None:
+        return None
+    origin = ManualPakOrigin(
+        pak_file=pak_file,
+        url=url,
+        source=parsed["source"],
+        nexus_mod_id=parsed["nexus_mod_id"],
+        modio_slug=parsed["modio_slug"],
+        recorded_at=datetime.now(timezone.utc).isoformat(),
+    )
+    origins = load_manual_origins(profiles_dir, profile_name)
+    origins[pak_file] = origin
+
+    dest_dir = profile_data_dir(profiles_dir, profile_name)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    serializable = {
+        f: {k: v for k, v in asdict(o).items() if k != "pak_file"} for f, o in origins.items()
+    }
+    (dest_dir / MANUAL_ORIGINS_FILENAME).write_text(
+        json.dumps(serializable, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return origin

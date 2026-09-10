@@ -8,16 +8,22 @@ heuristique), `match_orphan_by_uuid` (étape 2, fiable, via un faux
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import bg3_mod_tui.pak_origin as pak_origin
 from bg3_mod_tui.inventory import ArchiveEntry
 from bg3_mod_tui.pak_origin import (
+    MANUAL_ORIGINS_FILENAME,
     find_orphaned_paks,
+    load_manual_origins,
     match_orphan_by_name,
     match_orphan_by_uuid,
+    parse_manual_origin_link,
     resolve_archive_path,
+    save_manual_origin,
 )
+from bg3_mod_tui.profiles import profile_data_dir
 
 
 def _archive(
@@ -144,3 +150,117 @@ def test_match_orphan_by_uuid_pak_sans_meta_lsx_exploitable(tmp_path, monkeypatc
         pak_path, [], divine_exe=Path("Divine.exe"), reference_path=tmp_path, **dirs
     )
     assert result is None
+
+
+def test_parse_manual_origin_link_reconnait_un_lien_nexus():
+    parsed = parse_manual_origin_link("https://www.nexusmods.com/baldursgate3/mods/12345")
+    assert parsed == {"source": "nexus", "nexus_mod_id": 12345, "modio_slug": None}
+
+
+def test_parse_manual_origin_link_reconnait_un_lien_modio():
+    parsed = parse_manual_origin_link("https://mod.io/g/baldursgate3/m/mon-super-mod")
+    assert parsed == {"source": "modio", "nexus_mod_id": None, "modio_slug": "mon-super-mod"}
+
+
+def test_parse_manual_origin_link_lien_non_reconnu():
+    assert parse_manual_origin_link("https://example.com/pas-un-mod") is None
+    assert parse_manual_origin_link("n'importe quoi") is None
+
+
+def test_save_manual_origin_lien_non_reconnu_n_ecrit_rien(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    result = save_manual_origin(profiles_dir, "MonProfil", "Isole.pak", "pas un lien")
+    assert result is None
+    assert not profiles_dir.exists()
+
+
+def test_save_puis_load_manual_origin_nexus(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    origin = save_manual_origin(
+        profiles_dir,
+        "MonProfil",
+        "Isole.pak",
+        "https://www.nexusmods.com/baldursgate3/mods/777",
+    )
+    assert origin is not None
+    assert origin.source == "nexus"
+    assert origin.nexus_mod_id == 777
+
+    reloaded = load_manual_origins(profiles_dir, "MonProfil")
+    assert "Isole.pak" in reloaded
+    assert reloaded["Isole.pak"].nexus_mod_id == 777
+    assert reloaded["Isole.pak"].url == "https://www.nexusmods.com/baldursgate3/mods/777"
+
+
+def test_save_manual_origin_modio_puis_load(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    origin = save_manual_origin(
+        profiles_dir, "MonProfil", "Isole.pak", "https://mod.io/g/baldursgate3/m/mon-mod"
+    )
+    assert origin is not None
+    assert origin.source == "modio"
+    assert origin.modio_slug == "mon-mod"
+
+    reloaded = load_manual_origins(profiles_dir, "MonProfil")
+    assert reloaded["Isole.pak"].modio_slug == "mon-mod"
+
+
+def test_load_manual_origins_dossier_absent_renvoie_vide(tmp_path):
+    assert load_manual_origins(tmp_path / "profiles", "MonProfil") == {}
+
+
+def test_save_manual_origin_conserve_les_entrees_existantes_d_autres_pak(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    save_manual_origin(
+        profiles_dir, "MonProfil", "Premier.pak", "https://www.nexusmods.com/baldursgate3/mods/1"
+    )
+    save_manual_origin(
+        profiles_dir, "MonProfil", "Second.pak", "https://www.nexusmods.com/baldursgate3/mods/2"
+    )
+    reloaded = load_manual_origins(profiles_dir, "MonProfil")
+    assert set(reloaded) == {"Premier.pak", "Second.pak"}
+
+
+def test_load_manual_origins_fichier_corrompu_renvoie_vide(tmp_path):
+    profiles_dir = tmp_path / "profiles"
+    dest_dir = profile_data_dir(profiles_dir, "MonProfil")
+    dest_dir.mkdir(parents=True)
+    (dest_dir / MANUAL_ORIGINS_FILENAME).write_text("{ceci n'est pas du JSON", encoding="utf-8")
+
+    assert load_manual_origins(profiles_dir, "MonProfil") == {}
+
+
+def test_load_manual_origins_ignore_une_entree_avec_un_champ_inattendu(tmp_path):
+    # Fichier édité à la main (ou par une version antérieure/postérieure de
+    # l'outil) avec un champ que `ManualPakOrigin` ne connaît pas pour cette
+    # entrée : elle est ignorée plutôt que de faire échouer le chargement
+    # des autres entrées valides du même fichier.
+    profiles_dir = tmp_path / "profiles"
+    dest_dir = profile_data_dir(profiles_dir, "MonProfil")
+    dest_dir.mkdir(parents=True)
+    (dest_dir / MANUAL_ORIGINS_FILENAME).write_text(
+        json.dumps(
+            {
+                "Corrompu.pak": {
+                    "url": "https://www.nexusmods.com/baldursgate3/mods/9",
+                    "source": "nexus",
+                    "nexus_mod_id": 9,
+                    "modio_slug": None,
+                    "recorded_at": "2026-01-01T00:00:00+00:00",
+                    "champ_inconnu": "casse le TypeError attendu",
+                },
+                "Valide.pak": {
+                    "url": "https://www.nexusmods.com/baldursgate3/mods/10",
+                    "source": "nexus",
+                    "nexus_mod_id": 10,
+                    "modio_slug": None,
+                    "recorded_at": "2026-01-01T00:00:00+00:00",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    reloaded = load_manual_origins(profiles_dir, "MonProfil")
+    assert set(reloaded) == {"Valide.pak"}
+    assert reloaded["Valide.pak"].nexus_mod_id == 10
