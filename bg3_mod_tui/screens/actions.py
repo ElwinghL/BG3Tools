@@ -60,6 +60,7 @@ from bg3_mod_tui.webserver import WebServerHandle, start_http_server
 from bg3_mod_tui.wineprefix import WinePrefixError, optimize_prefix_for_tools
 from bg3_mod_tui.mod_pipeline import (
     clean_pak_files,
+    cleanup_duplicate_archives,
     download_mods_from_links_file,
     download_subscribed_modio_mods,
     extract_archives_to_mods,
@@ -875,9 +876,34 @@ class ActionsScreen(Screen):
         done.wait()
         return result
 
+    def _cleanup_duplicate_archives(self, log) -> None:
+        """Nettoie les doublons d'archives déjà présents dans
+        `_installees`/`_a_traiter` (voir
+        `mod_pipeline.cleanup_duplicate_archives`) — appelé en préambule
+        de "télécharger les mods" et "extraire vers Mods/" pour que ce
+        nettoyage se fasse automatiquement à chaque exécution plutôt que
+        d'être une action séparée à lancer soi-même."""
+        log("=== Nettoyage des doublons d'archives déjà présents ===")
+        total_removed = 0
+        total_freed = 0
+        for directory in (
+            self._config.archives_installed_dir,
+            self._config.archives_pending_dir,
+        ):
+            report = cleanup_duplicate_archives(directory, log=log)
+            total_removed += len(report["removed"])
+            total_freed += report["freed_bytes"]
+        if total_removed:
+            log(
+                f"{total_removed} doublon(s) supprimé(s) au total "
+                f"({_human_size(total_freed)} récupéré(s))."
+            )
+
     @work(exclusive=True, thread=True)
     def run_download_mods(self) -> None:
         def log(msg): return self.app.call_from_thread(self._log, msg)
+
+        self._cleanup_duplicate_archives(log)
 
         log("=== Téléchargement des mods listés dans nexus_links_to_add.md (Nexus) ===")
         try:
@@ -912,7 +938,12 @@ class ActionsScreen(Screen):
                 access_token=os.environ.get("MODIO_ACCESS_TOKEN") or None,
             )
             report = download_subscribed_modio_mods(
-                client, self._config.archives_dir, log=log)
+                client,
+                self._config.archives_dir,
+                archives_installed_dir=self._config.archives_installed_dir,
+                archives_pending_dir=self._config.archives_pending_dir,
+                log=log,
+            )
             log(
                 f"Terminé (mod.io) : {len(report['downloaded'])} téléchargé(s), "
                 f"{len(report['skipped'])} déjà présent(s), "
@@ -959,6 +990,9 @@ class ActionsScreen(Screen):
     @work(exclusive=True, thread=True)
     def run_extract(self) -> None:
         def log(msg): return self.app.call_from_thread(self._log, msg)
+
+        self._cleanup_duplicate_archives(log)
+
         log("=== Extraction des archives vers Mods/ ===")
         report = extract_archives_to_mods(
             self._config.archives_dir,
