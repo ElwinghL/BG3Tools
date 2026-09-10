@@ -78,6 +78,7 @@ from bg3_mod_tui.profiles import (
 from bg3_mod_tui.webserver import WebServerHandle, start_http_server
 from bg3_mod_tui.wineprefix import WinePrefixError, optimize_prefix_for_tools
 from bg3_mod_tui.mod_pipeline import (
+    check_nexus_updates,
     clean_pak_files,
     cleanup_duplicate_archives,
     download_mods_from_links_file,
@@ -954,6 +955,18 @@ class ActionsScreen(Screen):
                         ),
                     )
                     yield Button(
+                        "Vérifier les mises à jour Nexus...",
+                        id="action-nexus-updates",
+                        tooltip=(
+                            "Compare la version de chaque archive Nexus connue "
+                            "localement à la version actuellement publiée sur "
+                            "Nexus, pour repérer les mods obsolètes — rapport "
+                            "dans nexus_updates.md sous le profil actif "
+                            "(nécessite NEXUS_API_KEY, rien n'est téléchargé "
+                            "automatiquement)."
+                        ),
+                    )
+                    yield Button(
                         "Fichiers Nexus écartés...",
                         id="action-nexus-blacklist",
                         tooltip=(
@@ -1662,6 +1675,80 @@ class ActionsScreen(Screen):
             self.app.push_screen(ManualPakOriginPromptScreen(pak_file), on_url)
 
         prompt_next(0)
+
+    @on(Button.Pressed, "#action-nexus-updates")
+    def handle_nexus_updates(self) -> None:
+        self.run_nexus_updates()
+
+    @work(exclusive=True, thread=True)
+    def run_nexus_updates(self) -> None:
+        """Sous-tâche 3 du TODO "Priorisation Nexus / Mod.io" : compare
+        chaque archive Nexus connue localement à la version actuellement
+        publiée sur Nexus (voir `mod_pipeline.check_nexus_updates`).
+        Lecture seule — ne télécharge ni ne modifie rien, seulement un
+        rapport (`nexus_updates.md`, même emplacement que
+        `archives_orphelines.md`)."""
+        def log(msg): return self.app.call_from_thread(self._log, msg)
+        log("=== Vérification des mises à jour Nexus ===")
+        try:
+            archives = scan_all_archives(
+                archives_dir=self._config.archives_dir,
+                archives_installed_dir=self._config.archives_installed_dir,
+                archives_pending_dir=self._config.archives_pending_dir,
+                on_progress=log,
+            )
+        except OSError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return
+
+        known = [a for a in archives if a.nexus_mod_id is not None]
+        if not known:
+            log("Aucune archive Nexus reconnue localement (aucun ID Nexus retrouvé dans les noms de fichiers).")
+            return
+
+        try:
+            client = NexusClient(os.environ.get("NEXUS_API_KEY", ""))
+        except NexusAPIError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return
+
+        report = check_nexus_updates(client, known, log=log)
+        self._write_nexus_updates_report(report)
+
+    def _write_nexus_updates_report(self, report: dict[str, list]) -> None:
+        def log(msg): return self.app.call_from_thread(self._log, msg)
+
+        outdated = report["outdated"]
+        report_dir = profile_data_dir(self._config.profiles_dir, self._config.active_profile)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "nexus_updates.md"
+
+        lines = ["# Mods Nexus obsolètes localement\n"]
+        if outdated:
+            lines.append(
+                f"{len(outdated)} mod(s) dont la version disponible sur Nexus "
+                f"est plus récente que l'archive connue localement — "
+                f"{len(report['up_to_date'])} déjà à jour, "
+                f"{len(report['failed'])} non vérifiable(s).\n"
+            )
+            lines += ["| Mod | Version locale | Version Nexus | Archive |", "|---|---|---|---|"]
+            for entry in sorted(outdated, key=lambda e: e["mod_name_guess"] or e["archive"]):
+                name = entry["mod_name_guess"] or entry["archive"]
+                origin = f"[{name}]({entry['nexus_url']})" if entry.get("nexus_url") else name
+                lines.append(
+                    f"| {origin} | {entry['local_version'] or '?'} | "
+                    f"{entry['remote_version']} | {entry['archive']} |"
+                )
+        else:
+            lines.append(
+                f"Toutes les archives Nexus connues localement ({len(report['up_to_date'])}) "
+                f"sont à jour par rapport à Nexus."
+            )
+        if report["failed"]:
+            lines.append(f"\n{len(report['failed'])} mod(s) non vérifiable(s) (erreur API, voir logs).")
+
+        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        log(f"{len(outdated)} mod(s) obsolète(s) -> {report_path}")
 
     @on(Button.Pressed, "#action-nexus-blacklist")
     def handle_nexus_blacklist(self) -> None:
