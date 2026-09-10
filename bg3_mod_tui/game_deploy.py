@@ -21,12 +21,11 @@ manuellement) — un rappel est donc journalisé plutôt qu'appliqué.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 
-from bg3_mod_tui.platform_utils import is_windows
+from bg3_mod_tui.platform_utils import is_windows, link_or_symlink
 
 LogFn = Callable[[str], None]
 
@@ -79,7 +78,7 @@ def _replace_with_hardlink_backup(target: Path, source: Path, backup: Path, *, l
             log(f"  original sauvegardé : '{target.name}' -> '{backup.name}'")
         else:
             target.unlink()
-    os.link(source, target)
+    link_or_symlink(source, target)
     log(f"  '{target.name}' remplacé par un hardlink vers notre copie.")
 
 
@@ -136,7 +135,7 @@ def _hardlink_replace(target: Path, source: Path, *, log: LogFn) -> None:
         return
     if target.exists():
         target.unlink()
-    os.link(source, target)
+    link_or_symlink(source, target)
     log(f"  '{target.name}' relié (hardlink) à notre copie gérée.")
 
 

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bg3_mod_tui.config import ModToolsConfig
-from bg3_mod_tui.platform_utils import can_create_links_without_admin, is_windows
+from bg3_mod_tui.platform_utils import can_create_links_without_admin, is_windows, link_or_symlink
 
 
 class LinkingError(RuntimeError):
@@ -72,7 +72,7 @@ def _replace_with_hardlink(original: Path, source: Path) -> None:
                 shutil.move(str(original), str(backup))
             else:
                 original.unlink()
-        os.link(source, original)
+        link_or_symlink(source, original)
     except OSError as exc:
         raise LinkingError(f"Échec de création du hardlink modsettings.lsx : {exc}") from exc
 

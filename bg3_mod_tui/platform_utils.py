@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import sys
 from pathlib import Path
@@ -186,6 +187,23 @@ def to_wine_path(path: Path) -> str:
     présent dans tout préfixe standard) — cette conversion n'a de sens que
     sous Linux, pas sous Windows où le chemin natif suffit."""
     return "Z:" + str(path.resolve()).replace("/", "\\")
+
+
+def link_or_symlink(source: Path, target: Path) -> None:
+    """Crée `target` comme hardlink vers `source` ; si les deux chemins ne
+    sont pas sur le même système de fichiers (`OSError EXDEV`, ex: dépôt
+    d'outils et installation du jeu sur des points de montage différents,
+    où le hardlink est physiquement impossible), retombe sur un lien
+    symbolique — les appelants comparent les fichiers via `Path.stat()`
+    (qui suit les liens), donc cette substitution reste transparente pour
+    leur logique d'idempotence."""
+    try:
+        os.link(source, target)
+    except OSError as exc:
+        if exc.errno == errno.EXDEV:
+            os.symlink(source, target)
+        else:
+            raise
 
 
 def default_env_appdata() -> str | None:
