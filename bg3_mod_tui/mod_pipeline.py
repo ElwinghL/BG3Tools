@@ -9,7 +9,9 @@ import hashlib
 import re
 import shutil
 import tempfile
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from bg3_mod_tui.archives import ArchiveError, extract_archive, is_supported_archive
@@ -55,6 +57,18 @@ SelectFilesFn = Callable[[int, str, list[tuple[int, str]]], list[int]]
 SelectNestedArchivesFn = Callable[[str, list[Path]], list[Path]]
 
 _INTERNAL_DIR_NAMES = {"_a_traiter", "_installees"}
+
+# mod.io ne documente aucune limite de téléchargements simultanés côté API
+# (contrairement à Nexus, voir `_NEXUS_MAX_DOWNLOAD_THREADS` dans
+# `download_mods_from_links_file`) — la parallélisation de
+# `download_subscribed_modio_mods` (sous-tâche 5a du TODO "Téléchargements
+# parallèles") n'a donc pas de plafond imposé de l'extérieur. On borne quand
+# même le pool à une valeur raisonnable : ouvrir autant de connexions HTTP
+# simultanées que de mods abonnés (potentiellement des dizaines) n'apporterait
+# plus grand-chose passé un certain nombre (goulot d'étranglement réseau/disque
+# bien avant celui-là) et gaspillerait threads/descripteurs de fichiers pour
+# rien.
+MODIO_MAX_DOWNLOAD_THREADS = 8
 
 
 def _unique_destination(dest_dir: Path, name: str) -> Path:
@@ -283,9 +297,19 @@ def download_subscribed_modio_mods(
     pas seulement des .pak (voir `extract_archives_to_mods`, qui lui ne
     duplique plus que le contenu .pak, pas l'archive).
 
+    mod.io ne pose aucune question à l'utilisateur pendant le téléchargement
+    (pas de wizard de sélection de variantes comme côté Nexus) : les
+    téléchargements sont donc lancés en parallèle sans coordination
+    particulière, jusqu'à `MODIO_MAX_DOWNLOAD_THREADS` à la fois (sous-tâche
+    5a du TODO "Téléchargements parallèles" — voir la constante pour le
+    détail du choix de cette borne). L'agrégation du rapport (`report`) est
+    protégée par un verrou (`report_lock`) : plusieurs threads de
+    téléchargement peuvent terminer en même temps et y ajouter une entrée.
+
     Retourne {"downloaded": [...], "skipped": [...], "failed": [(name, err)]}.
     """
     report: dict[str, list] = {"downloaded": [], "skipped": [], "failed": []}
+    report_lock = threading.Lock()
 
     try:
         mods = client.subscribed_mods()
@@ -301,6 +325,11 @@ def download_subscribed_modio_mods(
         dest_dir, *(d for d in (archives_installed_dir, archives_pending_dir) if d is not None)
     )
 
+    # Filtrage préalable (séquentiel, pas de réseau) : ne reste dans
+    # `to_fetch` que ce qu'il y a effectivement à télécharger — évite
+    # d'ouvrir un thread juste pour journaliser un "déjà présent" ou un
+    # "pas de fichier disponible".
+    to_fetch = []
     for mod in mods:
         if mod.mod_id in already_present_ids:
             log(fmt_row(mod.name, STATUS_IGNORE, detail="déjà présent"))
@@ -312,6 +341,9 @@ def download_subscribed_modio_mods(
             report["failed"].append((mod.name, "pas de fichier disponible"))
             continue
 
+        to_fetch.append(mod)
+
+    def _download_one(mod) -> None:
         # mod.io sert tous les téléchargements depuis une URL générique
         # (littéralement `.../download`, sans nom de fichier) : sans nom de
         # secours distinctif, tous les mods sans Content-Disposition
@@ -323,21 +355,36 @@ def download_subscribed_modio_mods(
             target_name = resolve_remote_filename(mod.download_url, fallback_stem=fallback_stem)
         except Exception as exc:
             log(fmt_row(mod.name, STATUS_ECHEC, detail=f"URL invalide : {exc}"))
-            report["failed"].append((mod.name, str(exc)))
-            continue
+            with report_lock:
+                report["failed"].append((mod.name, str(exc)))
+            return
 
         if (dest_dir / target_name).exists():
             log(fmt_row(mod.name, STATUS_IGNORE, detail="déjà présent"))
-            report["skipped"].append(mod.name)
-            continue
+            with report_lock:
+                report["skipped"].append(mod.name)
+            return
 
         try:
             path = download_file(mod.download_url, dest_dir, fallback_stem=fallback_stem)
             log(fmt_row(mod.name, STATUS_SUCCES, detail=path.name))
-            report["downloaded"].append(mod.name)
+            with report_lock:
+                report["downloaded"].append(mod.name)
         except Exception as exc:
             log(fmt_row(mod.name, STATUS_ECHEC, detail=str(exc)))
-            report["failed"].append((mod.name, str(exc)))
+            with report_lock:
+                report["failed"].append((mod.name, str(exc)))
+
+    if to_fetch:
+        max_workers = min(len(to_fetch), MODIO_MAX_DOWNLOAD_THREADS)
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="modio-dl") as executor:
+            # `list(...)` force la consommation de l'itérateur paresseux
+            # renvoyé par `map` : sans ça, les tâches sont bien soumises au
+            # pool mais rien n'attend leur fin avant de continuer (et une
+            # exception éventuellement échappée de `_download_one` — qui ne
+            # devrait normalement jamais en laisser fuiter une, tout y est
+            # attrapé — ne serait jamais levée ici).
+            list(executor.map(_download_one, to_fetch))
 
     return report
 
