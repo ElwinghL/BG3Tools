@@ -107,13 +107,15 @@ def download_mods_from_links_file(
 
     report: dict[str, list] = {"downloaded": [], "skipped": [], "failed": []}
 
-    for mod_id in mod_ids:
+    total = len(mod_ids)
+    for index, mod_id in enumerate(mod_ids, start=1):
+        progress = f"[{index}/{total}]"
         try:
             info = client.mod_info(mod_id)
-            label = f"{mod_id} {info.name}"
+            label = f"{progress} {mod_id} {info.name}"
             version = info.version
         except NexusAPIError:
-            label = str(mod_id)
+            label = f"{progress} {mod_id}"
             info = None
             version = ""
 
