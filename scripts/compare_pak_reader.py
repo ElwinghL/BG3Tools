@@ -34,6 +34,7 @@ import shutil
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,6 +59,7 @@ class PakRecord:
     entries: dict[str, dict[str, int]] = field(default_factory=dict)  # name -> {size, compression}
     index_or_extract_seconds: float = 0.0
     content_hashes: dict[str, str] = field(default_factory=dict)
+    content_errors: dict[str, str] = field(default_factory=dict)  # nom d'entrée -> erreur (n'interrompt pas le run)
     content_seconds: float = 0.0
 
 
@@ -95,22 +97,48 @@ def _pick_sample_names(entries: dict[str, dict[str, int]], cap: int) -> list[str
     return sample
 
 
+def _write_report(out_path: Path, tool: str, sample_cap: int, records: dict[str, PakRecord]) -> None:
+    """Écrit (ou réécrit) le rapport JSON à partir de `records` tel quel à
+    l'instant de l'appel — appelée après chaque `.pak` traité (pas
+    seulement une fois à la fin) pour qu'une interruption ou une erreur
+    inattendue au milieu d'un lot laisse un rapport partiel exploitable au
+    lieu de rien du tout (même principe que `_flush_orphans_progress`
+    ailleurs dans le projet)."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, Any] = {
+        "tool": tool,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "sample_cap": sample_cap,
+        "paks": {name: asdict(record) for name, record in records.items()},
+    }
+    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 # --------------------------------------------------------------------------
 # Voie Python native (bg3_mod_tui.pak_reader)
 # --------------------------------------------------------------------------
 
-def _run_python(pak_paths: list[Path], sample_cap: int) -> dict[str, PakRecord]:
+def _run_python(
+    pak_paths: list[Path],
+    sample_cap: int,
+    *,
+    records: dict[str, PakRecord] | None = None,
+    on_progress: Callable[[], None] | None = None,
+) -> dict[str, PakRecord]:
     from bg3_mod_tui.pak_reader import PakArchive, PakReaderError, parse_meta_lsx_bytes
 
-    records: dict[str, PakRecord] = {}
+    if records is None:
+        records = {}
     for pak_path in pak_paths:
         record = PakRecord(file=pak_path.name)
+        records[pak_path.name] = record
         start = time.monotonic()
         try:
             archive = PakArchive.open(pak_path)
         except PakReaderError as exc:
             record.error = f"{type(exc).__name__}: {exc}"
-            records[pak_path.name] = record
+            if on_progress is not None:
+                on_progress()
             continue
         record.index_or_extract_seconds = time.monotonic() - start
         record.entries = {
@@ -128,10 +156,14 @@ def _run_python(pak_paths: list[Path], sample_cap: int) -> dict[str, PakRecord]:
             entry = archive.find(name)
             if entry is None:
                 continue
-            record.content_hashes[name] = _sha256(archive.read(entry))
+            try:
+                record.content_hashes[name] = _sha256(archive.read(entry))
+            except Exception as exc:  # noqa: BLE001 - une entrée en erreur ne doit pas interrompre le run
+                record.content_errors[name] = f"{type(exc).__name__}: {exc}"
         record.content_seconds = time.monotonic() - start
         archive.close()
-        records[pak_path.name] = record
+        if on_progress is not None:
+            on_progress()
     return records
 
 
@@ -139,7 +171,13 @@ def _run_python(pak_paths: list[Path], sample_cap: int) -> dict[str, PakRecord]:
 # Voie Rust native (pak_reader_rs)
 # --------------------------------------------------------------------------
 
-def _run_rust(pak_paths: list[Path], sample_cap: int) -> dict[str, PakRecord]:
+def _run_rust(
+    pak_paths: list[Path],
+    sample_cap: int,
+    *,
+    records: dict[str, PakRecord] | None = None,
+    on_progress: Callable[[], None] | None = None,
+) -> dict[str, PakRecord]:
     try:
         import pak_reader_rs as r
     except ImportError as exc:
@@ -148,15 +186,18 @@ def _run_rust(pak_paths: list[Path], sample_cap: int) -> dict[str, PakRecord]:
             "  uv run maturin develop --manifest-path rust/pak_reader_rs/Cargo.toml"
         ) from exc
 
-    records: dict[str, PakRecord] = {}
+    if records is None:
+        records = {}
     for pak_path in pak_paths:
         record = PakRecord(file=pak_path.name)
+        records[pak_path.name] = record
         start = time.monotonic()
         try:
             archive = r.PakArchive.open(str(pak_path))
         except r.PakReaderError as exc:
             record.error = f"{type(exc).__name__}: {exc}"
-            records[pak_path.name] = record
+            if on_progress is not None:
+                on_progress()
             continue
         record.index_or_extract_seconds = time.monotonic() - start
         record.entries = {
@@ -174,9 +215,13 @@ def _run_rust(pak_paths: list[Path], sample_cap: int) -> dict[str, PakRecord]:
             entry = archive.find(name)
             if entry is None:
                 continue
-            record.content_hashes[name] = _sha256(bytes(archive.read(entry)))
+            try:
+                record.content_hashes[name] = _sha256(bytes(archive.read(entry)))
+            except Exception as exc:  # noqa: BLE001 - une entrée en erreur ne doit pas interrompre le run
+                record.content_errors[name] = f"{type(exc).__name__}: {exc}"
         record.content_seconds = time.monotonic() - start
-        records[pak_path.name] = record
+        if on_progress is not None:
+            on_progress()
     return records
 
 
@@ -185,15 +230,23 @@ def _run_rust(pak_paths: list[Path], sample_cap: int) -> dict[str, PakRecord]:
 # --------------------------------------------------------------------------
 
 def _run_divine_tool(
-    pak_paths: list[Path], sample_cap: int, *, divine_exe: Path, reference_path: Path
+    pak_paths: list[Path],
+    sample_cap: int,
+    *,
+    divine_exe: Path,
+    reference_path: Path,
+    records: dict[str, PakRecord] | None = None,
+    on_progress: Callable[[], None] | None = None,
 ) -> dict[str, PakRecord]:
     from bg3_mod_tui.pak_reader import extract_uuid_from_lsf_bytes
 
-    records: dict[str, PakRecord] = {}
+    if records is None:
+        records = {}
     with tempfile.TemporaryDirectory(prefix="bg3_compare_divine_") as tmp:
         tmp_root = Path(tmp)
         for pak_path in pak_paths:
             record = PakRecord(file=pak_path.name)
+            records[pak_path.name] = record
             work_dir = tmp_root / pak_path.stem
             work_dir.mkdir(parents=True, exist_ok=True)
             start = time.monotonic()
@@ -212,7 +265,8 @@ def _run_divine_tool(
             except PakMetadataError as exc:
                 record.error = str(exc)
                 shutil.rmtree(work_dir, ignore_errors=True)
-                records[pak_path.name] = record
+                if on_progress is not None:
+                    on_progress()
                 continue
             record.index_or_extract_seconds = time.monotonic() - start
 
@@ -237,11 +291,15 @@ def _run_divine_tool(
 
             start = time.monotonic()
             for name in _pick_sample_names(record.entries, sample_cap):
-                record.content_hashes[name] = _sha256(disk_files[name].read_bytes())
+                try:
+                    record.content_hashes[name] = _sha256(disk_files[name].read_bytes())
+                except Exception as exc:  # noqa: BLE001 - une entrée en erreur ne doit pas interrompre le run
+                    record.content_errors[name] = f"{type(exc).__name__}: {exc}"
             record.content_seconds = time.monotonic() - start
 
             shutil.rmtree(work_dir, ignore_errors=True)
-            records[pak_path.name] = record
+            if on_progress is not None:
+                on_progress()
     return records
 
 
@@ -267,10 +325,14 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     print(f"[{args.tool}] {len(pak_paths)} .pak, échantillon de contenu = {args.sample}")
 
+    out_path = args.out or (REPORTS_DIR / f"{args.tool}_report.json")
+    records: dict[str, PakRecord] = {}
+    flush = lambda: _write_report(out_path, args.tool, args.sample, records)  # noqa: E731
+
     if args.tool == "python":
-        records = _run_python(pak_paths, args.sample)
+        _run_python(pak_paths, args.sample, records=records, on_progress=flush)
     elif args.tool == "rust":
-        records = _run_rust(pak_paths, args.sample)
+        _run_rust(pak_paths, args.sample, records=records, on_progress=flush)
     else:
         divine_exe = args.divine_exe or find_divine_exe(config.tools_dir)
         if divine_exe is None or not divine_exe.is_file():
@@ -280,29 +342,28 @@ def cmd_run(args: argparse.Namespace) -> int:
         if not reference_path.is_dir():
             print(f"Chemin de référence introuvable : {reference_path} (précise --reference-path).")
             return 2
-        records = _run_divine_tool(
-            pak_paths, args.sample, divine_exe=divine_exe, reference_path=reference_path
+        _run_divine_tool(
+            pak_paths,
+            args.sample,
+            divine_exe=divine_exe,
+            reference_path=reference_path,
+            records=records,
+            on_progress=flush,
         )
 
     errors = sum(1 for r in records.values() if r.error)
+    content_errors = sum(len(r.content_errors) for r in records.values())
     total_index = sum(r.index_or_extract_seconds for r in records.values())
     total_content = sum(r.content_seconds for r in records.values())
     total_hashed = sum(len(r.content_hashes) for r in records.values())
     print(
-        f"[{args.tool}] terminé : {len(records)} .pak ({errors} en erreur) — "
+        f"[{args.tool}] terminé : {len(records)} .pak ({errors} en erreur, "
+        f"{content_errors} entrées en erreur) — "
         f"index/extraction {total_index:.2f}s, contenu {total_content:.2f}s "
         f"({total_hashed} fichiers hashés)"
     )
 
-    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = args.out or (REPORTS_DIR / f"{args.tool}_report.json")
-    payload: dict[str, Any] = {
-        "tool": args.tool,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "sample_cap": args.sample,
-        "paks": {name: asdict(record) for name, record in records.items()},
-    }
-    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_report(out_path, args.tool, args.sample, records)
     print(f"[{args.tool}] rapport écrit : {out_path}")
     return 0
 
