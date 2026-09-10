@@ -72,15 +72,15 @@ Une clé API Nexus Mods (`NEXUS_API_KEY`) et/ou mod.io (`MODIO_API_KEY`,
 
 ## Développement
 
-Installation des dépendances via [Poetry](https://python-poetry.org/) :
+Installation des dépendances via [uv](https://docs.astral.sh/uv/) :
 
 ```bash
-poetry install
-poetry run bg3-mod-tui
+uv sync
+uv run bg3-mod-tui
 ```
 
 `pip install -e .` (utilisé par `run.sh`/`run.bat`) fonctionne aussi
-directement, `pyproject.toml` étant lu par les deux (backend `poetry-core`,
+directement, `pyproject.toml` étant lu par les deux (backend `hatchling`,
 métadonnées au format standard PEP 621).
 
 ### Créer une release
