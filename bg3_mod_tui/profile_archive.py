@@ -29,6 +29,7 @@ from pathlib import Path
 
 import zstandard
 
+from bg3_mod_tui import __version__ as TOOL_VERSION
 from bg3_mod_tui.native_mods import load_manifest as load_native_mods_manifest
 from bg3_mod_tui.profiles import (
     MANIFEST_FILENAME,
@@ -53,6 +54,12 @@ NATIVE_MODS_ARCNAME = "NativeMods"
 LOOSE_MODS_ARCNAME = "DataMods"
 NATIVE_MODS_MANIFEST_ARCNAME = "native_mods_manifest.json"
 INVENTORY_ARCNAME = "mods_inventory.json"
+# Fichier dédié plutôt qu'un champ ajouté à manifest.json : garde ce
+# dernier inchangé (format déjà partagé avec les profils sauvegardés
+# localement, voir `profiles.py`) et permet de vérifier la version avant
+# même de parser le reste de l'archive. Absent d'une archive créée avant
+# l'ajout de ce garde-fou -> traité comme version "inconnue" à l'import.
+TOOL_VERSION_ARCNAME = "tool_version.json"
 
 
 class ProfileArchiveError(RuntimeError):
@@ -108,7 +115,9 @@ def export_profile_archive(
     profil — ces deux fichiers sont de toute façon négligeables en taille
     face aux .pak/DLL déjà inclus. Un fichier attendu mais absent est
     journalisé et ignoré (pas d'échec global) — l'archive reste utile même
-    incomplète."""
+    incomplète. Embarque aussi la version de l'outil (`tool_version.json`)
+    pour que `import_profile_archive` puisse avertir en cas d'écart avec
+    l'outil qui importe."""
     try:
         profile_dir = find_profile_dir(profiles_dir, name)
     except ProfileError:
@@ -125,6 +134,7 @@ def export_profile_archive(
         with tarfile.open(fileobj=zfh, mode="w|") as tar:
             tar.add(profile_dir / MODSETTINGS_FILENAME, arcname=MODSETTINGS_FILENAME)
             tar.add(manifest_path, arcname=MANIFEST_FILENAME)
+            _add_json_file(tar, TOOL_VERSION_ARCNAME, {"tool_version": TOOL_VERSION})
 
             for entries, source_dir, arc_root in (
                 (manifest.get("paks", []), mods_dir, MODS_ARCNAME),
@@ -167,6 +177,34 @@ def export_profile_archive(
     return dest_path
 
 
+def _warn_on_tool_version_mismatch(tmp_path: Path, log: LogFn) -> None:
+    """Compare la version de l'outil embarquée dans l'archive (voir
+    `export_profile_archive`) à `bg3_mod_tui.__version__` de l'outil qui
+    importe. Avertit (log seul, pas d'exception) si absente — archive créée
+    avant l'ajout de ce garde-fou — ou différente : le format d'archive et
+    de manifeste évoluant potentiellement d'une version à l'autre, mieux
+    vaut prévenir que d'échouer silencieusement sur un import partiel."""
+    version_path = tmp_path / TOOL_VERSION_ARCNAME
+    archive_version: str | None = None
+    if version_path.is_file():
+        try:
+            archive_version = json.loads(version_path.read_text(encoding="utf-8")).get("tool_version")
+        except (OSError, json.JSONDecodeError):
+            archive_version = None
+
+    if archive_version is None:
+        log(
+            "[#D8C091]Version de l'outil ayant créé l'archive inconnue (probablement générée "
+            "par une version antérieure à ce garde-fou) : import poursuivi avec prudence.[/#D8C091]"
+        )
+    elif archive_version != TOOL_VERSION:
+        log(
+            f"[#D8C091]Archive créée avec bg3_mod_tui {archive_version}, version actuelle "
+            f"{TOOL_VERSION} : import poursuivi mais des incompatibilités de format sont "
+            "possibles.[/#D8C091]"
+        )
+
+
 def import_profile_archive(
     archive_path: Path,
     *,
@@ -188,7 +226,19 @@ def import_profile_archive(
     personnalisée localement prime). Ne l'active pas — l'appelant doit
     ensuite appeler `restore_profile` pour ça (même flux que pour un
     profil sauvegardé localement). Retourne le nom du profil importé. Lève
-    `ProfileArchiveError` si l'archive est invalide."""
+    `ProfileArchiveError` si l'archive est invalide.
+
+    Deux garde-fous, tous deux en mode avertissement plutôt que blocage —
+    cohérent avec le reste du fichier (un fichier attendu mais absent à
+    l'export est déjà simplement journalisé, pas fatal) :
+    - Version de l'outil (`tool_version.json`, voir `export_profile_archive`) :
+      comparée à `bg3_mod_tui.__version__` de l'outil qui importe. Absente
+      (archive créée avant ce garde-fou) ou différente -> avertissement
+      explicite, import poursuivi.
+    - Complétude : tous les fichiers listés dans le manifeste (`.pak`, DLL,
+      fichiers loose) sont vérifiés présents dans l'archive extraite avant
+      la copie ; les absents sont résumés en un seul avertissement, puis
+      ignorés (import best-effort avec ce qui est disponible)."""
     if not archive_path.is_file():
         raise ProfileArchiveError(f"Archive introuvable : {archive_path}")
 
@@ -211,28 +261,48 @@ def import_profile_archive(
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         name = manifest.get("name") or archive_path.stem
 
+        _warn_on_tool_version_mismatch(tmp_path, log)
+
+        expected_paks = sorted(manifest_file_names(manifest.get("paks", [])))
+        expected_native_mods = sorted(manifest_file_names(manifest.get("native_mods", [])))
+        expected_loose_files = sorted(manifest.get("loose_files", []))
+        missing = [
+            file_name for file_name in expected_paks
+            if not (tmp_path / MODS_ARCNAME / file_name).is_file()
+        ] + [
+            file_name for file_name in expected_native_mods
+            if not (tmp_path / NATIVE_MODS_ARCNAME / file_name).is_file()
+        ] + [
+            relative for relative in expected_loose_files
+            if not (tmp_path / LOOSE_MODS_ARCNAME / relative).is_file()
+        ]
+        if missing:
+            log(
+                f"[#D8C091]Archive incomplète : {len(missing)} fichier(s) du manifeste absent(s) "
+                f"de l'archive, ignoré(s) (import poursuivi avec les fichiers présents) : "
+                f"{', '.join(missing)}[/#D8C091]"
+            )
+
         mods_dir.mkdir(parents=True, exist_ok=True)
         native_mods_dir.mkdir(parents=True, exist_ok=True)
 
         copied = 0
-        for entries, source_root, target_dir in (
-            (manifest.get("paks", []), tmp_path / MODS_ARCNAME, mods_dir),
-            (manifest.get("native_mods", []), tmp_path / NATIVE_MODS_ARCNAME, native_mods_dir),
+        for file_names, source_root, target_dir in (
+            (expected_paks, tmp_path / MODS_ARCNAME, mods_dir),
+            (expected_native_mods, tmp_path / NATIVE_MODS_ARCNAME, native_mods_dir),
         ):
-            for file_name in sorted(manifest_file_names(entries)):
+            for file_name in file_names:
                 source = source_root / file_name
                 if not source.is_file():
-                    log(f"[#D8C091]Absent de l'archive, ignoré : {file_name}[/#D8C091]")
-                    continue
+                    continue  # déjà signalé ci-dessus (résumé de complétude)
                 shutil.copy2(source, target_dir / file_name)
                 copied += 1
 
         loose_source_root = tmp_path / LOOSE_MODS_ARCNAME
-        for relative in sorted(manifest.get("loose_files", [])):
+        for relative in expected_loose_files:
             source = loose_source_root / relative
             if not source.is_file():
-                log(f"[#D8C091]Absent de l'archive, ignoré : {relative}[/#D8C091]")
-                continue
+                continue  # déjà signalé ci-dessus (résumé de complétude)
             target = loose_mods_dir / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
