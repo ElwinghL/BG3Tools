@@ -181,6 +181,115 @@ def test_extract_archives_to_mods_archive_corrompue_est_signalee_en_echec(tmp_pa
     assert (dirs["pending_dir"] / "Corrompu.zip").is_file()
 
 
+def _make_zip_bytes(*entries: tuple[str, bytes]) -> bytes:
+    import io
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for name, content in entries:
+            zf.writestr(name, content)
+    return buf.getvalue()
+
+
+def test_extract_archives_to_mods_sans_zip_imbrique_comportement_inchange(tmp_path):
+    # Une archive "normale" (pas de ZIP/RAR/7z imbriqué à l'intérieur) est
+    # traitée exactement comme avant — aucune mention de ZIP imbriqué dans
+    # les logs, et `select_nested_archives` n'est jamais sollicité.
+    dirs = _make_pipeline_dirs(tmp_path)
+    _make_zip(dirs["archives_dir"] / "MonMod.zip", ("MonMod.pak", b"donnees pak"))
+    logs: list[str] = []
+
+    def select_nested_archives(archive_name, candidates):
+        raise AssertionError("ne doit pas être appelé sans ZIP imbriqué")
+
+    report = extract_archives_to_mods(
+        dirs["archives_dir"],
+        dirs["mods_dir"],
+        dirs["pending_dir"],
+        dirs["installed_dir"],
+        select_nested_archives=select_nested_archives,
+        log=logs.append,
+    )
+
+    assert report["installed"] == ["MonMod.zip"]
+    assert (dirs["mods_dir"] / "MonMod.pak").is_file()
+    assert not any("imbriqué" in line for line in logs)
+
+
+def test_extract_archives_to_mods_zip_imbrique_choisi_est_extrait(tmp_path):
+    # L'archive principale ne contient pas de .pak directement, mais un
+    # ZIP imbriqué ("Interne.zip") qui, lui, en contient un. Quand
+    # `select_nested_archives` choisit de le garder, il est extrait à son
+    # tour et son .pak rejoint mods_dir.
+    dirs = _make_pipeline_dirs(tmp_path)
+    inner_bytes = _make_zip_bytes(("Interne.pak", b"contenu interne"))
+    _make_zip(dirs["archives_dir"] / "Conteneur.zip", ("Interne.zip", inner_bytes))
+    logs: list[str] = []
+
+    def select_nested_archives(archive_name, candidates):
+        assert archive_name == "Conteneur.zip"
+        assert [p.name for p in candidates] == ["Interne.zip"]
+        return candidates  # tout garder
+
+    report = extract_archives_to_mods(
+        dirs["archives_dir"],
+        dirs["mods_dir"],
+        dirs["pending_dir"],
+        dirs["installed_dir"],
+        select_nested_archives=select_nested_archives,
+        log=logs.append,
+    )
+
+    assert report["installed"] == ["Conteneur.zip"]
+    assert (dirs["mods_dir"] / "Interne.pak").read_bytes() == b"contenu interne"
+    assert any("retenu" in line for line in logs)
+
+
+def test_extract_archives_to_mods_zip_imbrique_refuse_est_ignore(tmp_path):
+    # Même archive que ci-dessus, mais `select_nested_archives` refuse le
+    # ZIP imbriqué : son contenu (.pak compris) n'est jamais extrait, et
+    # comme rien d'autre n'est trouvé dans l'archive principale, celle-ci
+    # part en examen manuel (`pending_dir`).
+    dirs = _make_pipeline_dirs(tmp_path)
+    inner_bytes = _make_zip_bytes(("Interne.pak", b"contenu interne"))
+    _make_zip(dirs["archives_dir"] / "Conteneur.zip", ("Interne.zip", inner_bytes))
+    logs: list[str] = []
+
+    def select_nested_archives(archive_name, candidates):
+        return []  # rien garder
+
+    report = extract_archives_to_mods(
+        dirs["archives_dir"],
+        dirs["mods_dir"],
+        dirs["pending_dir"],
+        dirs["installed_dir"],
+        select_nested_archives=select_nested_archives,
+        log=logs.append,
+    )
+
+    assert report["pending"] == ["Conteneur.zip"]
+    assert not (dirs["mods_dir"] / "Interne.pak").exists()
+    assert any("ignoré" in line for line in logs)
+
+
+def test_extract_archives_to_mods_zip_imbrique_sans_callback_garde_tout_par_defaut(tmp_path):
+    # Sans `select_nested_archives` (contexte non interactif), le
+    # comportement par défaut documenté est de tout garder.
+    dirs = _make_pipeline_dirs(tmp_path)
+    inner_bytes = _make_zip_bytes(("Interne.pak", b"contenu interne"))
+    _make_zip(dirs["archives_dir"] / "Conteneur.zip", ("Interne.zip", inner_bytes))
+
+    report = extract_archives_to_mods(
+        dirs["archives_dir"],
+        dirs["mods_dir"],
+        dirs["pending_dir"],
+        dirs["installed_dir"],
+    )
+
+    assert report["installed"] == ["Conteneur.zip"]
+    assert (dirs["mods_dir"] / "Interne.pak").read_bytes() == b"contenu interne"
+
+
 class _FakeModIOClient:
     def __init__(self, mods: list[ModIOMod]) -> None:
         self._mods = mods

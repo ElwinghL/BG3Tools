@@ -45,6 +45,14 @@ LogFn = Callable[[str], None]
 # entier est alors blacklisté).
 SelectFilesFn = Callable[[int, str, list[tuple[int, str]]], list[int]]
 
+# Reçoit (nom de l'archive parente, [chemin des ZIP/RAR/7z imbriqués trouvés
+# à l'intérieur, ...]) quand une archive extraite contient elle-même
+# d'autres archives au lieu de .pak directement — doit retourner les
+# chemins à garder (et donc extraire à leur tour) parmi ceux reçus. Une
+# liste vide est un choix valide (aucune archive imbriquée n'est gardée).
+# Voir `extract_archives_to_mods`.
+SelectNestedArchivesFn = Callable[[str, list[Path]], list[Path]]
+
 _INTERNAL_DIR_NAMES = {"_a_traiter", "_installees"}
 
 
@@ -479,11 +487,35 @@ def extract_archives_to_mods(
     native_mods_manifest_path: Path | None = None,
     native_mods_managed_dir: Path | None = None,
     managed_dir: Path | None = None,
+    select_nested_archives: SelectNestedArchivesFn | None = None,
     log: LogFn = lambda _msg: None,
 ) -> dict[str, list]:
     """Extrait chaque archive de `archives_dir` : les .pak trouvés sont
     copiés (à plat) dans `mods_dir`, puis l'archive traitée est déplacée
     dans `installed_dir`.
+
+    Certains mods sont distribués sous forme d'une archive contenant elle-
+    même d'autres archives (.zip/.rar/.7z, ex: plusieurs variantes d'un
+    mod, ou un installeur qui embarque plusieurs add-ons) plutôt que des
+    .pak directement. Quand `extract_archive` révèle de tels ZIP imbriqués
+    dans le dossier temporaire d'extraction, `select_nested_archives` est
+    appelé (avec le nom de l'archive parente et la liste de leurs chemins)
+    pour demander lesquels garder — réutilise le même principe de choix
+    que `select_files` dans `download_mods_from_links_file`. Ceux retenus
+    sont à leur tour extraits (dans un sous-dossier dédié) et leur contenu
+    rejoint la suite du traitement normal (recherche de .pak, puis de
+    dossiers Data/ connus, ci-dessous) ; les autres sont simplement
+    ignorés. Une seule profondeur d'imbrication est gérée (un ZIP imbriqué
+    dans un ZIP imbriqué n'est pas redétecté) : ce cas n'a pas été observé
+    en pratique et gérer une récursion illimitée ajouterait un risque
+    d'archive-bombe pour un bénéfice hypothétique.
+
+    Sans `select_nested_archives` (contexte non interactif), tous les ZIP
+    imbriqués trouvés sont conservés et extraits — comme
+    `download_mods_from_links_file` télécharge toutes les variantes
+    candidates sans `select_files` : par défaut on préfère ne rien perdre
+    silencieusement plutôt qu'écarter un contenu potentiellement utile
+    sans que personne n'ait pu se prononcer.
 
     Si aucune .pak n'est trouvée mais qu'un sous-dossier connu de Data/
     (Generated, Public, ...) est présent — mods "loose files" — sa structure
@@ -579,6 +611,30 @@ def extract_archives_to_mods(
                 shutil.move(str(archive), str(dest))
                 report["failed"].append((archive.name, str(exc)))
                 continue
+
+            nested_archives = [
+                p for p in tmp_path.rglob("*") if p.is_file() and is_supported_archive(p)
+            ]
+            if nested_archives:
+                if select_nested_archives is not None:
+                    chosen = [p for p in select_nested_archives(archive.name, nested_archives) if p in nested_archives]
+                else:
+                    chosen = list(nested_archives)
+                rejected = [p for p in nested_archives if p not in chosen]
+
+                if rejected:
+                    names = ", ".join(p.name for p in rejected)
+                    log(fmt_row(archive.name, STATUS_IGNORE, detail=f"ZIP imbriqué(s) ignoré(s) : {names}"))
+
+                if chosen:
+                    names = ", ".join(p.name for p in chosen)
+                    log(fmt_row(archive.name, STATUS_SUCCES, detail=f"ZIP imbriqué(s) retenu(s) : {names}"))
+                    for nested in chosen:
+                        nested_dest = nested.parent / f"_imbrique_{nested.stem}"
+                        try:
+                            extract_archive(nested, nested_dest)
+                        except ArchiveError as exc:
+                            log(fmt_row(nested.name, STATUS_ECHEC, detail=f"ZIP imbriqué non extrait : {exc}"))
 
             paks = list(tmp_path.rglob("*.pak"))
             if paks:

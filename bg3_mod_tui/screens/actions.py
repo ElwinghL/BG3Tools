@@ -321,6 +321,71 @@ class NexusFileSelectionScreen(ModalScreen[list[int]]):
         self.query_one("#file-selection-list", SelectionList).focus()
 
 
+class NestedArchiveSelectionScreen(ModalScreen[list[Path]]):
+    """Demande, quand une archive de mod contient elle-même d'autres
+    archives (.zip/.rar/.7z) imbriquées plutôt que des .pak directement
+    (ex: plusieurs variantes empaquetées ensemble), lesquelles garder —
+    même wizard que `NexusFileSelectionScreen` (flèches pour naviguer,
+    espace pour cocher/décocher, tous cochés par défaut, Entrée ou bouton
+    pour valider), sans les éléments propres à Nexus (mod_id, lien
+    "Ouvrir sur Nexus") qui n'ont pas de sens pour un ZIP imbriqué
+    quelconque. Les archives décochées sont ignorées ; les autres sont
+    extraites à leur tour par `mod_pipeline.extract_archives_to_mods`."""
+
+    BINDINGS = [Binding("enter", "confirm", "Valider", priority=True)]
+
+    CSS = _SELECTION_LIST_CSS + """
+    NestedArchiveSelectionScreen {
+        align: center middle;
+    }
+    #nested-selection-box {
+        width: 80%;
+        max-width: 100;
+        border: round $accent;
+        padding: 1 2;
+        background: $surface;
+    }
+    #nested-selection-list {
+        height: auto;
+        max-height: 20;
+        margin-top: 1;
+    }
+    #nested-selection-buttons {
+        height: auto;
+        margin-top: 1;
+    }
+    """
+
+    def __init__(self, archive_name: str, candidates: list[Path]) -> None:
+        super().__init__()
+        self._archive_name = archive_name
+        self._candidates = candidates
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="nested-selection-box"):
+            yield Label(f"ZIP imbriqué(s) trouvé(s) dans « {self._archive_name} »", classes="title")
+            yield Label(
+                "Espace : cocher/décocher ceux à garder et extraire. Entrée : "
+                "valider — les ZIP décochés seront ignorés."
+            )
+            yield SelectionList[Path](
+                *[(path.name, path, True) for path in self._candidates],
+                id="nested-selection-list",
+            )
+            with Horizontal(id="nested-selection-buttons"):
+                yield Button("Valider", id="nested-selection-confirm", variant="primary")
+
+    def on_mount(self) -> None:
+        self.query_one("#nested-selection-list", SelectionList).focus()
+
+    def action_confirm(self) -> None:
+        self.dismiss(self.query_one("#nested-selection-list", SelectionList).selected)
+
+    @on(Button.Pressed, "#nested-selection-confirm")
+    def handle_confirm(self) -> None:
+        self.action_confirm()
+
+
 class NexusBlacklistScreen(ModalScreen[list[tuple[int, int]] | None]):
     """Liste les fichiers Nexus écartés (blacklist) du profil actif — voir
     `NexusFileSelectionScreen` et `mod_pipeline.download_mods_from_links_file`
@@ -876,6 +941,23 @@ class ActionsScreen(Screen):
         done.wait()
         return result
 
+    def _select_nested_archives(self, archive_name: str, candidates: list[Path]) -> list[Path]:
+        """Appelé depuis le thread d'extraction (voir `run_extract`) :
+        bascule sur le thread principal pour afficher
+        `NestedArchiveSelectionScreen` et bloque jusqu'à validation."""
+        done = threading.Event()
+        result: list[Path] = []
+
+        def show_screen() -> None:
+            def on_result(chosen: list[Path]) -> None:
+                result.extend(chosen)
+                done.set()
+            self.app.push_screen(NestedArchiveSelectionScreen(archive_name, candidates), on_result)
+
+        self.app.call_from_thread(show_screen)
+        done.wait()
+        return result
+
     def _cleanup_duplicate_archives(self, log) -> None:
         """Nettoie les doublons d'archives déjà présents dans
         `_installees`/`_a_traiter` (voir
@@ -1004,6 +1086,7 @@ class ActionsScreen(Screen):
             native_mods_manifest_path=self._config.native_mods_manifest_file,
             native_mods_managed_dir=self._config.native_mods_managed_dir,
             managed_dir=self._config.managed_dir,
+            select_nested_archives=self._select_nested_archives,
             log=log,
         )
         log(
