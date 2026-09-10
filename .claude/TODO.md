@@ -25,10 +25,10 @@
 
 ### 5. Téléchargements parallèles
 
-- **5a.** Mod.io : téléchargement parallèle sans restriction (pas de rate-limit)
-- **5b.** Nexus : max ~6 threads de DL concurrents
-- **5c.** Console dédiée avec barres de progression par thread, sous la console principale
-- **5d.** Préparation des wizards suivants pendant qu'un DL tourne (pipeline)
+- ~~**5a.** Mod.io : téléchargement parallèle sans restriction (pas de rate-limit)~~ — fait : `ThreadPoolExecutor` (`MODIO_MAX_DOWNLOAD_THREADS=8`, borne raisonnable documentée plutôt qu'une vraie limite API)
+- ~~**5b.** Nexus : max ~6 threads de DL concurrents~~ — fait : `_NEXUS_MAX_DOWNLOAD_THREADS=6` ; `select_files` (wizard de sélection de variantes) reste strictement séquentiel (un seul écran modal à la fois)
+- ~~**5c.** Console dédiée avec barres de progression par thread, sous la console principale~~ — fait : nouvel onglet "Téléchargements" (`DownloadProgressConsole`), une ligne par thread actif avec barre + taille téléchargée/totale
+- ~~**5d.** Préparation des wizards suivants pendant qu'un DL tourne (pipeline)~~ — fait : côté Nexus, chaque job est soumis au pool dès qu'il est prêt (`executor.submit`) au lieu d'attendre la fin de la préparation de tous les mods — la boucle de préparation (info + wizard) avance pendant que des téléchargements tournent déjà
 
 ### 6. Utilitaire standalone de validation `.pak`
 
