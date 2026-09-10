@@ -50,6 +50,13 @@ from bg3_mod_tui.native_mods import (
     load_manifest as load_native_mods_manifest,
 )
 from bg3_mod_tui.pak_metadata import archive_pak_identities, build_deployed_uuid_index
+from bg3_mod_tui.pak_origin import (
+    find_orphaned_paks,
+    load_manual_origins,
+    match_orphan_by_name,
+    match_orphan_by_uuid,
+    save_manual_origin,
+)
 from bg3_mod_tui.platform_utils import find_proton_prefix, has_graphical_display, is_windows
 from bg3_mod_tui.profile_archive import (
     ARCHIVE_SUFFIX,
@@ -660,6 +667,67 @@ class ImportArchivePromptScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class ManualPakOriginPromptScreen(ModalScreen[str | None]):
+    """Étape 3 (dernier recours) de `pak_origin` : demande à l'utilisateur
+    un lien Nexus/mod.io pour un .pak isolé qu'aucun matching automatique
+    (nom, puis UUID) n'a permis de relier à une archive connue — voir
+    `ActionsScreen._prompt_manual_pak_origins`."""
+
+    CSS = """
+    ManualPakOriginPromptScreen {
+        align: center middle;
+    }
+    #manual-origin-box {
+        width: 80;
+        border: round $accent;
+        padding: 1 2;
+        background: $surface;
+    }
+    #manual-origin-buttons {
+        height: auto;
+        margin-top: 1;
+    }
+    #manual-origin-buttons Button {
+        margin-right: 1;
+    }
+    """
+
+    def __init__(self, pak_file: str) -> None:
+        super().__init__()
+        self._pak_file = pak_file
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="manual-origin-box"):
+            yield Label(f".pak isolé sans origine connue : {self._pak_file}", classes="title")
+            yield Label(
+                "Aucune archive locale ni UUID connu ne correspond — colle le lien "
+                "Nexus ou mod.io de ce mod (laisse vide pour ignorer) :"
+            )
+            yield Input(
+                placeholder="ex: https://www.nexusmods.com/baldursgate3/mods/12345",
+                id="manual-origin-input",
+            )
+            with Horizontal(id="manual-origin-buttons"):
+                yield Button("Enregistrer", id="manual-origin-confirm", variant="primary")
+                yield Button("Ignorer", id="manual-origin-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#manual-origin-input", Input).focus()
+
+    @on(Input.Submitted, "#manual-origin-input")
+    def handle_submit(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip() or None)
+
+    @on(Button.Pressed, "#manual-origin-confirm")
+    def handle_confirm(self) -> None:
+        self.dismiss(self.query_one(
+            "#manual-origin-input", Input).value.strip() or None)
+
+    @on(Button.Pressed, "#manual-origin-cancel")
+    def handle_cancel(self) -> None:
+        self.dismiss(None)
+
+
 NEW_PROFILE_OPTION = "__new_profile__"
 
 
@@ -872,6 +940,17 @@ class ActionsScreen(Screen):
                             "archives_orphelines.md sous le profil actif "
                             "(BG3_Managed/Profiles/...), rien n'est supprimé "
                             "automatiquement."
+                        ),
+                    )
+                    yield Button(
+                        "Origine des .pak isolés...",
+                        id="action-orphan-paks",
+                        tooltip=(
+                            "Pour chaque .pak de Mods/ sans archive connue (glisser-déposé "
+                            "direct, hors circuit Nexus/mod.io de ce TUI) : tente une "
+                            "correspondance par nom puis par UUID réel (meta.lsx), et "
+                            "demande en dernier recours un lien Nexus/mod.io à mémoriser "
+                            "pour ne plus le redemander."
                         ),
                     )
                     yield Button(
@@ -1467,6 +1546,122 @@ class ActionsScreen(Screen):
             f"{' confirmée(s) par UUID' if verified else ''} "
             f"({_human_size(total_bytes)}) -> {report_path}"
         )
+
+    @on(Button.Pressed, "#action-orphan-paks")
+    def handle_resolve_pak_origins(self) -> None:
+        self.run_resolve_pak_origins()
+
+    @work(exclusive=True, thread=True)
+    def run_resolve_pak_origins(self) -> None:
+        """Enchaîne les trois mécanismes de `pak_origin` sur les .pak
+        isolés de Mods/ (voir le docstring de ce module) : nom, puis UUID
+        réel, puis — en dernier recours — un lien saisi par l'utilisateur
+        (mémorisé ensuite via `save_manual_origin`)."""
+        def log(msg): return self.app.call_from_thread(self._log, msg)
+        log("=== Origine des .pak isolés ===")
+        try:
+            inventory = build_inventory(
+                mods_dir=self._config.managed_mods_link,
+                archives_dir=self._config.archives_dir,
+                archives_installed_dir=self._config.archives_installed_dir,
+                archives_pending_dir=self._config.archives_pending_dir,
+                on_progress=log,
+            )
+        except OSError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return
+
+        orphans = find_orphaned_paks(inventory["paks"])
+        if not orphans:
+            log("Aucun .pak isolé : chaque .pak de Mods/ est associé à une archive connue.")
+            return
+
+        manual_origins = load_manual_origins(self._config.profiles_dir, self._config.active_profile)
+        archives = scan_all_archives(
+            archives_dir=self._config.archives_dir,
+            archives_installed_dir=self._config.archives_installed_dir,
+            archives_pending_dir=self._config.archives_pending_dir,
+            on_progress=log,
+        )
+        divine_exe = find_divine_exe(self._config.tools_dir)
+        if divine_exe is None:
+            log(
+                "[#D8C091]Divine.exe introuvable sous Tools/ExportTools/ — étape 2 "
+                "(matching par UUID) ignorée, seuls le nom et la saisie manuelle "
+                "seront tentés.[/#D8C091]"
+            )
+
+        resolved_by_name = 0
+        resolved_by_uuid = 0
+        already_manual = 0
+        unresolved: list[dict] = []
+
+        for pak in orphans:
+            pak_file = pak["file"]
+            if pak_file in manual_origins:
+                already_manual += 1
+                continue
+
+            match = match_orphan_by_name(pak_file, archives)
+            if match:
+                resolved_by_name += 1
+                log(f"  {pak_file} -> {match['archive']} (par nom)")
+                continue
+
+            if divine_exe is not None:
+                pak_path = self._config.managed_mods_link / pak_file
+                match = match_orphan_by_uuid(
+                    pak_path,
+                    archives,
+                    archives_dir=self._config.archives_dir,
+                    archives_installed_dir=self._config.archives_installed_dir,
+                    archives_pending_dir=self._config.archives_pending_dir,
+                    divine_exe=divine_exe,
+                    reference_path=self._config.project_root,
+                    log=log,
+                )
+                if match:
+                    resolved_by_uuid += 1
+                    log(f"  {pak_file} -> {match['archive']} (par UUID)")
+                    continue
+
+            unresolved.append(pak)
+
+        log(
+            f"{resolved_by_name} par nom, {resolved_by_uuid} par UUID, "
+            f"{already_manual} déjà renseigné(s) manuellement, "
+            f"{len(unresolved)} sans correspondance automatique."
+        )
+
+        if unresolved:
+            self.app.call_from_thread(self._prompt_manual_pak_origins, unresolved)
+
+    def _prompt_manual_pak_origins(self, paks: list[dict]) -> None:
+        """Demande, l'un après l'autre (modal), un lien Nexus/mod.io pour
+        chaque .pak de `paks` — étape 3 de `run_resolve_pak_origins`,
+        appelée sur le thread UI (poussée d'écran modale)."""
+        def prompt_next(index: int) -> None:
+            if index >= len(paks):
+                return
+            pak_file = paks[index]["file"]
+
+            def on_url(url: str | None) -> None:
+                if url:
+                    origin = save_manual_origin(
+                        self._config.profiles_dir, self._config.active_profile, pak_file, url
+                    )
+                    if origin is None:
+                        self._log(
+                            f"[#C46F6F]{pak_file} : lien non reconnu (ni Nexus, ni "
+                            f"mod.io) — ignoré.[/#C46F6F]"
+                        )
+                    else:
+                        self._log(f"{pak_file} : origine enregistrée -> {origin.url}")
+                prompt_next(index + 1)
+
+            self.app.push_screen(ManualPakOriginPromptScreen(pak_file), on_url)
+
+        prompt_next(0)
 
     @on(Button.Pressed, "#action-nexus-blacklist")
     def handle_nexus_blacklist(self) -> None:
