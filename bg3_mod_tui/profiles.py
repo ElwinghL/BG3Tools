@@ -14,7 +14,16 @@ est donc automatique ; les .pak/DLL manquants (supprimés depuis la
 sauvegarde, ex: par "Nettoyer les .pak") sont seulement signalés, pas
 retéléchargés automatiquement — ils restent récupérables depuis
 Archives_installees/_installees/ ou en relançant l'extraction (option 5),
-ou via l'import d'une archive de profil qui les embarque directement."""
+ou via l'import d'une archive de profil qui les embarque directement.
+
+En plus du manifeste (état *voulu* au moment de la sauvegarde), chaque
+profil a un fichier de suivi des hardlinks (`hardlinks.json`, voir
+`load_profile_hardlinks`/`save_profile_hardlinks`) qui reflète l'état
+*réellement relié* lors de sa dernière restauration. `restore_profile`
+s'en sert pour ne défaire, lors d'un changement de profil, que les
+hardlinks du profil quitté qui ne font plus partie du nouveau — au lieu de
+tout supprimer sans discernement (voir `game_deploy.sync_hardlinked_files`
+et `game_deploy.remove_stale_hardlinks`)."""
 
 from __future__ import annotations
 
@@ -33,6 +42,7 @@ LogFn = Callable[[str], None]
 
 MODSETTINGS_FILENAME = "modsettings.lsx"
 MANIFEST_FILENAME = "manifest.json"
+HARDLINKS_FILENAME = "hardlinks.json"
 FILE_CHOICES_FILENAME = "nexus_file_choices.json"
 _NO_PROFILE_SLUG = "_sans_profil"
 
@@ -250,6 +260,51 @@ def manifest_file_names(entries: list) -> set[str]:
     (liste de `{"file":..., "origin":...}`), pour rester compatible avec
     les profils déjà sauvegardés avant l'ajout de l'origine."""
     return {entry["file"] if isinstance(entry, dict) else entry for entry in entries}
+
+
+def load_profile_hardlinks(profile_dir: Path) -> dict[str, list[str]]:
+    """Charge le fichier de suivi des hardlinks du profil `profile_dir`
+    (`hardlinks.json`, voir `save_profile_hardlinks`) : la liste des
+    fichiers "loose" (chemins relatifs à `game_data_dir`) et des mods
+    natifs (noms de fichiers dans `bin/NativeMods/`) que CE profil a
+    effectivement reliés par hardlink lors de sa dernière restauration —
+    par opposition au manifeste (`manifest.json`), qui décrit l'état voulu
+    au moment de la sauvegarde, pas l'état réellement en place. Sert à
+    `restore_profile` pour ne défaire, lors d'un changement de profil, que
+    les hardlinks du profil quitté qui ne font plus partie du nouveau.
+    Retourne des listes vides si le fichier est absent ou invalide (aucun
+    hardlink connu à défaire pour ce profil)."""
+    path = profile_dir / HARDLINKS_FILENAME
+    empty: dict[str, list[str]] = {"loose_files": [], "native_mods": []}
+    if not path.is_file():
+        return empty
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    return {
+        "loose_files": sorted(set(data.get("loose_files", []))),
+        "native_mods": sorted(set(data.get("native_mods", []))),
+    }
+
+
+def save_profile_hardlinks(
+    profile_dir: Path, *, loose_files: set[str] | list[str], native_mods: set[str] | list[str]
+) -> None:
+    """Écrit le fichier de suivi des hardlinks du profil `profile_dir`
+    (voir `load_profile_hardlinks`) — appelé par `restore_profile` après
+    chaque (re)déploiement pour refléter l'état réellement relié (pas
+    seulement l'état voulu du manifeste), afin qu'un prochain changement de
+    profil sache exactement quoi défaire."""
+    data = {
+        "loose_files": sorted(set(loose_files)),
+        "native_mods": sorted(set(native_mods)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    (profile_dir / HARDLINKS_FILENAME).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 @dataclass
