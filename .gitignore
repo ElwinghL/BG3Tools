@@ -28,38 +28,18 @@ __pycache__/
 .claude/*
 !.claude/TODO.md
 
-# Outils tiers téléchargés : on garde la structure des dossiers (.gitkeep)
-# mais on ignore les fichiers eux-mêmes (binaires/archives, pas notre code).
+# Outils GitHub de TOOLS.md : suivis comme sous-modules git de BG3Tools
+# (voir tools_manager.py, _add_or_update_git_submodule) — un vrai dépôt
+# épinglé à un commit dans notre historique, donc PAS ignoré ici (BG3
+# Load Order Optimizer, LSLib/ExportTools, Para Tool, BG3 Mod Manager,
+# BG3 Script Extender, BG3 Compatibility Framework, bg3rustpaklib,
+# bg3pythonpaklib).
 
 # Marqueur de version écrit par tools_manager.py dans chaque dossier
 # d'outil, pour savoir si un nouveau téléchargement est nécessaire.
 /Tools/**/.bg3modtools_version
 
 /Tools/Archives_installees/**
-
-/Tools/BG3-Load-Order-Optimizer/**/*.dll
-/Tools/BG3-Load-Order-Optimizer/**/*.exe
-/Tools/BG3-Load-Order-Optimizer/**/*.json
-/Tools/BG3-Load-Order-Optimizer/**/*.txt
-
-/Tools/BG3ModManager_Latest/**/*.dll
-/Tools/BG3ModManager_Latest/**/*.exe
-/Tools/BG3ModManager_Latest/**/*.config
-/Tools/BG3ModManager_Latest/**/*.json
-/Tools/BG3ModManager_Latest/**/*.log
-/Tools/BG3ModManager_Latest/*.old-*
-
-/Tools/Para-Tools/*.App
-/Tools/Para-Tools/*.App.exe
-/Tools/Para-Tools/*.pdb
-
-/Tools/BG3 Script Extender/*.dll
-/Tools/BG3 Script Extender/ScriptExtenderSettings.json
-
-/Tools/ExportTools/**/*.dll
-/Tools/ExportTools/**/*.exe
-/Tools/ExportTools/**/*.json
-/Tools/ExportTools/**/*.config
 
 /Tools/Native Mod Loader/bin/*.dll
 
@@ -75,11 +55,6 @@ __pycache__/
 /Tools/*.zip
 /Tools/*.rar
 /Tools/*.7z
-
-# Sources téléchargées depuis GitHub (pas de release/.pak fourni — voir
-# compat_framework.py, qui reconstruit le .pak localement à partir
-# d'elles via Divine.exe) : pas notre code.
-/Tools/BG3-Compatibility-Framework/**
 
 # Rust (crates sous rust/, ex. pak_reader_rs) : artefacts de build Cargo,
 # pas notre code. Cargo.lock reste versionné (verrouiller les versions

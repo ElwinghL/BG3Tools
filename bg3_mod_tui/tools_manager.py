@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -105,9 +106,14 @@ class ToolRelease:
     vrai numéro de version sémantique."""
 
 
-def _github_release(owner: str, repo: str) -> ToolRelease:
+def _github_release(owner: str, repo: str) -> ToolRelease | None:
     """Retourne le meilleur asset à télécharger (premier .zip d'une
-    release GitHub, ou à défaut l'archive source zip) avec sa version."""
+    release GitHub, ou à défaut l'archive source zip de cette release)
+    avec sa version. `None` si le dépôt n'a aucune release exploitable —
+    dans ce cas seule la source (toujours suivie comme sous-module git,
+    voir `_add_or_update_git_submodule`) est installée, sans sous-dossier
+    de release précompilée. Lève `ToolsError` si le dépôt lui-même est
+    introuvable."""
     with httpx.Client(timeout=15, headers={"Accept": "application/vnd.github+json"}) as client:
         resp = client.get(f"https://api.github.com/repos/{owner}/{repo}/releases/latest")
         if resp.status_code == 200:
@@ -118,24 +124,75 @@ def _github_release(owner: str, repo: str) -> ToolRelease:
                     return ToolRelease(asset["name"], asset["browser_download_url"], tag)
             if data.get("zipball_url"):
                 return ToolRelease(f"{repo}-{tag}.zip", data["zipball_url"], tag)
+            return None
 
         resp = client.get(f"https://api.github.com/repos/{owner}/{repo}")
         if resp.status_code != 200:
             raise ToolsError(f"Dépôt GitHub introuvable : {owner}/{repo} ({resp.status_code}).")
-        default_branch = resp.json().get("default_branch", "main")
+        return None
 
-        # Pas de release : la "version" est le hash du dernier commit de la
-        # branche par défaut, seul moyen de détecter un changement réel
-        # (sinon rien ne distinguerait deux téléchargements du même zip
-        # source à des moments différents).
-        commit_resp = client.get(f"https://api.github.com/repos/{owner}/{repo}/commits/{default_branch}")
-        version = commit_resp.json()["sha"][:12] if commit_resp.status_code == 200 else default_branch
 
-        return ToolRelease(
-            f"{repo}-{default_branch}.zip",
-            f"https://github.com/{owner}/{repo}/archive/refs/heads/{default_branch}.zip",
-            version,
+def _run_git(args: list[str], *, cwd: Path | None = None, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _is_registered_submodule(project_root: Path, local_dir: str) -> bool:
+    """Vrai si `local_dir` est déjà déclaré comme sous-module dans
+    `.gitmodules` à la racine de `project_root`."""
+    gitmodules = project_root / ".gitmodules"
+    if not gitmodules.is_file():
+        return False
+    check = _run_git(["config", "--file", ".gitmodules", "--get-regexp", r"\.path$"], cwd=project_root)
+    if check.returncode != 0:
+        return False
+    return any(line.strip().endswith(f" {local_dir}") for line in check.stdout.splitlines())
+
+
+def _add_or_update_git_submodule(owner: str, repo: str, local_dir: str, project_root: Path, *, log: LogFn) -> str:
+    """Déclare (première fois, `git submodule add`) ou met à jour
+    (`git submodule update --remote`, sur la branche par défaut du
+    remote) `local_dir` comme sous-module git du dépôt BG3Tools lui-même
+    — un vrai sous-dépôt épinglé à un commit précis dans notre historique,
+    plutôt qu'une simple archive téléchargée, pour suivre un dépôt qu'on
+    développe/dont on dépend activement (ex: bg3rustpaklib, mais aussi les
+    autres outils GitHub de TOOLS.md). N'effectue aucun commit dans
+    BG3Tools : `git submodule add`/`update --remote` modifient
+    `.gitmodules` et l'index (le gitlink épinglé), à committer
+    explicitement plus tard. Retourne le hash court du commit HEAD du
+    sous-module après l'opération ; lève `ToolsError` en cas d'échec
+    d'une commande git."""
+    url = f"https://github.com/{owner}/{repo}.git"
+    dest_dir = project_root / local_dir
+
+    if _is_registered_submodule(project_root, local_dir):
+        log(f"[{repo}] sous-module existant, mise à jour (submodule update --remote)...")
+        update = _run_git(
+            ["submodule", "update", "--remote", "--checkout", "--", local_dir],
+            cwd=project_root,
+            timeout=300,
         )
+        if update.returncode != 0:
+            raise ToolsError(f"échec de 'git submodule update' pour {owner}/{repo} : {update.stderr.strip()}")
+    else:
+        log(f"[{repo}] ajout comme sous-module ({url})...")
+        add = _run_git(
+            ["submodule", "add", "--depth", "1", "--force", url, local_dir],
+            cwd=project_root,
+            timeout=300,
+        )
+        if add.returncode != 0:
+            raise ToolsError(f"échec de 'git submodule add' pour {owner}/{repo} : {add.stderr.strip()}")
+
+    rev = _run_git(["rev-parse", "--short", "HEAD"], cwd=dest_dir)
+    if rev.returncode != 0:
+        raise ToolsError(f"impossible de lire le commit HEAD du sous-module {owner}/{repo} : {rev.stderr.strip()}")
+    return rev.stdout.strip()
 
 
 def _installed_version(dest_dir: Path) -> str | None:
@@ -238,17 +295,86 @@ def _install_nexus_tool(
     log(f"[{entry.name}] installé dans {dest_dir} ({version}).")
 
 
+def _release_subdir_name(dest_dir: Path) -> str:
+    """Nom du sous-dossier où déposer une release précompilée, choisi
+    selon la convention de build du dépôt cloné dans `dest_dir` plutôt
+    qu'un nom fixe imposé de notre côté : `release/` pour un projet Rust
+    (miroir de `target/release/`, voir Cargo.toml), `dist/` pour un projet
+    Python (miroir de la sortie de `python -m build`, voir
+    pyproject.toml/setup.py/setup.cfg) — `dist/` par défaut sinon, la
+    convention la plus répandue ailleurs (npm, etc.)."""
+    if (dest_dir / "Cargo.toml").is_file():
+        return "release"
+    if any((dest_dir / f).is_file() for f in ("pyproject.toml", "setup.py", "setup.cfg")):
+        return "dist"
+    return "dist"
+
+
+def _install_github_release(
+    entry: ToolEntry, dest_dir: Path, release: ToolRelease, *, log: LogFn
+) -> None:
+    """Télécharge/extrait la release `release` dans un sous-dossier de
+    `dest_dir` nommé selon `_release_subdir_name` (précompilé prêt à
+    l'emploi), à côté du clone git de la source dans `dest_dir` lui-même."""
+    dist_dir = dest_dir / _release_subdir_name(dest_dir)
+    installed = _installed_version(dist_dir)
+    if installed == release.version:
+        log(f"[{entry.name}] release déjà à jour ({release.version}).")
+        return
+    if installed:
+        log(f"[{entry.name}] release : mise à jour {installed} -> {release.version}.")
+    else:
+        log(f"[{entry.name}] téléchargement de la release ({release.version})...")
+
+    with tempfile.TemporaryDirectory(prefix="bg3modtools_tool_") as tmp:
+        tmp_path = Path(tmp)
+        archive_path = tmp_path / release.asset_name
+        log(f"[{entry.name}] téléchargement de {release.asset_name}...")
+        try:
+            with httpx.stream("GET", release.download_url, timeout=30, follow_redirects=True) as resp:
+                resp.raise_for_status()
+                with archive_path.open("wb") as fh:
+                    for chunk in resp.iter_bytes(65536):
+                        fh.write(chunk)
+        except httpx.HTTPError as exc:
+            log(f"[{entry.name}] échec du téléchargement de la release : {exc}")
+            return
+
+        extract_dir = tmp_path / "extracted"
+        try:
+            extract_archive(archive_path, extract_dir)
+        except ArchiveError as exc:
+            log(f"[{entry.name}] échec d'extraction de la release : {exc}")
+            return
+
+        # Les archives GitHub (zipball / assets de release) contiennent
+        # parfois un seul dossier racine ("repo-tag/") : on en prend le
+        # contenu direct.
+        _flatten_and_move(extract_dir, dist_dir)
+
+        (dist_dir / VERSION_MARKER_NAME).write_text(release.version, encoding="utf-8")
+        log(f"[{entry.name}] release installée dans {dist_dir} ({release.version}).")
+
+
 def download_and_extract_tool(
     entry: ToolEntry, project_root: Path, *, log: LogFn = lambda _m: None
 ) -> None:
-    """Télécharge et extrait un outil GitHub dans
-    `project_root/<entry.local_dir>` (ex: "Tools/xxx", tel que déclaré dans
-    TOOLS.md). Pour un outil Nexus (pas de dépôt GitHub), voir
-    `_install_nexus_tool` : le téléchargement direct n'est possible qu'avec
-    un compte Nexus Premium, donc on attend une archive déposée à la main.
-    Ignore silencieusement (avec message) les entrées sans dossier local ni
-    dépôt GitHub ni mod Nexus identifiable (installation manuelle requise,
-    ex: Native Mod Loader)."""
+    """Installe un outil GitHub dans `project_root/<entry.local_dir>` (ex:
+    "Tools/xxx", tel que déclaré dans TOOLS.md) : la source est toujours
+    déclarée/mise à jour comme sous-module git de BG3Tools lui-même (voir
+    `_add_or_update_git_submodule`) directement dans ce dossier — un vrai
+    sous-dépôt épinglé à un commit, pas une archive figée, pour pouvoir
+    recompiler l'outil nous-mêmes au besoin — et si une release GitHub
+    exploitable existe, elle est en plus téléchargée/extraite dans un
+    sous-dossier nommé selon `_release_subdir_name` (précompilé prêt à
+    l'emploi, sans repasser par une compilation locale à chaque MAJ).
+    N'effectue aucun commit dans BG3Tools : voir
+    `_add_or_update_git_submodule`. Pour un outil Nexus (pas de
+    dépôt GitHub), voir `_install_nexus_tool` : le téléchargement direct
+    n'est possible qu'avec un compte Nexus Premium, donc on attend une
+    archive déposée à la main. Ignore silencieusement (avec message) les
+    entrées sans dossier local ni dépôt GitHub ni mod Nexus identifiable
+    (installation manuelle requise, ex: Native Mod Loader)."""
     if entry.local_dir is None:
         log(f"[{entry.name}] pas de dossier local défini, ignoré.")
         return
@@ -263,47 +389,31 @@ def download_and_extract_tool(
         return
 
     try:
-        release = _github_release(entry.github_owner, entry.github_repo)
+        version = _add_or_update_git_submodule(
+            entry.github_owner, entry.github_repo, entry.local_dir, project_root, log=log
+        )
     except ToolsError as exc:
         log(f"[{entry.name}] {exc}")
         return
 
     installed = _installed_version(dest_dir)
-    if installed == release.version:
-        log(f"[{entry.name}] déjà à jour ({release.version}).")
-        return
-    if installed:
-        log(f"[{entry.name}] mise à jour : {installed} -> {release.version}.")
+    if installed == version:
+        log(f"[{entry.name}] source déjà à jour ({version}).")
     else:
-        log(f"[{entry.name}] installation ({release.version})...")
+        (dest_dir / VERSION_MARKER_NAME).write_text(version, encoding="utf-8")
+        if installed:
+            log(f"[{entry.name}] source mise à jour : {installed} -> {version}.")
+        else:
+            log(f"[{entry.name}] source clonée dans {dest_dir} ({version}).")
 
-    with tempfile.TemporaryDirectory(prefix="bg3modtools_tool_") as tmp:
-        tmp_path = Path(tmp)
-        archive_path = tmp_path / release.asset_name
-        log(f"[{entry.name}] téléchargement de {release.asset_name}...")
-        try:
-            with httpx.stream("GET", release.download_url, timeout=30, follow_redirects=True) as resp:
-                resp.raise_for_status()
-                with archive_path.open("wb") as fh:
-                    for chunk in resp.iter_bytes(65536):
-                        fh.write(chunk)
-        except httpx.HTTPError as exc:
-            log(f"[{entry.name}] échec du téléchargement : {exc}")
-            return
+    try:
+        release = _github_release(entry.github_owner, entry.github_repo)
+    except ToolsError as exc:
+        log(f"[{entry.name}] {exc}")
+        return
 
-        extract_dir = tmp_path / "extracted"
-        try:
-            extract_archive(archive_path, extract_dir)
-        except ArchiveError as exc:
-            log(f"[{entry.name}] échec d'extraction : {exc}")
-            return
-
-        # Les archives GitHub (zipball / source zip) contiennent un seul
-        # dossier racine ("repo-branche/") : on en prend le contenu direct.
-        _flatten_and_move(extract_dir, dest_dir)
-
-        (dest_dir / VERSION_MARKER_NAME).write_text(release.version, encoding="utf-8")
-        log(f"[{entry.name}] installé dans {dest_dir} ({release.version}).")
+    if release is not None:
+        _install_github_release(entry, dest_dir, release, log=log)
 
 
 def find_executables(tools_root: Path) -> list[Path]:
