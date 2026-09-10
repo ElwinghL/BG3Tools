@@ -1,7 +1,5 @@
 # Chantier immédiat / prioritaire
 
-- /run/media/system/Data_Linux/SteamLibrary/steamapps/compatdata/1086940/pfx/drive_c/users/steamuser/ModTools/Tools/Archives_installees/\_installees/ est rempli de doublons
-- -Extraire vers Mods/ ne cree pas de doublons
 - Import de profil : bouton "importer" pointant vers une archive ; vérifier rapidement qu'elle contient les fichiers nécessaires (les mêmes que ceux exportés) + garde-fou sur la version de l'outil (import refusé/signalé si version différente de celle ayant généré l'archive)
 - Mods contenant eux-mêmes des ZIP imbriqués : réutiliser le wizard de sélection de fichiers (celui qui demande quel(s) fichier(s) garder lors d'une installation normale) pour que l'utilisateur choisisse quel(s) ZIP interne(s) garder ou non
 - Vue par onglets pour visualiser les différentes tâches/consoles en cours (pas de split visuel)
@@ -51,3 +49,4 @@
 - Ajouts de tests pour empecher les regressions — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/0698e3d)
 - Le changement de profil enleve tous les hardlinks deja en place (+ fichier de suivi des hardlinks par profil) — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/3532765)
 - Afficher une progression claire pour l'outil Archives orphelines (lecture des UUID de .pak déployés + vérification par archive) — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/dd6d374)
+- Fix des doublons d'archives mod.io (download_subscribed_modio_mods ne vérifiait pas les dossiers déjà installés) + nettoyage intégré des doublons dans _installees lors de "télécharger les mods"/"extraire vers Mods/" — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/e6d9578)
