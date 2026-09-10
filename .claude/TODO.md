@@ -19,6 +19,7 @@
 - Rename des merge de branche precedents pour suivre la convention de notation (nom de la branche en message de commit)
 - Par profils, on compte le nombre d'utilisation de chaques boutons, outils... et autres joyeusetes de notre appli, et on ajoute trois boutons de quick action en haut pour les trois actions les plus utilisees par le profil
 - Fusion des boutons Mise a jour des outils + Compil Compat Framework + ModFixerFork
+- Archives orphelines : le rapport (archives_orphelines.md) n'est écrit qu'à la toute fin du traitement (_write_orphans_report appelé une seule fois) — remplacer par une écriture étape par étape (au fil de la vérification) pour pouvoir interrompre le traitement et reprendre sans tout reperdre
 
 # Chantier annexe — page de build de classes (à faire avant V2/V3/V4)
 
