@@ -1,6 +1,7 @@
 [submodule "Tools/bg3rustpaklib"]
 	path = Tools/bg3rustpaklib
 	url = https://github.com/ElwinghL/bg3rustpaklib.git
+	branch = main
 [submodule "Tools/BG3-Load-Order-Optimizer"]
 	path = Tools/BG3-Load-Order-Optimizer
 	url = https://github.com/Nemix3D/bg3-load-order-optimizer.git
@@ -22,3 +23,4 @@
 [submodule "Tools/bg3pythonpaklib"]
 	path = Tools/bg3pythonpaklib
 	url = https://github.com/ElwinghL/bg3pythonpaklib.git
+	branch = main

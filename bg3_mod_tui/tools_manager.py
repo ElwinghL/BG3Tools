@@ -295,6 +295,33 @@ def _install_nexus_tool(
     log(f"[{entry.name}] installé dans {dest_dir} ({version}).")
 
 
+def _add_local_exclude(repo_dir: Path, *entries: str) -> None:
+    """Ajoute `entries` à l'exclude local du dépôt git dans `repo_dir`
+    (`.git/info/exclude`, jamais suivi ni poussé) plutôt qu'au `.gitignore`
+    du dépôt — un fichier tiers suivi en amont par le sous-module, pas à
+    nous de le modifier. Évite que nos ajouts locaux (marqueur de version,
+    release précompilée) n'apparaissent comme non suivis dans `git status`.
+    Idempotent (n'ajoute pas de doublon) ; sans effet si `repo_dir` n'est
+    pas un dépôt git."""
+    git_dir_res = _run_git(["rev-parse", "--git-dir"], cwd=repo_dir, timeout=10)
+    if git_dir_res.returncode != 0:
+        return
+    git_dir = Path(git_dir_res.stdout.strip())
+    if not git_dir.is_absolute():
+        git_dir = repo_dir / git_dir
+    exclude_path = git_dir / "info" / "exclude"
+    exclude_path.parent.mkdir(parents=True, exist_ok=True)
+    existing = exclude_path.read_text(encoding="utf-8").splitlines() if exclude_path.is_file() else []
+    to_add = [e for e in entries if e not in existing]
+    if not to_add:
+        return
+    with exclude_path.open("a", encoding="utf-8") as fh:
+        if existing and existing[-1] != "":
+            fh.write("\n")
+        for entry_line in to_add:
+            fh.write(entry_line + "\n")
+
+
 def _release_subdir_name(dest_dir: Path) -> str:
     """Nom du sous-dossier où déposer une release précompilée, choisi
     selon la convention de build du dépôt cloné dans `dest_dir` plutôt
@@ -316,7 +343,8 @@ def _install_github_release(
     """Télécharge/extrait la release `release` dans un sous-dossier de
     `dest_dir` nommé selon `_release_subdir_name` (précompilé prêt à
     l'emploi), à côté du clone git de la source dans `dest_dir` lui-même."""
-    dist_dir = dest_dir / _release_subdir_name(dest_dir)
+    subdir_name = _release_subdir_name(dest_dir)
+    dist_dir = dest_dir / subdir_name
     installed = _installed_version(dist_dir)
     if installed == release.version:
         log(f"[{entry.name}] release déjà à jour ({release.version}).")
@@ -353,6 +381,7 @@ def _install_github_release(
         _flatten_and_move(extract_dir, dist_dir)
 
         (dist_dir / VERSION_MARKER_NAME).write_text(release.version, encoding="utf-8")
+        _add_local_exclude(dest_dir, f"/{subdir_name}/")
         log(f"[{entry.name}] release installée dans {dist_dir} ({release.version}).")
 
 
@@ -401,6 +430,7 @@ def download_and_extract_tool(
         log(f"[{entry.name}] source déjà à jour ({version}).")
     else:
         (dest_dir / VERSION_MARKER_NAME).write_text(version, encoding="utf-8")
+        _add_local_exclude(dest_dir, f"/{VERSION_MARKER_NAME}")
         if installed:
             log(f"[{entry.name}] source mise à jour : {installed} -> {version}.")
         else:
