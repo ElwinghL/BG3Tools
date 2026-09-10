@@ -215,7 +215,7 @@ def write_html(output_path: Path | str = DEFAULT_HTML_FILENAME) -> Path:
     return path
 
 
-_HTML_TEMPLATE = """<!doctype html>
+_HTML_TEMPLATE = r"""<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="utf-8">
@@ -343,6 +343,7 @@ _HTML_TEMPLATE = """<!doctype html>
 
 <div id="errors"></div>
 <div id="status-ok">Build valide — aucune règle de progression enfreinte.</div>
+<div id="class-summary" class="subtitle"></div>
 
 <table id="levels">
   <thead>
@@ -414,7 +415,7 @@ function buildMermaidDefinition() {
     prevNodeId = nodeId;
     prevClass = choice.classId;
   }
-  if (lines.length === 1) lines.push('EMPTY["Aucun niveau renseigné pour l\\'instant"]');
+  if (lines.length === 1) lines.push('EMPTY["Aucun niveau renseigné pour l\'instant"]');
   return lines.join("\n");
 }
 
@@ -515,6 +516,41 @@ function validateBuild() {
   return errors;
 }
 
+// État (classes déjà utilisées comme nouveau choix, classe du niveau
+// précédent) juste avant `level`, en ne considérant que les niveaux
+// inférieurs déjà renseignés — sert à désactiver dans le menu déroulant
+// les classes qui ne pourraient de toute façon plus être choisies comme
+// nouveau choix (TODO 10d : rendre visible/empêcher en amont, pas
+// seulement signaler l'erreur après coup).
+function computeStateBeforeLevel(level) {
+  const usedAsNewChoice = new Set();
+  let prevClass = null;
+  const levels = Object.keys(build)
+    .map(Number)
+    .filter((lvl) => lvl < level && build[lvl] && build[lvl].classId)
+    .sort((a, b) => a - b);
+  for (const lvl of levels) {
+    const choice = build[lvl];
+    if (choice.classId !== prevClass) usedAsNewChoice.add(choice.classId);
+    prevClass = choice.classId;
+  }
+  return { usedAsNewChoice, prevClass };
+}
+
+function renderClassSummary() {
+  const el = document.getElementById("class-summary");
+  const { usedAsNewChoice, prevClass } = computeStateBeforeLevel(MAX_LEVEL + 1);
+  if (usedAsNewChoice.size === 0) {
+    el.textContent = "Aucune classe choisie pour l'instant.";
+    return;
+  }
+  const parts = Array.from(usedAsNewChoice).map((id) => {
+    const fr = CLASS_DATA[id].fr;
+    return id === prevClass ? fr + " (active — continuation possible)" : fr + " (quittée — indisponible pour un nouveau choix)";
+  });
+  el.textContent = "Classes utilisées dans ce build : " + parts.join(", ") + ".";
+}
+
 function renderErrors(errors) {
   const box = document.getElementById("errors");
   const ok = document.getElementById("status-ok");
@@ -540,11 +576,23 @@ function renderLevelRow(level) {
   levelTd.textContent = level;
   tr.appendChild(levelTd);
 
+  const { usedAsNewChoice, prevClass } = computeStateBeforeLevel(level);
+
   const classTd = document.createElement("td");
   const classSelect = document.createElement("select");
   classSelect.innerHTML =
     '<option value="">— aucune —</option>' +
-    classIds().map((id) => '<option value="' + id + '">' + CLASS_DATA[id].fr + "</option>").join("");
+    classIds()
+      .map((id) => {
+        // Une classe déjà quittée (nouveau choix consommé ailleurs qu'au
+        // niveau précédent) ne peut plus redevenir un nouveau choix ici —
+        // désactivée dans le menu plutôt que de laisser l'utilisateur
+        // découvrir l'erreur après coup (TODO 10d).
+        const closed = usedAsNewChoice.has(id) && id !== prevClass;
+        const attrs = closed ? ' disabled title="Déjà quittée plus tôt dans le build"' : "";
+        return '<option value="' + id + '"' + attrs + ">" + CLASS_DATA[id].fr + (closed ? " (indisponible)" : "") + "</option>";
+      })
+      .join("");
   const current = build[level];
   if (current && current.classId) classSelect.value = current.classId;
   classSelect.addEventListener("change", () => {
@@ -579,6 +627,11 @@ function renderLevelRow(level) {
   tr.appendChild(subclassTd);
 
   const typeTd = document.createElement("td");
+  if (choice && choice.classId) {
+    const isNewChoice = choice.classId !== prevClass;
+    typeTd.textContent = isNewChoice ? "Nouveau choix" : "Continuation";
+    typeTd.className = isNewChoice ? "row-new-choice" : "row-continuation";
+  }
   tr.appendChild(typeTd);
 
   const gainsTd = document.createElement("td");
@@ -604,6 +657,7 @@ function renderAll() {
     tbody.appendChild(renderLevelRow(level));
   }
   renderErrors(validateBuild());
+  renderClassSummary();
   renderMermaid();
 }
 
