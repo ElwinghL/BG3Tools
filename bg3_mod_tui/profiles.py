@@ -14,7 +14,16 @@ est donc automatique ; les .pak/DLL manquants (supprimés depuis la
 sauvegarde, ex: par "Nettoyer les .pak") sont seulement signalés, pas
 retéléchargés automatiquement — ils restent récupérables depuis
 Archives_installees/_installees/ ou en relançant l'extraction (option 5),
-ou via l'import d'une archive de profil qui les embarque directement."""
+ou via l'import d'une archive de profil qui les embarque directement.
+
+En plus du manifeste (état *voulu* au moment de la sauvegarde), chaque
+profil a un fichier de suivi des hardlinks (`hardlinks.json`, voir
+`load_profile_hardlinks`/`save_profile_hardlinks`) qui reflète l'état
+*réellement relié* lors de sa dernière restauration. `restore_profile`
+s'en sert pour ne défaire, lors d'un changement de profil, que les
+hardlinks du profil quitté qui ne font plus partie du nouveau — au lieu de
+tout supprimer sans discernement (voir `game_deploy.sync_hardlinked_files`
+et `game_deploy.remove_stale_hardlinks`)."""
 
 from __future__ import annotations
 
@@ -26,13 +35,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bg3_mod_tui.game_deploy import deploy_loose_files
+from bg3_mod_tui.game_deploy import remove_stale_hardlinks, sync_hardlinked_files
 from bg3_mod_tui.inventory import ArchiveEntry, match_archive_origin
 
 LogFn = Callable[[str], None]
 
 MODSETTINGS_FILENAME = "modsettings.lsx"
 MANIFEST_FILENAME = "manifest.json"
+HARDLINKS_FILENAME = "hardlinks.json"
 FILE_CHOICES_FILENAME = "nexus_file_choices.json"
 _NO_PROFILE_SLUG = "_sans_profil"
 
@@ -252,6 +262,51 @@ def manifest_file_names(entries: list) -> set[str]:
     return {entry["file"] if isinstance(entry, dict) else entry for entry in entries}
 
 
+def load_profile_hardlinks(profile_dir: Path) -> dict[str, list[str]]:
+    """Charge le fichier de suivi des hardlinks du profil `profile_dir`
+    (`hardlinks.json`, voir `save_profile_hardlinks`) : la liste des
+    fichiers "loose" (chemins relatifs à `game_data_dir`) et des mods
+    natifs (noms de fichiers dans `bin/NativeMods/`) que CE profil a
+    effectivement reliés par hardlink lors de sa dernière restauration —
+    par opposition au manifeste (`manifest.json`), qui décrit l'état voulu
+    au moment de la sauvegarde, pas l'état réellement en place. Sert à
+    `restore_profile` pour ne défaire, lors d'un changement de profil, que
+    les hardlinks du profil quitté qui ne font plus partie du nouveau.
+    Retourne des listes vides si le fichier est absent ou invalide (aucun
+    hardlink connu à défaire pour ce profil)."""
+    path = profile_dir / HARDLINKS_FILENAME
+    empty: dict[str, list[str]] = {"loose_files": [], "native_mods": []}
+    if not path.is_file():
+        return empty
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    return {
+        "loose_files": sorted(set(data.get("loose_files", []))),
+        "native_mods": sorted(set(data.get("native_mods", []))),
+    }
+
+
+def save_profile_hardlinks(
+    profile_dir: Path, *, loose_files: set[str] | list[str], native_mods: set[str] | list[str]
+) -> None:
+    """Écrit le fichier de suivi des hardlinks du profil `profile_dir`
+    (voir `load_profile_hardlinks`) — appelé par `restore_profile` après
+    chaque (re)déploiement pour refléter l'état réellement relié (pas
+    seulement l'état voulu du manifeste), afin qu'un prochain changement de
+    profil sache exactement quoi défaire."""
+    data = {
+        "loose_files": sorted(set(loose_files)),
+        "native_mods": sorted(set(native_mods)),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    (profile_dir / HARDLINKS_FILENAME).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
 @dataclass
 class RestoreReport:
     profile_dir: Path
@@ -271,16 +326,29 @@ def restore_profile(
     loose_mods_dir: Path,
     game_data_dir: Path,
     native_mods_dir: Path | None = None,
+    previous_profile: str | None = None,
     log: LogFn = lambda _msg: None,
 ) -> RestoreReport:
     """Restaure le profil `name` : remplace `modsettings_path` par la copie
-    sauvegardée, puis relie (hardlink) tous les fichiers "loose" gérés dans
-    `game_data_dir` (DataMods/ est une copie permanente et globale, donc
-    toujours restaurable telle quelle). Compare ensuite les .pak listés
-    dans le manifeste à ceux réellement présents dans `mods_dir` (et les
-    DLL à celles de `native_mods_dir`, si fourni) — voir la limite connue
-    en tête de module. Lève `ProfileError` si le profil ou son
-    modsettings.lsx sont introuvables."""
+    sauvegardée, puis relie (hardlink) les fichiers "loose" de ce profil
+    dans `game_data_dir` (DataMods/ est une copie permanente et globale,
+    donc toujours restaurable telle quelle, mais seuls les fichiers listés
+    dans le manifeste de `name` sont reliés). Si `previous_profile` est
+    fourni (le profil qu'on quitte), seuls les hardlinks qu'il avait
+    effectivement créés (voir `load_profile_hardlinks`) et qui ne font plus
+    partie de `name` sont défaits — les autres, y compris ceux d'un
+    éventuel profil précédent inconnu ou tout fichier non suivi, restent
+    intouchés (voir `game_deploy.sync_hardlinked_files`). Il en va de même
+    pour les mods natifs (DLL) de `native_mods_dir`, si fourni : seuls ceux
+    du profil quitté absents du nouveau sont retirés (recréer ceux qui
+    manquent nécessite l'archive d'origine, pas juste le hardlink — voir la
+    limite connue en tête de module, toujours signalée via
+    `native_mods_missing`). Compare enfin les .pak listés dans le manifeste
+    à ceux réellement présents dans `mods_dir` — voir la limite connue en
+    tête de module. Le nouvel état réellement relié est sauvegardé dans le
+    fichier de suivi du profil `name` (voir `save_profile_hardlinks`), pour
+    le prochain changement de profil. Lève `ProfileError` si le profil ou
+    son modsettings.lsx sont introuvables."""
     profile_dir = find_profile_dir(profiles_dir, name)
     saved_modsettings = profile_dir / MODSETTINGS_FILENAME
     if not saved_modsettings.is_file():
@@ -293,21 +361,43 @@ def restore_profile(
     sync_game_profile(modsettings_path, name, saved_modsettings)
     log(f"modsettings.lsx restauré depuis le profil « {name} ».")
 
-    linked = deploy_loose_files(loose_mods_dir, game_data_dir, log=log)
+    previous_hardlinks: dict[str, list[str]] = {"loose_files": [], "native_mods": []}
+    if previous_profile and previous_profile != name:
+        try:
+            previous_hardlinks = load_profile_hardlinks(find_profile_dir(profiles_dir, previous_profile))
+        except ProfileError:
+            pass  # profil précédent introuvable (renommé/supprimé) : rien à défaire pour lui.
+
+    expected_loose_files = set(manifest.get("loose_files", []))
+    linked_loose_files = sync_hardlinked_files(
+        loose_mods_dir,
+        game_data_dir,
+        expected_loose_files,
+        set(previous_hardlinks["loose_files"]),
+        log=log,
+    )
+    log(f"{len(linked_loose_files)} fichier(s) loose reliés (hardlink) pour ce profil.")
 
     current_paks = {p.name for p in mods_dir.glob("*.pak")} if mods_dir.is_dir() else set()
     expected_paks = manifest_file_names(manifest.get("paks", []))
+
+    expected_native_mods = manifest_file_names(manifest.get("native_mods", []))
+    obsolete_native_mods = set(previous_hardlinks["native_mods"]) - expected_native_mods
+    if native_mods_dir is not None and obsolete_native_mods:
+        remove_stale_hardlinks(native_mods_dir, obsolete_native_mods, log=log)
 
     current_native_mods = (
         {p.name for p in native_mods_dir.iterdir() if p.is_file()}
         if native_mods_dir is not None and native_mods_dir.is_dir()
         else set()
     )
-    expected_native_mods = manifest_file_names(manifest.get("native_mods", []))
+    linked_native_mods = expected_native_mods & current_native_mods
+
+    save_profile_hardlinks(profile_dir, loose_files=linked_loose_files, native_mods=linked_native_mods)
 
     return RestoreReport(
         profile_dir=profile_dir,
-        loose_files_linked=linked,
+        loose_files_linked=len(linked_loose_files),
         paks_missing=sorted(expected_paks - current_paks),
         paks_extra=sorted(current_paks - expected_paks),
         native_mods_missing=sorted(expected_native_mods - current_native_mods),
