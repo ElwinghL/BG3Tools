@@ -1,12 +1,10 @@
 # Chantier immédiat / prioritaire
 
-- Import de profil : bouton "importer" pointant vers une archive ; vérifier rapidement qu'elle contient les fichiers nécessaires (les mêmes que ceux exportés) + garde-fou sur la version de l'outil (import refusé/signalé si version différente de celle ayant généré l'archive)
-- Mods contenant eux-mêmes des ZIP imbriqués : réutiliser le wizard de sélection de fichiers (celui qui demande quel(s) fichier(s) garder lors d'une installation normale) pour que l'utilisateur choisisse quel(s) ZIP interne(s) garder ou non
-- Vue par onglets pour visualiser les différentes tâches/consoles en cours (pas de split visuel)
 - Mods installés par glisser-déposer sur le mod manager (ni Nexus, ni Mod.io) : tenter de les relier à l'une des deux sources
   - Matching par nom de fichier/mod
   - Matching par hash du .pak
   - Si aucun match automatique, demander à l'utilisateur d'indiquer la source (lien Nexus/Mod.io)
+- Le texte des doublons supprimes doit etre codifier pour etre plus lisible
 - Priorisation Nexus / Mod.io (règle unique) :
   - Si Mod.io propose une version plus récente que celle de Nexus, on privilégie Mod.io, avec (un)subscribe auto si besoin
   - Gérer les erreurs d'écriture lors d'une mise à jour via Mod.io (fréquentes en jeu) ; si l'écriture réussit sans passer par un dl d'archive, on change l'origine du mod vers modio
@@ -16,7 +14,9 @@
   - Nexus : pendant qu'un DL tourne, préparer les wizards suivants (max ~6 threads de DL)
   - Console dédiée avec barres de progression par thread de DL, sous la console principale
 - Outil standalone de vérification/validation des .pak — équivalent léger et rapide de la partie "check des .pak" de divinity.exe (pas la génération de modsettings.lsx ni le lancement du jeu)
+  - L'outil actuel, pour de la lecture uniquement, timeout beqaucoup
 - Rename des merge de branche precedents pour suivre la convention de notation (nom de la branche en message de commit)
+- Par profils, on compte le nombre d'utilisation de chaques boutons, outils... et autres joyeusetes de notre appli, et on ajoute trois boutons de quick action en haut pour les trois actions les plus utilisees par le profil
 
 # Chantier annexe — page de build de classes (à faire avant V2/V3/V4)
 
@@ -49,4 +49,7 @@
 - Ajouts de tests pour empecher les regressions — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/0698e3d)
 - Le changement de profil enleve tous les hardlinks deja en place (+ fichier de suivi des hardlinks par profil) — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/3532765)
 - Afficher une progression claire pour l'outil Archives orphelines (lecture des UUID de .pak déployés + vérification par archive) — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/dd6d374)
-- Fix des doublons d'archives mod.io (download_subscribed_modio_mods ne vérifiait pas les dossiers déjà installés) + nettoyage intégré des doublons dans _installees lors de "télécharger les mods"/"extraire vers Mods/" — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/e6d9578)
+- Fix des doublons d'archives mod.io (download_subscribed_modio_mods ne vérifiait pas les dossiers déjà installés) + nettoyage intégré des doublons dans \_installees lors de "télécharger les mods"/"extraire vers Mods/" — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/e6d9578)
+- Vue par onglets (Tâches/Outils/Web) pour les consoles, à la place de l'empilement vertical — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/a5baf81)
+- Import de profil : vérification des fichiers manquants + garde-fou de version (avertissement, pas de blocage) — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/26463ad)
+- Mods avec ZIP imbriqués : wizard de sélection pour choisir lesquels garder/extraire — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/e819a64)
