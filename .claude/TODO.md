@@ -12,8 +12,8 @@
 
 ### 2. Archives orphelines — écriture incrémentale du rapport
 
-- **2a.** Remplacer l'appel unique `_write_orphans_report` par un flush à chaque étape de vérification
-- **2b.** Format : un commit/étape = une ligne écrite dans `archives_orphelines.md` (UUID archive, statut, action)
+- ~~**2a.** Remplacer l'appel unique `_write_orphans_report` par un flush à chaque étape de vérification~~ — fait : nouvelle méthode `_flush_orphans_progress` réécrivant `archives_orphelines.md` à chaque archive traitée dans la boucle Divine.exe (une interruption en cours de route laisse un rapport partiel exploitable au lieu de rien) ; `_write_orphans_report` reste appelée une dernière fois en fin de boucle pour le regroupement final poli (orphelines/non vérifiables)
+- ~~**2b.** Format : un commit/étape = une ligne écrite dans `archives_orphelines.md` (UUID archive, statut, action)~~ — fait : chaque ligne de progression (`_orphan_report_row`) porte le nom d'archive, taille, origine, date, et un statut clair (« orpheline confirmée », « faux positif écarté », « non vérifiable ») — adapté par rapport à l'UUID d'archive mentionné à l'origine (une archive peut contenir plusieurs .pak/UUID, le nom de fichier identifie sans ambiguïté la ligne)
 
 ## P1 — Haute priorité
 

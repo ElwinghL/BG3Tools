@@ -104,6 +104,23 @@ def _human_size(size_bytes: int) -> str:
         size /= 1024
     return f"{size:.1f} Go"
 
+
+def _orphan_report_row(archive: dict, statut: str) -> str:
+    """Formate une ligne de tableau Markdown pour le rapport d'archives
+    orphelines (`run_orphaned_archives` / `_flush_orphans_progress`), avec
+    une colonne Statut en plus du format historique — une ligne = une
+    archive déjà traitée, suffisante à elle seule pour savoir ce qui a été
+    décidé pour cette archive sans attendre la fin du lot."""
+    origin = (
+        f"[{archive['mod_name_guess']}]({archive['nexus_url']})"
+        if archive.get("nexus_url")
+        else (archive.get("mod_name_guess") or "?")
+    )
+    return (
+        f"| {archive['file']} | {_human_size(archive['size_bytes'])} | "
+        f"{origin} | {archive['modified'][:10]} | {statut} |"
+    )
+
 # Contraste renforcé pour les cases à cocher des `SelectionList` (utilisée
 # par `NexusFileSelectionScreen` et `NexusBlacklistScreen`) : le style par
 # défaut de Textual ne distingue coché/décoché que par la couleur d'un
@@ -1455,8 +1472,13 @@ class ActionsScreen(Screen):
             log=log,
         )
 
+        report_dir = profile_data_dir(self._config.profiles_dir, self._config.active_profile)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "archives_orphelines.md"
+
         confirmed: list[dict] = []
         unverifiable: list[dict] = []
+        processed: list[tuple[dict, str]] = []
         total_candidates = len(candidates)
         # Un par un si peu de candidats, sinon un intervalle qui garde des
         # mises à jour fréquentes sans spammer sur un gros lot (même logique
@@ -1477,8 +1499,21 @@ class ActionsScreen(Screen):
                 # la méthode par UUID ne s'applique pas, on ne peut pas
                 # confirmer — gardé à part plutôt que déclaré orphelin à tort.
                 unverifiable.append(archive)
+                statut = "non vérifiable (pas de .pak dans l'archive)"
             elif not any(uuid in deployed_uuids for uuid, _name in identities):
                 confirmed.append(archive)
+                statut = "orpheline confirmée (UUID absent des .pak déployés)"
+            else:
+                statut = "faux positif écarté (mod toujours déployé)"
+            processed.append((archive, statut))
+            # Flush à chaque étape plutôt qu'un seul écrit final : chaque
+            # appel à Divine.exe est lent (un sous-processus par archive), un
+            # gros lot peut prendre plusieurs minutes — une interruption en
+            # cours de route (fermeture de l'app, crash) laisse ainsi un
+            # rapport partiel avec les décisions déjà prises, au lieu de rien.
+            self._flush_orphans_progress(
+                report_path, processed, done=index, total=total_candidates
+            )
 
         discarded = len(candidates) - len(confirmed) - len(unverifiable)
         log(
@@ -1488,6 +1523,39 @@ class ActionsScreen(Screen):
             f"(pas de .pak dedans)."
         )
         self._write_orphans_report(confirmed, verified=True, unverifiable=unverifiable)
+
+    def _flush_orphans_progress(
+        self,
+        report_path: Path,
+        processed: list[tuple[dict, str]],
+        *,
+        done: int,
+        total: int,
+    ) -> None:
+        """Réécrit `archives_orphelines.md` avec l'état accumulé jusqu'ici
+        (une ligne par archive déjà traitée, avec son statut). Réécriture
+        complète du fichier à chaque étape plutôt qu'un simple append :
+        plus de réécritures disque, mais pour un lot de quelques
+        dizaines/centaines d'archives au pire, c'est négligeable — et ça
+        évite de maintenir deux formats différents (un « brut » en append,
+        un « poli » à la fin) : la version finale, écrite par
+        `_write_orphans_report` une fois la vérification terminée, remplace
+        simplement ce rapport de progression par un regroupement par statut
+        plus lisible."""
+        lines = [
+            "# Archives potentiellement orphelines\n",
+            (
+                f"Vérification par UUID réel (Divine.exe) en cours : "
+                f"{done}/{total} archive(s) traitée(s). Rapport mis à jour "
+                f"au fil de l'eau — une interruption ne perd pas les "
+                f"décisions déjà prises ci-dessous.\n"
+            ),
+            "| Archive | Taille | Origine | Modifiée | Statut |",
+            "|---|---|---|---|---|",
+        ]
+        lines += [_orphan_report_row(archive, statut) for archive, statut in processed]
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def _write_orphans_report(
         self,
