@@ -58,6 +58,7 @@ lève une exception."""
 from __future__ import annotations
 
 import mmap
+import re
 import struct
 import zlib
 from dataclasses import dataclass
@@ -401,4 +402,75 @@ def read_meta_lsx_or_lsf_bytes(pak_path: Path) -> tuple[str, bytes] | None:
         lsf_entry = pak.find_suffix("meta.lsf")
         if lsf_entry is not None:
             return "lsf", pak.read(lsf_entry)
+    return None
+
+
+# Magie "LSOF" (LSF = "Larian Story Format" ; à ne pas confondre avec le
+# format LSPK du .pak lui-même), en uint32 little-endian — même convention
+# que la signature LSPK ("LSOF" en ASCII direct).
+_LSF_SIGNATURE = 0x464F534C
+
+# UUID au format texte standard (8-4-4-4-12 hexadécimal), tel qu'utilisé
+# par les attributs `UUID` du `ModuleInfo` (ex: "d7cee0e7-77e4-4db8-b40d-
+# 3b30beb2eb17") — ce motif est le même que celui écrit en clair dans un
+# meta.lsx, donc a de bonnes chances de rester repérable tel quel même
+# noyé dans les octets bruts (compressés ou non) d'un meta.lsf, sans avoir
+# besoin de parser la structure binaire complète LSOF (chunks Names/
+# Nodes/Attributes/Values) pour le localiser précisément.
+_UUID_RE = re.compile(
+    rb"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
+
+
+def _find_uuids(data: bytes) -> list[str]:
+    return [m.group().decode("ascii") for m in _UUID_RE.finditer(data)]
+
+
+def extract_uuid_from_lsf_bytes(data: bytes) -> str | None:
+    """Extrait l'UUID du mod depuis le contenu brut (déjà décompressé au
+    niveau du .pak) d'un `meta.lsf` — approche pragmatique par regex sur
+    les octets bruts plutôt qu'un parseur complet du format binaire LSOF
+    (chunks Names/Nodes/Attributes/Values, cf. LSLib `LSFReader`), suggérée
+    par la tâche d'origine : un `meta.lsf` est un petit fichier (quelques
+    Ko) où le texte de l'UUID (et des autres chaînes) apparaît le plus
+    souvent en clair, que le fichier soit stocké sans compression interne
+    ou compressé (zlib) niveau LSF.
+
+    Tente d'abord une recherche directe sur `data` (cas non compressé, ou
+    UUID situé dans une portion non compressée du fichier). Si aucun UUID
+    n'est trouvé, tente une décompression zlib de tout ce qui suit le
+    magic+version (8 premiers octets) — hypothèse pragmatique sur le
+    format interne des chunks LSF compressés en `deflate` brut, la plus
+    répandue pour ce format selon LSLib — puis recherche à nouveau.
+
+    Retourne le premier UUID trouvé (celui du nœud `ModuleInfo` apparaît
+    généralement avant ceux de `Dependencies` dans le flux, mais ceci
+    n'est PAS garanti par cette approche uniquement textuelle — voir la
+    limite documentée dans le module). None si aucun UUID n'est trouvé
+    par aucune des deux tentatives.
+
+    Ne vérifie même pas la signature `LSOF` : accepte `data` tel quel,
+    volontairement tolérant (l'appelant sait déjà qu'il s'agit d'un
+    `meta.lsf` par son chemin interne dans le .pak)."""
+    direct = _find_uuids(data)
+    if direct:
+        return direct[0]
+
+    # Deuxième tentative : les chunks de données utiles d'un .lsf peuvent
+    # être compressés (zlib/deflate) indépendamment du .pak qui le
+    # contient — on saute le magic (4) + version (4) et on tente une
+    # décompression brute du reste, à défaut de parser le header de
+    # métadonnées exact (qui diffère selon la version du LSF, V2/V3 vs
+    # V5/V6 — non nécessaire pour cette approche best-effort).
+    if len(data) <= 8:
+        return None
+    payload = data[8:]
+    for wbits in (zlib.MAX_WBITS, -zlib.MAX_WBITS):
+        try:
+            decompressed = zlib.decompress(payload, wbits)
+        except zlib.error:
+            continue
+        found = _find_uuids(decompressed)
+        if found:
+            return found[0]
     return None
