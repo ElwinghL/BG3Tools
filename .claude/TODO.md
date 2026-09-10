@@ -37,8 +37,8 @@
 
 ### 7. Vue par onglets (Tâches / Outils / Web)
 
-- **7a.** Garder les trois consoles de base
-- **7b.** Console Tâches : si une tâche tourne déjà et qu'un bouton déclenche une écriture → créer un onglet dédié au lieu d'empiler
+- ~~**7a.** Garder les trois consoles de base~~ — déjà en place (4 onglets statiques dans `compose()` : Tâches, Téléchargements, Outils, Web), vérifié après 7b, rien à changer
+- ~~**7b.** Console Tâches : si une tâche tourne déjà et qu'un bouton déclenche une écriture → créer un onglet dédié au lieu d'empiler~~ — fait : `ActionsScreen._start_task`/`_acquire_task_console` (nouvel onglet dynamique via `TabbedContent.add_pane` si une tâche est déjà active, détecté via `self._active_tasks` peuplé/vidé sur le cycle de vie des `Worker` Textual) + `_resource_conflict` (verrouillage par étiquette de ressource — "mods-dir", "archives", "native-mods", "modsettings", "tools-dir"/"game-bin-dir" — pour garder mutuellement exclusives les actions qui écrivent dans les mêmes fichiers, même dans des onglets séparés) ; chaque `@work` a son propre groupe Textual (les ~16 workers "Tâches" partageaient tous le groupe "default" avant ce correctif, donc s'annulaient mutuellement dès qu'une autre action était lancée)
 
 ### 8. Profils + quick actions
 
