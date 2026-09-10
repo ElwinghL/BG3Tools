@@ -912,7 +912,12 @@ class ActionsScreen(Screen):
                 access_token=os.environ.get("MODIO_ACCESS_TOKEN") or None,
             )
             report = download_subscribed_modio_mods(
-                client, self._config.archives_dir, log=log)
+                client,
+                self._config.archives_dir,
+                archives_installed_dir=self._config.archives_installed_dir,
+                archives_pending_dir=self._config.archives_pending_dir,
+                log=log,
+            )
             log(
                 f"Terminé (mod.io) : {len(report['downloaded'])} téléchargé(s), "
                 f"{len(report['skipped'])} déjà présent(s), "

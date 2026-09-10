@@ -114,6 +114,41 @@ def known_mod_ids(*directories: Path) -> set[int]:
     return ids
 
 
+# Nom de secours utilisé par `mod_pipeline.download_subscribed_modio_mods`
+# quand mod.io ne fournit pas de nom de fichier exploitable (pas de
+# Content-Disposition — l'URL de téléchargement mod.io est générique,
+# littéralement `.../download` pour tous les mods) :
+# "<nom du mod>-modio<mod_id>.<ext>", ex: "Aesir's Champion
+# Set-modio5990151.zip". `(?!\d)` évite qu'un ID plus long ne matche
+# partiellement (ex: "modio123" ne doit pas matcher dans "modio1234").
+_MODIO_ID_RE = re.compile(r"-modio(?P<id>\d+)(?!\d)", re.IGNORECASE)
+
+
+def known_modio_ids(*directories: Path) -> set[int]:
+    """Équivalent de `known_mod_ids` pour les mods mod.io : repère l'ID
+    mod.io inséré dans le nom de fichier de secours (voir `_MODIO_ID_RE`)
+    parmi les archives de `directories`.
+
+    Best-effort : si un téléchargement mod.io fournit un vrai nom de
+    fichier via Content-Disposition (pas de nom de secours nécessaire),
+    celui-ci ne contient pas forcément ce motif et le mod correspondant ne
+    sera pas détecté ici — dans ce cas, comme avant ce correctif, un
+    nouveau téléchargement du même mod n'est pas reconnu comme doublon
+    par cette fonction (à la différence du mécanisme namé sur les
+    archives Nexus, dont le nom encode toujours l'ID)."""
+    ids: set[int] = set()
+    for directory in directories:
+        if not directory.is_dir():
+            continue
+        for path in directory.iterdir():
+            if not path.is_file() or path.suffix.lower() not in (".zip", ".rar", ".7z"):
+                continue
+            match = _MODIO_ID_RE.search(path.stem)
+            if match:
+                ids.add(int(match.group("id")))
+    return ids
+
+
 def _mtime_iso(path: Path) -> str:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
 

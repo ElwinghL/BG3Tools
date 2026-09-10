@@ -13,7 +13,7 @@ from pathlib import Path
 from bg3_mod_tui.archives import ArchiveError, extract_archive, is_supported_archive
 from bg3_mod_tui.downloader import download_file, resolve_remote_filename
 from bg3_mod_tui.game_deploy import deploy_loose_files
-from bg3_mod_tui.inventory import known_mod_ids
+from bg3_mod_tui.inventory import known_mod_ids, known_modio_ids
 from bg3_mod_tui.native_mods import (
     NativeModsManifestError,
     deploy_native_mod_archive,
@@ -176,10 +176,24 @@ def download_subscribed_modio_mods(
     client: ModIOClient,
     dest_dir: Path,
     *,
+    archives_installed_dir: Path | None = None,
+    archives_pending_dir: Path | None = None,
     log: LogFn = lambda _msg: None,
 ) -> dict[str, list]:
     """Télécharge, pour chaque mod auquel le compte mod.io est abonné, son
     fichier vers `dest_dir`.
+
+    Un mod est considéré comme déjà présent s'il a une archive dans
+    `dest_dir` OU dans `archives_installed_dir`/`archives_pending_dir` (une
+    archive déjà extraite a été déplacée hors de `dest_dir`, sans quoi
+    elle serait retéléchargée à chaque passage — voir `known_modio_ids`,
+    et le même principe côté Nexus dans `download_mods_from_links_file`).
+    Sans ce contrôle, le fichier retéléchargé prend un nom légèrement
+    différent une fois déplacé dans `archives_installed_dir` (suffixe
+    "(1)", "(2)"... ajouté par `_unique_destination` car le nom d'origine
+    y existe déjà) : symptôme observé de véritables archives dupliquées,
+    pas seulement des .pak (voir `extract_archives_to_mods`, qui lui ne
+    duplique plus que le contenu .pak, pas l'archive).
 
     Retourne {"downloaded": [...], "skipped": [...], "failed": [(name, err)]}.
     """
@@ -195,7 +209,16 @@ def download_subscribed_modio_mods(
     log(f"{len(mods)} mod(s) abonné(s) sur mod.io.")
     dest_dir.mkdir(parents=True, exist_ok=True)
 
+    already_present_ids = known_modio_ids(
+        dest_dir, *(d for d in (archives_installed_dir, archives_pending_dir) if d is not None)
+    )
+
     for mod in mods:
+        if mod.mod_id in already_present_ids:
+            log(fmt_row(mod.name, STATUS_IGNORE, detail="déjà présent"))
+            report["skipped"].append(mod.name)
+            continue
+
         if not mod.download_url:
             log(fmt_row(mod.name, STATUS_ECHEC, detail="pas de fichier disponible"))
             report["failed"].append((mod.name, "pas de fichier disponible"))

@@ -1,14 +1,21 @@
 """Tests de `bg3_mod_tui.mod_pipeline` : `_unique_destination` (évite
-d'écraser un fichier existant en suffixant "(1)", "(2)"...) et
+d'écraser un fichier existant en suffixant "(1)", "(2)"...),
 `extract_archives_to_mods` sur un cas simple avec de vraies archives .zip
-temporaires (dédup des .pak déjà présents dans `mods_dir`)."""
+temporaires (dédup des .pak déjà présents dans `mods_dir`), et
+`download_subscribed_modio_mods` (ne retélécharge pas un mod mod.io déjà
+installé/en attente)."""
 
 from __future__ import annotations
 
 import zipfile
 from pathlib import Path
 
-from bg3_mod_tui.mod_pipeline import _unique_destination, extract_archives_to_mods
+from bg3_mod_tui.mod_pipeline import (
+    _unique_destination,
+    download_subscribed_modio_mods,
+    extract_archives_to_mods,
+)
+from bg3_mod_tui.providers.modio import ModIOMod
 
 
 def _make_zip(path: Path, *entries: tuple[str, bytes]) -> None:
@@ -169,3 +176,66 @@ def test_extract_archives_to_mods_archive_corrompue_est_signalee_en_echec(tmp_pa
     assert len(report["failed"]) == 1
     assert report["failed"][0][0] == "Corrompu.zip"
     assert (dirs["pending_dir"] / "Corrompu.zip").is_file()
+
+
+class _FakeModIOClient:
+    def __init__(self, mods: list[ModIOMod]) -> None:
+        self._mods = mods
+
+    def subscribed_mods(self) -> list[ModIOMod]:
+        return self._mods
+
+
+def test_download_subscribed_modio_mods_deja_installe_n_est_pas_retelecharge(tmp_path):
+    # Reproduit le bug racine : un mod mod.io déjà déplacé vers
+    # `_installees` (installé lors d'un run précédent) ne doit pas être
+    # retéléchargé, sous peine de créer une archive dupliquée (suffixée
+    # "(1)" par `_unique_destination` lors du prochain passage
+    # d'`extract_archives_to_mods`, faute de mieux le nom d'origine étant
+    # déjà pris dans `_installees`).
+    dest_dir = tmp_path / "a_traiter"
+    installed_dir = tmp_path / "_installees"
+    installed_dir.mkdir(parents=True)
+    (installed_dir / "Aesir's Champion Set-modio5990151.zip").write_bytes(b"contenu deja installe")
+
+    client = _FakeModIOClient(
+        [ModIOMod(mod_id=5990151, name="Aesir's Champion Set", summary="", download_url=None)]
+    )
+
+    report = download_subscribed_modio_mods(
+        client, dest_dir, archives_installed_dir=installed_dir
+    )
+
+    assert report["skipped"] == ["Aesir's Champion Set"]
+    assert report["downloaded"] == []
+    assert report["failed"] == []
+    assert not dest_dir.exists() or not any(dest_dir.iterdir())
+
+
+def test_download_subscribed_modio_mods_detecte_aussi_via_le_dossier_en_attente(tmp_path):
+    dest_dir = tmp_path / "a_traiter"
+    pending_dir = tmp_path / "_a_traiter"
+    pending_dir.mkdir(parents=True)
+    (pending_dir / "MonMod-modio42.zip").write_bytes(b"x")
+
+    client = _FakeModIOClient([ModIOMod(mod_id=42, name="MonMod", summary="", download_url=None)])
+
+    report = download_subscribed_modio_mods(
+        client, dest_dir, archives_pending_dir=pending_dir
+    )
+
+    assert report["skipped"] == ["MonMod"]
+
+
+def test_download_subscribed_modio_mods_mod_absent_sans_download_url_echoue(tmp_path):
+    # Sans les dossiers de détection (ou si le mod n'y figure vraiment
+    # pas), le comportement antérieur au correctif est inchangé : un mod
+    # sans URL de téléchargement échoue normalement (pas de faux "déjà
+    # présent").
+    dest_dir = tmp_path / "a_traiter"
+    client = _FakeModIOClient([ModIOMod(mod_id=99, name="AutreMod", summary="", download_url=None)])
+
+    report = download_subscribed_modio_mods(client, dest_dir)
+
+    assert report["failed"] == [("AutreMod", "pas de fichier disponible")]
+    assert report["skipped"] == []
