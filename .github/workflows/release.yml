@@ -1,0 +1,62 @@
+name: Release
+
+# Miroir GitHub Actions de .gitea/workflows/release.yml : se déclenche sur
+# les push sur main qui touchent pyproject.toml (bump de version), réutilise
+# scripts/make_release.sh, et publie la release via `gh release create`
+# (équivalent GitHub de l'appel à l'API Gitea du workflow d'origine). Si le
+# tag existe déjà, le job ne fait rien.
+on:
+  push:
+    branches: [main]
+    paths:
+      - pyproject.toml
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Lire la version / vérifier si le tag existe déjà
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Construire l'archive et poser le tag
+        if: steps.version.outputs.exists == 'false'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zip python3 >/dev/null
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          ./scripts/make_release.sh
+
+      - name: Pousser le tag
+        if: steps.version.outputs.exists == 'false'
+        run: git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Publier la Release GitHub (avec le zip en pièce jointe)
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            "dist/bg3-mod-tui-${TAG}.zip" \
+            --title "$TAG" \
+            --generate-notes

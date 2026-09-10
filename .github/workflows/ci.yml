@@ -1,8 +1,8 @@
 name: CI
 
-# Lance la suite pytest à chaque push/PR vers main, indépendamment du
-# workflow Release (qui ne se déclenche que sur un bump de version dans
-# pyproject.toml) — feedback rapide sur toute régression.
+# Miroir GitHub Actions de .gitea/workflows/ci.yml (même déclencheurs, même
+# suite pytest) — Gitea reste la CI de référence, ce doublon sert aux PR/push
+# GitHub le cas échéant.
 on:
   push:
     branches: [main]
@@ -12,7 +12,7 @@ on:
 
 jobs:
   tests:
-    runs-on: debian-git-bun
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
