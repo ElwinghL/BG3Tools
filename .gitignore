@@ -59,6 +59,19 @@ __pycache__/
 
 /Tools/Native Mod Loader/bin/*.dll
 
+/Tools/MoreReactiveCompanionsConfigApp/*.exe
+/Tools/MoreReactiveCompanionsConfigApp/*.png
+/Tools/MoreReactiveCompanionsConfigApp/*.txt
+
+# Archive Nexus déposée manuellement en attente de traitement par
+# tools_manager.py (compte non-Premium, pas de téléchargement direct
+# possible — voir _install_nexus_tool) : ne doit jamais être commitée,
+# qu'elle soit encore en attente ou déjà consommée (déplacée sous
+# Archives_installees/, déjà ignoré ci-dessus).
+/Tools/*.zip
+/Tools/*.rar
+/Tools/*.7z
+
 # Sources téléchargées depuis GitHub (pas de release/.pak fourni — voir
 # compat_framework.py, qui reconstruit le .pak localement à partir
 # d'elles via Divine.exe) : pas notre code.
