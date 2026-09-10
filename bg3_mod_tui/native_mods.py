@@ -83,7 +83,7 @@ def _hardlink_into(dest_dir: Path, source: Path, *, log: LogFn) -> None:
     target = dest_dir / source.name
     if target.exists():
         if target.stat().st_ino == source.stat().st_ino:
-            log(f"  '{target.name}' déjà relié, rien à faire.")
+            log(f"  '{target.name}' déjà relié vers '{source}', rien à faire.")
             return
         target.unlink()
     os.link(source, target)

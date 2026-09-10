@@ -70,7 +70,7 @@ def _replace_with_hardlink_backup(target: Path, source: Path, backup: Path, *, l
     sauvegardé qu'une seule fois — un `backup` déjà présent n'est jamais
     écrasé)."""
     if target.exists() and target.stat().st_ino == source.stat().st_ino:
-        log(f"  '{target.name}' déjà un hardlink vers notre copie, rien à faire.")
+        log(f"  '{target.name}' déjà un hardlink vers '{source}', rien à faire.")
         return
 
     if target.exists():
@@ -132,7 +132,7 @@ def _hardlink_replace(target: Path, source: Path, *, log: LogFn) -> None:
     fichiers gérés par nous (pas de notion d'« original du jeu » à
     préserver, contrairement à `_replace_with_hardlink_backup`)."""
     if target.exists() and target.stat().st_ino == source.stat().st_ino:
-        log(f"  '{target.name}' déjà un hardlink vers notre copie, rien à faire.")
+        log(f"  '{target.name}' déjà un hardlink vers '{source}', rien à faire.")
         return
     if target.exists():
         target.unlink()
