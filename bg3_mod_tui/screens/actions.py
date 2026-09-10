@@ -825,11 +825,13 @@ class ActionsScreen(Screen):
                             "directement le module Gustav), d'où le warning "
                             "\"no meta.lsx\"/\"no valid load-order UUID\" dans les "
                             "validateurs de load order — bénin mais gênant à distinguer "
-                            "d'un vrai problème. Ce bouton reconstruit ModFixerFork.pak "
-                            "(module séparé, meta.lsx propre) via Divine.exe à partir de "
-                            "ModFixer.pak déjà déployé, sans le toucher — effet non "
-                            "garanti à 100% (voir mod_fixer_fork.py) et de toute façon "
-                            "plus nécessaire depuis le Patch 7 de BG3 selon Nexus."
+                            "d'un vrai problème. Ce bouton remplace ModFixer.pak par une "
+                            "version forkée (module séparé, meta.lsx propre, même UUID "
+                            "stable à chaque reconstruction) via Divine.exe — un seul "
+                            "fichier au final, l'original étant sauvegardé une fois pour "
+                            "toutes dans ModFixer.pak.orig. Effet non garanti à 100% (voir "
+                            "mod_fixer_fork.py) et de toute façon plus nécessaire depuis le "
+                            "Patch 7 de BG3 selon Nexus."
                         ),
                     )
                     yield Button(

@@ -12,11 +12,16 @@ mais gênant à distinguer d'un vrai problème.
 Ce module reconstruit donc un module séparé ("ModFixerFork", meta.lsx
 propre avec un UUID généré) contenant le même fichier au même chemin
 relatif — sous son propre dossier, jamais sous `Mods/Gustav/` (écraser le
-meta.lsx du module de base serait dangereux). Effet non garanti à 100% :
-si le moteur cible spécifiquement le cache du module Gustav pour décider
-de recompiler la story, ce fork sous un autre nom de module pourrait ne
-pas avoir le même effet — Nexus indique de toute façon que ce mod n'est
-plus nécessaire à partir du Patch 7 de BG3.
+meta.lsx du module de base serait dangereux) — puis remplace `ModFixer.pak`
+par ce résultat (même nom de fichier, un seul .pak dans Mods/ : pas de
+doublon "ModFixer.pak" + "ModFixerFork.pak" à gérer soi-même). L'original
+est sauvegardé une fois pour toutes en `ModFixer.pak.orig` avant la
+première réécriture, pour rester réversible.
+
+Effet non garanti à 100% : si le moteur cible spécifiquement le cache du
+module Gustav pour décider de recompiler la story, ce fork sous un autre
+nom de module pourrait ne pas avoir le même effet — Nexus indique de toute
+façon que ce mod n'est plus nécessaire à partir du Patch 7 de BG3.
 
 Comme pour `compat_framework.py`, le .pak résultant n'est jamais committé
 (voir .gitignore) : reconstruit localement via Divine.exe (LSLib) à partir
@@ -28,7 +33,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -39,8 +43,16 @@ from bg3_mod_tui.platform_utils import find_proton_prefix, is_windows, to_wine_p
 LogFn = Callable[[str], None]
 
 ORIGINAL_PAK_NAME = "ModFixer.pak"
-FORK_PAK_NAME = "ModFixerFork.pak"
+# Sauvegarde de l'original, écrite une seule fois (avant la toute première
+# réécriture) pour pouvoir revenir en arrière — jamais retouchée ensuite,
+# même si le fork est reconstruit plusieurs fois.
+ORIGINAL_BACKUP_NAME = "ModFixer.pak.orig"
 FORK_MODULE_NAME = "ModFixerFork"
+# UUID fixe (généré une fois, jamais recalculé) plutôt qu'un uuid4()
+# aléatoire à chaque reconstruction : un profil sauvegardé ou modsettings.lsx
+# qui référencerait ce module par UUID ne doit pas se retrouver cassé si le
+# fork est reconstruit une seconde fois (ex: après mise à jour de Divine.exe).
+FORK_UUID = "d0d7859c-09ab-45b7-b618-b59dded29403"
 # Chemin du fichier "déclencheur" à l'intérieur du module d'origine
 # (Gustav) — reproduit tel quel sous le nouveau module.
 _OVERRIDE_RELATIVE_PATH = Path("Story/RawFiles/Goals/ForceRecompile.txt")
@@ -149,15 +161,23 @@ def build_fork(
     reference_path: Path,
     log: LogFn = lambda _msg: None,
 ) -> Path:
-    """Reconstruit `ModFixerFork.pak` (voir docstring du module) dans
-    `mods_dir`, à partir de `mods_dir/ModFixer.pak` déjà déployé.
+    """Reconstruit `ModFixer.pak` (voir docstring du module) dans
+    `mods_dir`, en l'écrasant par sa propre version forkée (meta.lsx
+    propre) — un seul fichier au final, pas un `ModFixerFork.pak` séparé
+    à gérer en plus de l'original.
 
-    Lève `ModFixerForkError` si `ModFixer.pak` ou Divine.exe sont
-    introuvables, ou si son contenu ne correspond pas à celui attendu
-    (mod mis à jour entre-temps par son auteur, ou fichier différent) —
-    on refuse de repackager à l'aveugle plutôt que de produire un fork
-    silencieusement incorrect."""
-    original_pak = mods_dir / ORIGINAL_PAK_NAME
+    Lève `ModFixerForkError` si `ModFixer.pak` (ou sa sauvegarde
+    `ModFixer.pak.orig`, si l'original a déjà été remplacé lors d'un appel
+    précédent) ou Divine.exe sont introuvables, ou si son contenu ne
+    correspond pas à celui attendu (mod mis à jour entre-temps par son
+    auteur, ou fichier différent) — on refuse de repackager à l'aveugle
+    plutôt que de produire un fork silencieusement incorrect."""
+    dest_pak = mods_dir / ORIGINAL_PAK_NAME
+    backup_pak = mods_dir / ORIGINAL_BACKUP_NAME
+    # Source à extraire : la sauvegarde si ModFixer.pak a déjà été remplacé
+    # par un fork précédent (sinon on repackagerait le fork lui-même, dont
+    # la structure Mods/ModFixerFork/ ne correspond plus à _ORIGINAL_MODULE_NAME).
+    original_pak = backup_pak if backup_pak.is_file() else dest_pak
     if not original_pak.is_file():
         raise ModFixerForkError(
             f"{ORIGINAL_PAK_NAME} introuvable dans {mods_dir} — installe d'abord Mod "
@@ -201,14 +221,16 @@ def build_fork(
         dest_override.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_file, dest_override)
 
-        new_uuid = str(uuid.uuid4())
         (fork_module_dir / "meta.lsx").write_text(
-            _META_LSX_TEMPLATE.format(folder=FORK_MODULE_NAME, uuid=new_uuid),
+            _META_LSX_TEMPLATE.format(folder=FORK_MODULE_NAME, uuid=FORK_UUID),
             encoding="utf-8",
         )
 
-        dest_pak = mods_dir / FORK_PAK_NAME
-        log(f"Empaquetage de {FORK_PAK_NAME} (UUID {new_uuid}) via Divine.exe...")
+        if not backup_pak.is_file():
+            shutil.copy2(original_pak, backup_pak)
+            log(f"Original sauvegardé -> {backup_pak} (avant première réécriture).")
+
+        log(f"Empaquetage de {ORIGINAL_PAK_NAME} (UUID {FORK_UUID}) via Divine.exe...")
         _run_divine(
             divine_exe,
             "create-package",
@@ -223,7 +245,7 @@ def build_fork(
         raise ModFixerForkError(f"Échec de l'empaquetage : {dest_pak} n'a pas été créé.")
 
     log(
-        f"{FORK_PAK_NAME} créé -> {dest_pak}. {ORIGINAL_PAK_NAME} n'a pas été "
-        "touché/supprimé — à retirer toi-même de Mods/ si tu ne gardes que le fork."
+        f"{ORIGINAL_PAK_NAME} remplacé par le fork -> {dest_pak} (original conservé "
+        f"dans {backup_pak.name})."
     )
     return dest_pak
