@@ -23,11 +23,11 @@ dev = ["pytest>=8.0"]
 testpaths = ["tests"]
 
 [build-system]
-requires = ["poetry-core>=1.7.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-# poetry-core lit directement les métadonnées/dépendances de [project]
+# hatchling lit directement les métadonnées/dépendances de [project]
 # ci-dessus (PEP 621) ; cette section ne sert qu'à préciser le paquet à
-# empaqueter (sinon poetry-core ne le détecte pas automatiquement).
-[tool.poetry]
-packages = [{ include = "bg3_mod_tui" }]
+# empaqueter (sinon hatchling ne le détecte pas automatiquement).
+[tool.hatch.build.targets.wheel]
+packages = ["bg3_mod_tui"]
