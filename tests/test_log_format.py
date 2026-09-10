@@ -1,12 +1,11 @@
-"""Tests de `bg3_mod_tui.log_format` : `_pad` (alignement par nombre de
-caractères — `len()`/`str.ljust()`, pas par largeur d'affichage
-`rich.cells.cell_len` : les caractères larges (CJK, emoji) ou les séquences
-combinantes (accents NFD) ne sont donc *pas* comptés selon leur largeur
-réelle à l'écran, ce qui peut désaligner les colonnes du RichLog pour ces
-cas — comportement actuel figé ici pour détecter toute régression future,
-qu'elle aille dans un sens ou dans l'autre) et `fmt_row` (colonnes alignées
-+ échappement du balisage Rich, qui ne s'applique qu'aux crochets dont le
-contenu ressemble à un tag Rich valide — voir `rich.markup.escape`)."""
+"""Tests de `bg3_mod_tui.log_format` : `_pad` (alignement en largeur
+d'affichage réelle via `rich.cells.cell_len`, après normalisation NFC —
+les caractères larges CJK/emoji comptent pour 2 colonnes, et un accent
+décomposé en NFD (lettre + diacritique combinant) est recomposé avant
+mesure pour occuper une seule colonne comme sa forme précomposée NFC) et
+`fmt_row` (colonnes alignées + échappement du balisage Rich, qui ne
+s'applique qu'aux crochets dont le contenu ressemble à un tag Rich valide
+— voir `rich.markup.escape`)."""
 
 from __future__ import annotations
 
@@ -44,43 +43,42 @@ def test_pad_largeur_nulle_ne_leve_pas():
     assert result == "…"
 
 
-def test_pad_caracteres_larges_cjk_compte_en_caracteres_pas_en_cellules():
-    # "あいう" pèse 3 caractères Python (`len`) mais 6 cellules d'affichage
-    # (`cell_len`) : `_pad` compte en caractères, donc le résultat ne fait
-    # PAS `width` cellules d'affichage ici — comportement actuel, figé pour
-    # détecter une régression (dans un sens comme dans l'autre).
+def test_pad_caracteres_larges_cjk_compte_en_largeur_affichage():
+    # Chaque caractère CJK occupe 2 cellules d'affichage : "あいう" pèse 6
+    # cellules, pas 3 caractères — `_pad` doit tronquer/compléter selon
+    # `cell_len`, pas `len()`, sous peine de casser l'alignement des
+    # colonnes suivantes dans le RichLog.
     text = "あいう"
     assert len(text) == 3
     assert cell_len(text) == 6
 
     result = _pad(text, 10)
-    assert len(result) == 10
+    assert cell_len(result) == 10
     assert result.startswith(text)
 
-    truncated = _pad(text, 2)
-    assert len(truncated) == 2
+    truncated = _pad(text, 5)
+    assert cell_len(truncated) == 5
     assert truncated.endswith("…")
 
 
-def test_pad_emoji_compte_en_caracteres():
+def test_pad_emoji_compte_en_largeur_affichage():
     text = "🎮 mod"
     result = _pad(text, 12)
-    assert len(result) == 12
+    assert cell_len(result) == 12
 
 
-def test_pad_accents_decomposes_nfd_comptes_comme_deux_caracteres():
-    # "é" décomposé NFD (e + accent combinant U+0301) occupe une seule
-    # cellule d'affichage mais compte comme 2 caractères pour `len()`/`_pad`
-    # — figé ici : la forme composée (NFC) et décomposée (NFD) d'un même
-    # texte affiché à l'identique produisent donc un padding de longueur
-    # identique (en caractères), mais pas la même largeur d'affichage.
+def test_pad_accents_decomposes_nfd_sont_recomposes_et_comptent_une_cellule():
+    # "é" décomposé NFD (e + accent combinant U+0301, 2 codepoints) occupe
+    # toujours une seule cellule d'affichage une fois recomposé en NFC —
+    # `_pad` normalise d'abord en NFC, donc la forme décomposée et sa forme
+    # précomposée équivalente ("é" seul) produisent le même padding.
     decomposed = unicodedata.normalize("NFD", "étoile")
     assert len(decomposed) == 7  # "e" + accent combinant + "toile" (5) = 7
     assert cell_len(decomposed) == 6
 
     result = _pad(decomposed, 10)
-    assert len(result) == 10
-    assert result.startswith(decomposed)
+    assert cell_len(result) == 10
+    assert result == _pad("étoile", 10)  # forme NFC équivalente : même résultat
 
 
 def test_fmt_row_colonnes_alignees_sur_les_largeurs_par_defaut():

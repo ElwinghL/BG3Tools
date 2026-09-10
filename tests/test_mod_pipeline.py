@@ -85,7 +85,10 @@ def test_extract_archives_to_mods_installe_un_pak_simple(tmp_path):
 def test_extract_archives_to_mods_dedup_pak_deja_present(tmp_path):
     # Le .pak "MonMod.pak" est déjà dans mods_dir (ex: extrait d'un
     # précédent passage) : l'extraction d'une nouvelle archive fournissant
-    # un .pak de même nom ne doit pas l'écraser mais créer "MonMod (1).pak".
+    # un .pak de même nom ne doit PAS l'écraser ni créer un doublon suffixé
+    # "MonMod (1).pak" — le .pak est ignoré (contenu existant préservé), et
+    # comme il s'agit du seul .pak de l'archive, celle-ci est classée
+    # "skipped" plutôt que "installed" (rien de nouveau à en tirer).
     dirs = _make_pipeline_dirs(tmp_path)
     (dirs["mods_dir"] / "MonMod.pak").write_bytes(b"ancienne version")
     _make_zip(dirs["archives_dir"] / "MonMod-update.zip", ("MonMod.pak", b"nouvelle version"))
@@ -97,9 +100,42 @@ def test_extract_archives_to_mods_dedup_pak_deja_present(tmp_path):
         dirs["installed_dir"],
     )
 
-    assert report["installed"] == ["MonMod-update.zip"]
+    assert report["installed"] == []
+    assert report["skipped"] == ["MonMod-update.zip"]
     assert (dirs["mods_dir"] / "MonMod.pak").read_bytes() == b"ancienne version"
-    assert (dirs["mods_dir"] / "MonMod (1).pak").read_bytes() == b"nouvelle version"
+    assert not (dirs["mods_dir"] / "MonMod (1).pak").exists()
+    # L'archive est tout de même déplacée vers _installees/ (rien de plus à
+    # en tirer dans archives_dir), même si aucun .pak n'a été copié.
+    assert (dirs["installed_dir"] / "MonMod-update.zip").is_file()
+    assert not (dirs["archives_dir"] / "MonMod-update.zip").exists()
+
+
+def test_extract_archives_to_mods_pak_partiellement_deja_present(tmp_path):
+    # Archive avec deux .pak, dont un seul déjà présent dans mods_dir :
+    # l'archive reste "installed" (au moins un .pak neuf copié), et le
+    # détail journalisé mentionne le nombre de .pak ignorés en doublon.
+    dirs = _make_pipeline_dirs(tmp_path)
+    (dirs["mods_dir"] / "Deja.pak").write_bytes(b"deja la")
+    _make_zip(
+        dirs["archives_dir"] / "Combo.zip",
+        ("Deja.pak", b"contenu ignore"),
+        ("Nouveau.pak", b"contenu neuf"),
+    )
+    logs: list[str] = []
+
+    report = extract_archives_to_mods(
+        dirs["archives_dir"],
+        dirs["mods_dir"],
+        dirs["pending_dir"],
+        dirs["installed_dir"],
+        log=logs.append,
+    )
+
+    assert report["installed"] == ["Combo.zip"]
+    assert report["skipped"] == []
+    assert (dirs["mods_dir"] / "Deja.pak").read_bytes() == b"deja la"
+    assert (dirs["mods_dir"] / "Nouveau.pak").read_bytes() == b"contenu neuf"
+    assert any("déjà présent" in line for line in logs)
 
 
 def test_extract_archives_to_mods_archive_sans_pak_ni_dossier_connu_va_en_examen(tmp_path):
