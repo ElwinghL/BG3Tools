@@ -58,6 +58,13 @@ SelectNestedArchivesFn = Callable[[str, list[Path]], list[Path]]
 
 _INTERNAL_DIR_NAMES = {"_a_traiter", "_installees"}
 
+# Nexus limite le nombre de téléchargements simultanés autorisés pour un
+# compte Premium (l'unique moyen documenté d'obtenir des liens de
+# téléchargement direct via l'API) — 6 est une valeur prudente, sous ce
+# plafond, choisie pour `download_mods_from_links_file` (sous-tâche 5b du
+# TODO "Téléchargements parallèles").
+_NEXUS_MAX_DOWNLOAD_THREADS = 6
+
 # mod.io ne documente aucune limite de téléchargements simultanés côté API
 # (contrairement à Nexus, voir `_NEXUS_MAX_DOWNLOAD_THREADS` dans
 # `download_mods_from_links_file`) — la parallélisation de
@@ -117,6 +124,20 @@ def download_mods_from_links_file(
     archive déjà extraite a été déplacée hors de `dest_dir`, sans quoi elle
     serait retéléchargée à chaque passage).
 
+    Sous-tâche 5b du TODO "Téléchargements parallèles" : les téléchargements
+    eux-mêmes sont parallélisés, jusqu'à `_NEXUS_MAX_DOWNLOAD_THREADS` (6)
+    threads à la fois (contrairement à mod.io, voir
+    `MODIO_MAX_DOWNLOAD_THREADS`, Nexus impose une vraie limite de
+    téléchargements simultanés côté API pour les comptes Premium — 6 est une
+    valeur prudente qui reste sous ce plafond). En revanche, `select_files`
+    (le wizard de sélection de variantes, un écran modal Textual — voir
+    `ActionsScreen._select_nexus_files`) reste appelé de façon strictement
+    SÉQUENTIELLE : toute la phase de préparation (info + fichiers + choix des
+    variantes pour chaque mod) tourne d'abord sur le thread appelant, avant
+    que le pool de téléchargement ne démarre — afficher plusieurs wizards à
+    la fois n'aurait pas de sens (un seul écran modal visible à la fois de
+    toute façon) et risquerait une vraie course sur `push_screen`.
+
     Retourne {"downloaded": [...], "skipped": [...], "failed": [(id, err)]}.
     """
     mod_ids = parse_mod_links_file(links_file)
@@ -131,7 +152,15 @@ def download_mods_from_links_file(
     blacklist_dirty = False
 
     report: dict[str, list] = {"downloaded": [], "skipped": [], "failed": []}
+    report_lock = threading.Lock()
 
+    # Phase de préparation (séquentielle, cf. docstring ci-dessus) : décide,
+    # pour chaque mod, les fichiers à télécharger — sans rien télécharger
+    # encore. `jobs` ne contient que les mods ayant effectivement quelque
+    # chose à télécharger ; les autres cas (déjà présent, tout blacklisté,
+    # rien retenu, erreur API) sont journalisés et reportés directement ici,
+    # comme avant.
+    jobs: list[tuple[int, str, str, list[tuple[int, str]]]] = []
     total = len(mod_ids)
     for index, mod_id in enumerate(mod_ids, start=1):
         progress = f"[{index}/{total}]"
@@ -174,17 +203,42 @@ def download_mods_from_links_file(
                 report["skipped"].append(mod_id)
                 continue
 
-            for file_id, _file_name in to_download:
-                url = client.download_link(mod_id, file_id)
-                path = download_file(url, dest_dir)
-                log(fmt_row(label, STATUS_SUCCES, version=version, detail=path.name))
-            report["downloaded"].append(mod_id)
+            jobs.append((mod_id, label, version, to_download))
         except NexusAPIError as exc:
             log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
             report["failed"].append((mod_id, str(exc)))
         except Exception as exc:
             log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
             report["failed"].append((mod_id, str(exc)))
+
+    def _download_job(job: tuple[int, str, str, list[tuple[int, str]]]) -> None:
+        """Télécharge tous les fichiers retenus pour UN mod (job de la phase
+        de préparation ci-dessus), sur son propre thread du pool. Toute
+        erreur (API ou autre) fait échouer le mod entier plutôt qu'un seul
+        fichier — cohérent avec le comportement historique séquentiel, où
+        une exception sur un fichier interrompait aussi les suivants du même
+        mod."""
+        mod_id, label, version, to_download = job
+        try:
+            for file_id, _file_name in to_download:
+                url = client.download_link(mod_id, file_id)
+                path = download_file(url, dest_dir)
+                log(fmt_row(label, STATUS_SUCCES, version=version, detail=path.name))
+            with report_lock:
+                report["downloaded"].append(mod_id)
+        except NexusAPIError as exc:
+            log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
+            with report_lock:
+                report["failed"].append((mod_id, str(exc)))
+        except Exception as exc:
+            log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
+            with report_lock:
+                report["failed"].append((mod_id, str(exc)))
+
+    if jobs:
+        max_workers = min(len(jobs), _NEXUS_MAX_DOWNLOAD_THREADS)
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="nexus-dl") as executor:
+            list(executor.map(_download_job, jobs))
 
     if blacklist_dirty and profiles_dir is not None:
         save_blacklisted_files(profiles_dir, profile_name, blacklist)
