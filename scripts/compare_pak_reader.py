@@ -134,7 +134,7 @@ def _run_python(
     sample_cap: int,
     *,
     records: dict[str, PakRecord] | None = None,
-    on_progress: Callable[[], None] | None = None,
+    on_progress: Callable[[PakRecord], None] | None = None,
 ) -> dict[str, PakRecord]:
     from bg3_mod_tui.pak_reader import PakArchive, PakReaderError, parse_meta_lsx_bytes
 
@@ -149,7 +149,7 @@ def _run_python(
         except PakReaderError as exc:
             record.error = f"{type(exc).__name__}: {exc}"
             if on_progress is not None:
-                on_progress()
+                on_progress(record)
             continue
         record.index_or_extract_seconds = time.monotonic() - start
         record.entries = {
@@ -174,7 +174,7 @@ def _run_python(
         record.content_seconds = time.monotonic() - start
         archive.close()
         if on_progress is not None:
-            on_progress()
+            on_progress(record)
     return records
 
 
@@ -187,7 +187,7 @@ def _run_rust(
     sample_cap: int,
     *,
     records: dict[str, PakRecord] | None = None,
-    on_progress: Callable[[], None] | None = None,
+    on_progress: Callable[[PakRecord], None] | None = None,
 ) -> dict[str, PakRecord]:
     try:
         import pak_reader_rs as r
@@ -208,7 +208,7 @@ def _run_rust(
         except r.PakReaderError as exc:
             record.error = f"{type(exc).__name__}: {exc}"
             if on_progress is not None:
-                on_progress()
+                on_progress(record)
             continue
         record.index_or_extract_seconds = time.monotonic() - start
         record.entries = {
@@ -232,7 +232,7 @@ def _run_rust(
                 record.content_errors[name] = f"{type(exc).__name__}: {exc}"
         record.content_seconds = time.monotonic() - start
         if on_progress is not None:
-            on_progress()
+            on_progress(record)
     return records
 
 
@@ -286,7 +286,7 @@ def _run_divine_batch_tool(
     divine_exe: Path,
     reference_path: Path,
     records: dict[str, PakRecord] | None = None,
-    on_progress: Callable[[], None] | None = None,
+    on_progress: Callable[[PakRecord], None] | None = None,
 ) -> tuple[dict[str, PakRecord], float]:
     """Équivalent de `_run_divine_tool`, mais via l'action native
     `extract-packages` de LSLib (voir `Divine/CLI/CommandLinePackageProcessor.
@@ -338,7 +338,7 @@ def _run_divine_batch_tool(
             for record in records.values():
                 record.error = error
                 if on_progress is not None:
-                    on_progress()
+                    on_progress(record)
             return records, time.monotonic() - start
         total_seconds = time.monotonic() - start
 
@@ -349,11 +349,11 @@ def _run_divine_batch_tool(
             if not work_dir.is_dir():
                 record.error = "non extrait par le batch Divine.exe (dossier de sortie absent)"
                 if on_progress is not None:
-                    on_progress()
+                    on_progress(record)
                 continue
             _finalize_divine_extraction(record, work_dir, sample_cap, reference_path=reference_path)
             if on_progress is not None:
-                on_progress()
+                on_progress(record)
 
     return records, total_seconds
 
@@ -365,7 +365,7 @@ def _run_divine_tool(
     divine_exe: Path,
     reference_path: Path,
     records: dict[str, PakRecord] | None = None,
-    on_progress: Callable[[], None] | None = None,
+    on_progress: Callable[[PakRecord], None] | None = None,
 ) -> dict[str, PakRecord]:
     """Un lancement de process Divine.exe *par `.pak`* (action `extract-
     package`, singulier) — le pire cas côté coût de démarrage (Wine/CLR
@@ -401,7 +401,7 @@ def _run_divine_tool(
                 record.error = str(exc)
                 shutil.rmtree(work_dir, ignore_errors=True)
                 if on_progress is not None:
-                    on_progress()
+                    on_progress(record)
                 continue
             record.index_or_extract_seconds = time.monotonic() - start
 
@@ -409,7 +409,7 @@ def _run_divine_tool(
 
             shutil.rmtree(work_dir, ignore_errors=True)
             if on_progress is not None:
-                on_progress()
+                on_progress(record)
     return records
 
 
@@ -452,8 +452,27 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     out_path = args.out or (REPORTS_DIR / f"{args.tool}_report.json")
     records: dict[str, PakRecord] = {}
-    flush = lambda: _write_report(out_path, args.tool, args.sample, records)  # noqa: E731
     extra: dict[str, Any] = {}
+    total = len(pak_paths)
+    done = 0
+
+    def flush(record: PakRecord) -> None:
+        nonlocal done
+        done += 1
+        if args.verbose:
+            if record.error:
+                status = f"ERREUR : {record.error}"
+            elif record.content_errors:
+                status = f"{len(record.content_errors)} entrée(s) en erreur"
+            else:
+                status = "OK"
+            print(
+                f"  [{done}/{total}] {record.file} — "
+                f"{record.index_or_extract_seconds:.2f}s index/extraction, "
+                f"{record.content_seconds:.2f}s contenu — {status}",
+                flush=True,
+            )
+        _write_report(out_path, args.tool, args.sample, records, extra=extra)
 
     if args.tool == "python":
         _run_python(pak_paths, args.sample, records=records, on_progress=flush)
@@ -601,6 +620,12 @@ def main() -> int:
     run_parser.add_argument("paks", nargs="*", type=Path, help="Fichiers .pak précis (sinon --dir/config)")
     run_parser.add_argument("--dir", type=Path, help="Dossier à scanner (*.pak)")
     run_parser.add_argument("--sample", type=int, default=60, help="Fichiers de contenu hashés par .pak (défaut 60)")
+    run_parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Affiche une ligne de progression par .pak traité (nom, temps, statut) — "
+        "utile sur un run long (ex: Divine.exe per-file) pour voir que ça avance.",
+    )
     run_parser.add_argument("--divine-exe", type=Path, help="Chemin vers Divine.exe (outil divine seulement)")
     run_parser.add_argument(
         "--divine-mode",
