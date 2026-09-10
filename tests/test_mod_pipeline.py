@@ -7,11 +7,14 @@ installé/en attente)."""
 
 from __future__ import annotations
 
+import os
+import time
 import zipfile
 from pathlib import Path
 
 from bg3_mod_tui.mod_pipeline import (
     _unique_destination,
+    cleanup_duplicate_archives,
     download_subscribed_modio_mods,
     extract_archives_to_mods,
 )
@@ -239,3 +242,91 @@ def test_download_subscribed_modio_mods_mod_absent_sans_download_url_echoue(tmp_
 
     assert report["failed"] == [("AutreMod", "pas de fichier disponible")]
     assert report["skipped"] == []
+
+
+def _touch_with_mtime(path: Path, content: bytes, mtime: float) -> None:
+    path.write_bytes(content)
+    os.utime(path, (mtime, mtime))
+
+
+def test_cleanup_duplicate_archives_dossier_vide_ou_absent(tmp_path):
+    assert cleanup_duplicate_archives(tmp_path)["removed"] == []
+    assert cleanup_duplicate_archives(tmp_path / "n_existe_pas")["removed"] == []
+
+
+def test_cleanup_duplicate_archives_supprime_les_doublons_de_contenu_identique(tmp_path):
+    # Cas typique observé dans _installees : même mod mod.io retéléchargé
+    # à trois reprises (contenu identique, suffixes "(1)", "(2)" ajoutés
+    # par _unique_destination faute de mieux).
+    now = time.time()
+    base = tmp_path / "Aesir's Champion Set-modio5990151.zip"
+    dup1 = tmp_path / "Aesir's Champion Set-modio5990151 (1).zip"
+    dup2 = tmp_path / "Aesir's Champion Set-modio5990151 (2).zip"
+    content_size = len(b"contenu identique")
+    _touch_with_mtime(base, b"contenu identique", now - 200)
+    _touch_with_mtime(dup1, b"contenu identique", now - 100)
+    _touch_with_mtime(dup2, b"contenu identique", now)
+
+    report = cleanup_duplicate_archives(tmp_path)
+
+    assert sorted(report["removed"]) == sorted([dup1.name, dup2.name])
+    assert report["conflicts"] == []
+    assert report["freed_bytes"] == content_size * 2
+    assert base.is_file()  # le plus ancien est conservé
+    assert not dup1.exists()
+    assert not dup2.exists()
+
+
+def test_cleanup_duplicate_archives_conserve_le_plus_ancien(tmp_path):
+    now = time.time()
+    older = tmp_path / "Mod-modio1.zip"
+    newer = tmp_path / "Mod-modio1 (1).zip"
+    # Écrit dans le désordre pour vérifier que c'est bien mtime qui tranche,
+    # pas l'ordre de découverte du dossier.
+    _touch_with_mtime(newer, b"x", now)
+    _touch_with_mtime(older, b"x", now - 500)
+
+    report = cleanup_duplicate_archives(tmp_path)
+
+    assert older.is_file()
+    assert not newer.exists()
+    assert report["removed"] == [newer.name]
+
+
+def test_cleanup_duplicate_archives_ignore_les_memes_noms_de_contenu_different(tmp_path):
+    # Même nom de base mais contenu différent (ex: mise à jour du mod
+    # retéléchargée sous un nom suffixé) : ne doit PAS être supprimé
+    # aveuglément sur la seule foi du nom, seulement rapporté en conflit.
+    base = tmp_path / "Mod-modio1.zip"
+    other = tmp_path / "Mod-modio1 (1).zip"
+    base.write_bytes(b"version A")
+    other.write_bytes(b"version B, plus recente")
+
+    report = cleanup_duplicate_archives(tmp_path)
+
+    assert report["removed"] == []
+    assert report["conflicts"] == ["Mod-modio1.zip"]
+    assert base.is_file()
+    assert other.is_file()
+
+
+def test_cleanup_duplicate_archives_n_affecte_pas_les_fichiers_sans_doublon(tmp_path):
+    unique = tmp_path / "UnMod-modio1.zip"
+    unique.write_bytes(b"contenu")
+
+    report = cleanup_duplicate_archives(tmp_path)
+
+    assert report["removed"] == []
+    assert report["conflicts"] == []
+    assert unique.is_file()
+
+
+def test_cleanup_duplicate_archives_ignore_les_fichiers_non_archives(tmp_path):
+    (tmp_path / "notes.txt").write_text("pas une archive")
+    (tmp_path / "notes (1).txt").write_text("pas une archive non plus")
+
+    report = cleanup_duplicate_archives(tmp_path)
+
+    assert report["removed"] == []
+    assert (tmp_path / "notes.txt").is_file()
+    assert (tmp_path / "notes (1).txt").is_file()

@@ -5,6 +5,8 @@ archives téléchargées vers le dossier Mods géré.
 
 from __future__ import annotations
 
+import hashlib
+import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -251,6 +253,118 @@ def download_subscribed_modio_mods(
             log(fmt_row(mod.name, STATUS_ECHEC, detail=str(exc)))
             report["failed"].append((mod.name, str(exc)))
 
+    return report
+
+
+# Suffixe de doublon "(N)" ajouté en fin de nom (avant l'extension) par
+# `_unique_destination` (déplacement d'une archive vers `_installees`/
+# `_a_traiter`) ou par un navigateur lors d'un second téléchargement manuel
+# du même fichier — voir `known_modio_ids`/`inventory._DUPLICATE_SUFFIX_RE`
+# pour la même convention côté détection d'ID.
+_DUPLICATE_SUFFIX_RE = re.compile(r" \(\d+\)(\.[A-Za-z0-9]+)$")
+
+_HASH_CHUNK_SIZE = 1024 * 1024
+
+
+def _file_hash(path: Path) -> str:
+    """Hash SHA-256 du contenu de `path`, lu par blocs (pas de chargement
+    intégral en mémoire — les archives de mods peuvent être volumineuses)."""
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(_HASH_CHUNK_SIZE), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _human_size(size_bytes: int) -> str:
+    """Formate une taille en octets en unité lisible (o/Ko/Mo/Go), pour les
+    logs de `cleanup_duplicate_archives`."""
+    size = float(size_bytes)
+    for unit in ("o", "Ko", "Mo", "Go"):
+        if size < 1024 or unit == "Go":
+            return f"{int(size)} {unit}" if unit == "o" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} Go"
+
+
+def cleanup_duplicate_archives(
+    directory: Path,
+    *,
+    log: LogFn = lambda _msg: None,
+) -> dict[str, list | int]:
+    """Détecte et supprime, dans `directory`, les archives en doublon d'un
+    même mod téléchargé/installé plusieurs fois au fil du temps — le
+    symptôme typique observé dans `_installees` : des triplets comme
+    "Aesir's Champion Set-modio5990151.zip",
+    "Aesir's Champion Set-modio5990151 (1).zip",
+    "Aesir's Champion Set-modio5990151 (2).zip" (voir cause racine dans
+    `download_subscribed_modio_mods` : un mod déjà installé, non détecté
+    comme tel, était retéléchargé puis, une fois déplacé vers
+    `_installees` par `extract_archives_to_mods`, suffixé "(N)" par
+    `_unique_destination` car le nom d'origine y était déjà pris).
+
+    Un "doublon potentiel" regroupe les archives dont le nom, une fois le
+    suffixe " (N)" final retiré, est identique (`_DUPLICATE_SUFFIX_RE`).
+    Pour éviter de supprimer par erreur une variante réellement
+    différente qui partagerait ce même nom de base (ex: une mise à jour du
+    mod retéléchargée sous un nom suffixé, dont le contenu a changé — se
+    fier à la seule taille ne suffit pas à l'exclure), seules les archives
+    dont le contenu est strictement identique (hash SHA-256) au sein d'un
+    même groupe sont traitées comme de vrais doublons : parmi elles, la
+    plus ancienne (`st_mtime`) est conservée, les autres supprimées. Un
+    groupe de même nom de base mais de hash différents n'est PAS touché
+    (compté comme "conflit", à examiner manuellement).
+
+    Retourne {"removed": [nom, ...], "freed_bytes": int, "conflicts":
+    [nom_de_base, ...]}."""
+    report: dict[str, list | int] = {"removed": [], "freed_bytes": 0, "conflicts": []}
+    if not directory.is_dir():
+        return report
+
+    groups: dict[str, list[Path]] = {}
+    for path in directory.iterdir():
+        if not path.is_file() or path.suffix.lower() not in (".zip", ".rar", ".7z"):
+            continue
+        base_name = _DUPLICATE_SUFFIX_RE.sub(r"\1", path.name)
+        groups.setdefault(base_name, []).append(path)
+
+    removed: list[str] = []
+    conflicts: list[str] = []
+    freed = 0
+
+    for base_name, paths in groups.items():
+        if len(paths) < 2:
+            continue
+
+        by_hash: dict[str, list[Path]] = {}
+        for path in paths:
+            by_hash.setdefault(_file_hash(path), []).append(path)
+
+        if len(by_hash) > 1:
+            conflicts.append(base_name)
+            log(
+                f"Doublons potentiels ignorés (contenus différents) : "
+                f"{base_name} ({len(by_hash)} versions distinctes, à examiner manuellement)."
+            )
+            continue
+
+        (dups,) = by_hash.values()
+        dups.sort(key=lambda p: p.stat().st_mtime)
+        keep, extra = dups[0], dups[1:]
+        for path in extra:
+            size = path.stat().st_size
+            path.unlink()
+            freed += size
+            removed.append(path.name)
+            log(f"Doublon supprimé : {path.name} (conservé : {keep.name})")
+
+    report["removed"] = removed
+    report["freed_bytes"] = freed
+    report["conflicts"] = conflicts
+    log(
+        f"Nettoyage des doublons ({directory.name}) : {len(removed)} archive(s) "
+        f"supprimée(s) ({_human_size(freed)} récupéré(s)), {len(conflicts)} conflit(s) ignoré(s)."
+    )
     return report
 
 
