@@ -2,6 +2,10 @@
 
 ## P0 — Critique / Fondation
 
+- BUG au clic sur Extraire vers Mods/ l'appli plante
+- Les bouton fusionnes ne demandent plus les boutons individuels
+- Je ne vois pas comment lancer le build planner
+
 ### 1. Lecteur natif `.pak` (remplacer Divine.exe)
 
 - ~~**1a-1e.**~~ — fait : `bg3_mod_tui/pak_reader.py` (mmap, header LSPK v15/16/18, index LZ4), parsing meta.lsx/meta.lsf, intégré dans `pak_metadata.read_pak_identity` (le point d'usage réel de Divine.exe — `inventory._match_pak_to_archive` ne lit aucun .pak, seulement les noms de fichiers), avec repli automatique sur Divine.exe y compris sur exception imprévue (`1e`)
