@@ -315,6 +315,8 @@ _HTML_TEMPLATE = """<!doctype html>
   .row-new-choice { color: var(--accent); font-size: 0.8rem; }
   .row-continuation { color: var(--muted); font-size: 0.8rem; }
   section#mermaid-section { margin-top: 24px; max-width: 1100px; }
+  #mermaid-graph { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; }
+  #mermaid-source { white-space: pre-wrap; color: var(--muted); font-size: 0.8rem; }
 </style>
 </head>
 <body>
@@ -357,9 +359,29 @@ _HTML_TEMPLATE = """<!doctype html>
 
 <section id="mermaid-section">
   <h2>Graph de progression</h2>
-  <p class="subtitle">(intégration Mermaid — voir TODO 10c)</p>
+  <p class="subtitle" id="mermaid-status">
+    Rendu via <a href="https://mermaid.js.org" target="_blank" rel="noopener">Mermaid</a>
+    (chargé depuis un CDN — nécessite une connexion réseau). Hors ligne, le
+    code source Mermaid brut reste affiché ci-dessous, copiable dans
+    n'importe quel éditeur Mermaid.
+  </p>
+  <div id="mermaid-graph" class="mermaid"></div>
+  <details id="mermaid-source-details">
+    <summary>Code source Mermaid</summary>
+    <pre id="mermaid-source"></pre>
+  </details>
 </section>
 
+<!--
+  Mermaid chargé depuis un CDN (jsDelivr, version figée) : seule
+  dépendance externe de la page, strictement nécessaire pour le rendu du
+  graph (TODO 10c). Chargement synchrone (pas de defer/async) afin que le
+  script inline ci-dessous puisse tester de façon fiable si `window.mermaid`
+  est disponible avant de s'en servir. Hors ligne (échec de chargement), la
+  page reste pleinement fonctionnelle : le code source Mermaid brut est
+  affiché en repli (voir renderMermaid()).
+-->
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
 <script>
 const CLASS_DATA = __CLASS_DATA_JSON__;
 const MIN_LEVEL = __MIN_LEVEL__;
@@ -367,6 +389,54 @@ const MAX_LEVEL = __MAX_LEVEL__;
 const GENERIC_FALLBACK = "Progression de classe (sorts, ressources ou capacités supplémentaires selon la classe — non détaillé)";
 
 const build = {}; // level(int) -> { classId, subclassId }
+
+const MERMAID_AVAILABLE = typeof window.mermaid !== "undefined";
+if (MERMAID_AVAILABLE) {
+  mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
+}
+
+function buildMermaidDefinition() {
+  const lines = ["graph TD"];
+  let prevNodeId = null;
+  let prevClass = null;
+  for (let level = MIN_LEVEL; level <= MAX_LEVEL; level++) {
+    const choice = build[level];
+    if (!choice || !choice.classId) continue;
+    const info = CLASS_DATA[choice.classId];
+    const subLabel = choice.subclassId ? " (" + info.subclasses[choice.subclassId].fr + ")" : "";
+    const label = ("Niv. " + level + " : " + info.fr + subLabel).replace(/"/g, "'");
+    const nodeId = "L" + level;
+    lines.push(nodeId + '["' + label + '"]');
+    if (prevNodeId) {
+      const isNewChoice = choice.classId !== prevClass;
+      lines.push(prevNodeId + " -->|" + (isNewChoice ? "nouveau choix" : "continuation") + "| " + nodeId);
+    }
+    prevNodeId = nodeId;
+    prevClass = choice.classId;
+  }
+  if (lines.length === 1) lines.push('EMPTY["Aucun niveau renseigné pour l\\'instant"]');
+  return lines.join("\n");
+}
+
+async function renderMermaid() {
+  const definition = buildMermaidDefinition();
+  document.getElementById("mermaid-source").textContent = definition;
+  const graphEl = document.getElementById("mermaid-graph");
+  const statusEl = document.getElementById("mermaid-status");
+  if (!MERMAID_AVAILABLE) {
+    graphEl.innerHTML = "";
+    statusEl.textContent =
+      "Mermaid n'a pas pu être chargé depuis le CDN (hors ligne ?) — le code source ci-dessous reste disponible et copiable.";
+    return;
+  }
+  try {
+    const { svg } = await mermaid.render("mermaid-svg-" + Date.now(), definition);
+    graphEl.innerHTML = svg;
+  } catch (err) {
+    graphEl.innerHTML = "";
+    statusEl.textContent = "Erreur de rendu Mermaid (voir le code source ci-dessous) : " + err;
+  }
+}
 
 function classIds() {
   return Object.keys(CLASS_DATA).sort((a, b) => CLASS_DATA[a].fr.localeCompare(CLASS_DATA[b].fr, "fr"));
@@ -534,6 +604,7 @@ function renderAll() {
     tbody.appendChild(renderLevelRow(level));
   }
   renderErrors(validateBuild());
+  renderMermaid();
 }
 
 document.getElementById("reset-btn").addEventListener("click", () => {
