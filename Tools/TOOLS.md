@@ -13,3 +13,5 @@ Liste des outils tiers utilisés dans ce workspace (non versionnés, voir
 | Native Mod Loader           | — (à télécharger manuellement, DLL non récupérable depuis GitHub) | https://github.com/gottyduke/NativeModLoader / https://www.nexusmods.com/baldursgate3/mods/944 |
 | BG3 Compatibility Framework | `Tools/BG3-Compatibility-Framework/`                              | https://github.com/BG3-Community-Library-Team/BG3-Compatibility-Framework                      |
 | MoreReactiveCompanions      | `Tools/MoreReactiveCompanionsConfigApp/`                          | https://www.nexusmods.com/baldursgate3/mods/5447                                               |
+| bg3rustpaklib                | `Tools/bg3rustpaklib/`                                            | https://github.com/ElwinghL/bg3rustpaklib                                                      |
+| bg3pythonpaklib              | `Tools/bg3pythonpaklib/`                                          | https://github.com/ElwinghL/bg3pythonpaklib                                                    |
