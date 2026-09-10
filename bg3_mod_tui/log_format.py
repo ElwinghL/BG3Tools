@@ -4,7 +4,9 @@ dans le RichLog du menu d'actions — nom du mod, version, statut."""
 from __future__ import annotations
 
 import re
+import unicodedata
 
+from rich.cells import cell_len
 from rich.markup import escape
 
 from bg3_mod_tui.theme import LOG_COLOR_ERROR, LOG_COLOR_SUCCESS, LOG_COLOR_WARNING
@@ -27,10 +29,29 @@ _STATUS_COLORS = {
 
 
 def _pad(text: str, width: int) -> str:
-    text = str(text)
-    if len(text) > width:
-        text = text[: max(width - 1, 0)] + "…"
-    return text.ljust(width)
+    """Aligne `text` sur `width` *colonnes d'affichage* (pas codepoints).
+
+    `len()`/`str.ljust()` comptent des codepoints Unicode, pas la largeur
+    visuelle réelle dans le terminal/RichLog : certains noms de mods
+    (traductions CJK, emojis, accents décomposés en NFD) désynchronisent
+    alors les colonnes suivantes. On normalise d'abord en NFC (un accent
+    stocké comme lettre + diacritique combinant redevient un seul
+    caractère précomposé) puis on mesure/tronque/complète en largeur
+    d'affichage via `rich.cells.cell_len` (les caractères larges type CJK
+    ou emoji comptent pour 2 colonnes)."""
+    text = unicodedata.normalize("NFC", str(text))
+    if cell_len(text) > width:
+        limit = max(width - 1, 0)
+        truncated = ""
+        total = 0
+        for char in text:
+            char_width = cell_len(char)
+            if total + char_width > limit:
+                break
+            truncated += char
+            total += char_width
+        text = truncated + "…"
+    return text + " " * max(width - cell_len(text), 0)
 
 
 def fmt_row(name: str, status: str, *, version: str = "", detail: str = "") -> str:
