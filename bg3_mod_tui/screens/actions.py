@@ -1176,7 +1176,14 @@ class ActionsScreen(Screen):
 
         confirmed: list[dict] = []
         unverifiable: list[dict] = []
+        total_candidates = len(candidates)
+        # Un par un si peu de candidats, sinon un intervalle qui garde des
+        # mises à jour fréquentes sans spammer sur un gros lot (même logique
+        # que build_deployed_uuid_index ci-dessus).
+        step = 1 if total_candidates <= 20 else 10
         for index, archive in enumerate(candidates, start=1):
+            if index % step == 1 or step == 1 or index == total_candidates:
+                log(f"  [{index}/{total_candidates}] {archive['file']}...")
             archive_path = self._config.archives_installed_dir / archive["file"]
             identities = archive_pak_identities(
                 archive_path,
@@ -1191,8 +1198,6 @@ class ActionsScreen(Screen):
                 unverifiable.append(archive)
             elif not any(uuid in deployed_uuids for uuid, _name in identities):
                 confirmed.append(archive)
-            if index % 10 == 0 or index == len(candidates):
-                log(f"  {index}/{len(candidates)} archive(s) vérifiée(s)...")
 
         discarded = len(candidates) - len(confirmed) - len(unverifiable)
         log(

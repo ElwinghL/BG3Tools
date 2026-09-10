@@ -142,9 +142,17 @@ def build_deployed_uuid_index(
     `find_orphaned_archives_by_uuid`). Un .pak en échec est journalisé et
     ignoré (pas d'échec global)."""
     index: dict[str, str] = {}
+    total = len(pak_paths)
+    # Un par un si peu de .pak (retour visible à chaque étape), sinon un
+    # intervalle qui garde des mises à jour fréquentes sans spammer sur
+    # un gros Mods/ (voir même logique dans la boucle de vérification des
+    # archives, run_orphaned_archives).
+    step = 1 if total <= 20 else 10
     with tempfile.TemporaryDirectory(prefix="bg3_pak_meta_") as tmp:
         tmp_path = Path(tmp)
         for count, pak in enumerate(pak_paths, start=1):
+            if step == 1 or count % step == 1 or count == total:
+                log(f"  [{count}/{total}] {pak.name}...")
             work_dir = tmp_path / str(count)
             work_dir.mkdir()
             try:
@@ -158,8 +166,6 @@ def build_deployed_uuid_index(
                 shutil.rmtree(work_dir, ignore_errors=True)
             if identity:
                 index[identity[0]] = identity[1] or pak.stem
-            if count % 25 == 0 or count == len(pak_paths):
-                log(f"  {count}/{len(pak_paths)} .pak identifiés (UUID)...")
     return index
 
 
