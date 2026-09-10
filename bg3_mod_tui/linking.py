@@ -64,7 +64,15 @@ def _create_symlink(link_path: Path, target: Path, *, target_is_dir: bool) -> No
 def _replace_with_hardlink(original: Path, source: Path) -> None:
     backup = original.with_suffix(original.suffix + ".bak")
     try:
-        if original.exists() and not original.is_symlink():
+        if original.is_symlink():
+            # Repli EXDEV d'une exécution précédente (voir `link_or_symlink`) :
+            # déjà un symlink vers la bonne source, rien à faire — sinon il
+            # faut le retirer avant de recréer le lien, `os.link`/`os.symlink`
+            # échouant sinon avec `EEXIST` (le cas qui nous a fait planter).
+            if original.resolve() == source.resolve():
+                return
+            original.unlink()
+        elif original.exists():
             # Si déjà un hardlink vers la même donnée (même inode), rien à faire.
             if original.stat().st_ino == source.stat().st_ino:
                 return

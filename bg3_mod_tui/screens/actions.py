@@ -26,14 +26,16 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
-from textual.worker import Worker
+from textual.worker import Worker, WorkerState
 
+from bg3_mod_tui.class_builder import DEFAULT_HTML_FILENAME, write_html
 from bg3_mod_tui.compat_framework import (
     CompatibilityFrameworkError,
     build_pak as build_compat_framework_pak,
     find_divine_exe,
 )
 from bg3_mod_tui.config import ModToolsConfig, save_config
+from bg3_mod_tui.crash_log import log_crash
 from bg3_mod_tui.game_deploy import deploy_native_mod_loader, deploy_script_extender
 from bg3_mod_tui.inventory import (
     NEXUS_MOD_URL,
@@ -769,10 +771,16 @@ class _ActiveTask(NamedTuple):
       (l'onglet "Tâches" principal si aucune autre tâche n'était active à
       son lancement, sinon un onglet dynamique dédié — voir
       `_acquire_task_console`).
+    - `write` : le callback d'écriture de cette tâche, SANS
+      `call_from_thread` (voir `_acquire_task_console`) — réutilisé par
+      `on_worker_state_changed`, qui tourne déjà sur le thread UI, pour
+      afficher une erreur de worker dans la BONNE console/onglet plutôt
+      que dans l'onglet "Tâches" principal par défaut.
     """
 
     resource_tags: frozenset[str]
     tab_id: str
+    write: Callable[[str], None]
 
 
 def _resource_conflict(
@@ -1055,6 +1063,19 @@ class ActionsScreen(Screen):
                             "uniquement, pour un environnement cohérent avec le jeu)."
                         ),
                     )
+                    yield Button(
+                        "Build de classes...",
+                        id="action-class-builder",
+                        disabled=True,
+                        tooltip=(
+                            "Génère une page HTML pour planifier un build multiclasse "
+                            "niveau par niveau, servie par le serveur Web (bouton "
+                            "planète) et ouverte dans le navigateur par défaut — "
+                            "nécessite donc de l'avoir démarré au préalable (grisé "
+                            "sinon). Données de classes/sous-classes limitées au "
+                            "vanilla BG3 (niveau 1 à 12)."
+                        ),
+                    )
                     if not is_windows():
                         yield Button(
                             "Ouvrir protontricks",
@@ -1218,7 +1239,9 @@ class ActionsScreen(Screen):
     def handle_log_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         self._clear_log_tab_indicator(event.pane.id or "")
 
-    def _acquire_task_console(self, title: str) -> tuple[Callable[[str], None], str]:
+    def _acquire_task_console(
+        self, title: str
+    ) -> tuple[Callable[[str], None], Callable[[str], None], str]:
         """Choisit la console où une tâche "Tâches" doit écrire ses logs
         (appelée UNIQUEMENT depuis le thread UI, avant de lancer le worker
         — voir `_start_task`) :
@@ -1242,12 +1265,26 @@ class ActionsScreen(Screen):
         raffinement d'UI non demandé par le TODO, laissé pour plus tard si
         le besoin s'en fait sentir.
 
-        Retourne une fonction `log` sûre à appeler depuis n'importe quel
-        thread (elle fait elle-même le `call_from_thread`, comme `_log`/
-        `_tool_log`) et l'id de l'onglet utilisé.
+        Retourne `(log, write, tab_id)` : `log` est sûre à appeler depuis
+        n'importe quel thread (elle fait elle-même le `call_from_thread`,
+        comme `_log`/`_tool_log`) et c'est elle qui est passée aux workers
+        `thread=True`. `write` est la version SANS `call_from_thread` —
+        `call_from_thread` refuse justement d'être appelée depuis le thread
+        UI (`RuntimeError`) — à utiliser à la place de `log` par tout code
+        qui tourne déjà sur le thread UI, comme `on_worker_state_changed`
+        pour signaler une erreur de worker dans la bonne console.
         """
         if not self._active_tasks:
-            return self._log, "actions-log-tab"
+            def write_main(message: str) -> None:
+                try:
+                    self._log(message)
+                except Exception:
+                    return
+
+            def log_main(message: str) -> None:
+                self.app.call_from_thread(write_main, message)
+
+            return log_main, write_main, "actions-log-tab"
 
         self._dynamic_task_tab_seq += 1
         seq = self._dynamic_task_tab_seq
@@ -1275,7 +1312,7 @@ class ActionsScreen(Screen):
         def log(message: str) -> None:
             self.app.call_from_thread(write, message)
 
-        return log, tab_id
+        return log, write, tab_id
 
     def _start_task(
         self,
@@ -1323,17 +1360,35 @@ class ActionsScreen(Screen):
             )
             return
 
-        log, tab_id = self._acquire_task_console(title)
+        log, write, tab_id = self._acquire_task_console(title)
         worker = launch(log)
         if worker is not None:
-            self._active_tasks[worker] = _ActiveTask(resource_tags=resource_tags, tab_id=tab_id)
+            self._active_tasks[worker] = _ActiveTask(
+                resource_tags=resource_tags, tab_id=tab_id, write=write
+            )
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         """Libère la réservation de ressources d'une tâche "Tâches" dès que
-        son `Worker` associé se termine (voir `_start_task`). Ignore les
-        workers qui ne sont pas gérés par ce mécanisme (ex: "Lancer un
-        outil...", "Optimiser le préfixe...") — ils ne sont simplement pas
-        dans `self._active_tasks`."""
+        son `Worker` associé se termine (voir `_start_task`), et journalise
+        toute erreur de worker : tous les `@work` de cet écran sont
+        `exit_on_error=False` (une erreur ne doit plus faire planter tout le
+        TUI — voir `bg3_mod_tui.crash_log`), donc Textual ne la remonte plus
+        jamais à `App._handle_exception` de lui-même ; c'est ce hook qui
+        prend le relais pour qu'elle reste tracée (crash log horodaté) ET
+        visible pour l'utilisateur (message dans la console concernée).
+
+        Pour un worker géré par `_start_task` (dans `self._active_tasks`),
+        le message va dans SA console (`_ActiveTask.write`) plutôt que dans
+        l'onglet "Tâches" principal par défaut. Pour un worker non tracké
+        (ex: "Lancer un outil...", "Optimiser le préfixe...") qui n'a pas
+        déjà son propre `try/except` autour d'une erreur attendue, le
+        message va dans la console d'outils (`#tools-log`)."""
+        if event.worker.state == WorkerState.ERROR and event.worker.error is not None:
+            log_crash(event.worker.error)
+            task = self._active_tasks.get(event.worker)
+            report = task.write if task is not None else self._tool_log
+            report(f"[#C46F6F]Erreur inattendue : {event.worker.error}[/#C46F6F]")
+
         if not event.worker.is_finished:
             return
         self._active_tasks.pop(event.worker, None)
@@ -1394,10 +1449,10 @@ class ActionsScreen(Screen):
         increment_usage_stat(
             self._config.profiles_dir, self._config.active_profile, button_id
         )
-        self._refresh_quick_actions()
+        self.run_worker(self._refresh_quick_actions(), exclusive=True, group="refresh-quick-actions")
 
     def on_mount(self) -> None:
-        self._refresh_quick_actions()
+        self.run_worker(self._refresh_quick_actions(), exclusive=True, group="refresh-quick-actions")
 
     def _action_button_lookup(self) -> dict[str, Button]:
         """Ids -> bouton d'action original (`action-*`, hors
@@ -1410,7 +1465,7 @@ class ActionsScreen(Screen):
             if button.id and button.id.startswith("action-") and button.id != self._UNTRACKED_ACTION_ID
         }
 
-    def _refresh_quick_actions(self) -> None:
+    async def _refresh_quick_actions(self) -> None:
         """(Re)construit la barre de quick actions (les 3 boutons d'action
         les plus utilisés pour le profil actif — voir `usage_stats.top_actions`)
         en haut de l'écran. Appelée au montage de l'écran (`on_mount`) ET
@@ -1425,8 +1480,13 @@ class ActionsScreen(Screen):
         clic est redirigé vers le bouton original par `on_button_pressed`
         ci-dessus."""
         bar = self.query_one("#quick-actions-bar")
-        for old_button in bar.query(Button):
-            old_button.remove()
+        # `remove()` est asynchrone (retourne un `AwaitRemove`) : il FAUT
+        # attendre que les anciens boutons soient réellement retirés du DOM
+        # avant de remonter les nouveaux, sinon `bar.mount(...)` plus bas
+        # peut tenter de créer un bouton avec le même id qu'un ancien pas
+        # encore supprimé et lever `DuplicateIds` (crash reproductible à
+        # chaque incrément d'usage tant qu'un top 3 était déjà affiché).
+        await bar.query(Button).remove()
 
         lookup = self._action_button_lookup()
         stats = load_usage_stats(self._config.profiles_dir, self._config.active_profile)
@@ -1531,7 +1591,7 @@ class ActionsScreen(Screen):
                 f"({_human_size(total_freed)} récupéré(s))."
             )
 
-    @work(exclusive=True, thread=True, group="run_download_mods")
+    @work(exclusive=True, thread=True, group="run_download_mods", exit_on_error=False)
     def run_download_mods(self, log: Callable[[str], None]) -> None:
         self.app.call_from_thread(
             self.query_one("#downloads-progress", DownloadProgressConsole).clear
@@ -1600,7 +1660,7 @@ class ActionsScreen(Screen):
             launch=self.run_clean_paks,
         )
 
-    @work(exclusive=True, thread=True, group="run_clean_paks")
+    @work(exclusive=True, thread=True, group="run_clean_paks", exit_on_error=False)
     def run_clean_paks(self, log: Callable[[str], None]) -> None:
         log("=== Nettoyage des .pak de Mods/ ===")
         clean_pak_files(
@@ -1620,7 +1680,7 @@ class ActionsScreen(Screen):
             launch=self.run_sync_modsettings,
         )
 
-    @work(exclusive=True, thread=True, group="run_sync_modsettings")
+    @work(exclusive=True, thread=True, group="run_sync_modsettings", exit_on_error=False)
     def run_sync_modsettings(self, log: Callable[[str], None]) -> None:
         log("=== Synchronisation de modsettings.lsx ===")
         try:
@@ -1642,7 +1702,7 @@ class ActionsScreen(Screen):
             launch=self.run_extract,
         )
 
-    @work(exclusive=True, thread=True, group="run_extract")
+    @work(exclusive=True, thread=True, group="run_extract", exit_on_error=False)
     def run_extract(self, log: Callable[[str], None]) -> None:
         self._cleanup_duplicate_archives(log)
 
@@ -1678,7 +1738,7 @@ class ActionsScreen(Screen):
             launch=self.run_native_mods,
         )
 
-    @work(exclusive=True, thread=True, group="run_native_mods")
+    @work(exclusive=True, thread=True, group="run_native_mods", exit_on_error=False)
     def run_native_mods(self, log: Callable[[str], None]) -> None:
         log("=== Déploiement des mods DLL (manifest natif) ===")
         try:
@@ -1711,7 +1771,7 @@ class ActionsScreen(Screen):
             launch=self.run_download_tools,
         )
 
-    @work(exclusive=True, thread=True, group="run_download_tools")
+    @work(exclusive=True, thread=True, group="run_download_tools", exit_on_error=False)
     def run_download_tools(self, log: Callable[[str], None]) -> None:
         self._download_tools_task(log)
 
@@ -1728,15 +1788,19 @@ class ActionsScreen(Screen):
         except ToolsError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
             return False
-        for entry in entries:
-            download_and_extract_tool(
-                entry, self._config.project_root, log=log)
+        try:
+            for entry in entries:
+                download_and_extract_tool(
+                    entry, self._config.project_root, log=log)
 
-        log("--- Déploiement des DLL dans le jeu (bin/) ---")
-        deploy_native_mod_loader(
-            self._config.tools_dir, self._config.game_bin_dir, log=log)
-        deploy_script_extender(self._config.tools_dir,
-                               self._config.game_bin_dir, log=log)
+            log("--- Déploiement des DLL dans le jeu (bin/) ---")
+            deploy_native_mod_loader(
+                self._config.tools_dir, self._config.game_bin_dir, log=log)
+            deploy_script_extender(self._config.tools_dir,
+                                   self._config.game_bin_dir, log=log)
+        except Exception as exc:
+            log(f"[#C46F6F]Erreur inattendue : {exc}[/#C46F6F]")
+            return False
         log("Terminé.")
         return True
 
@@ -1751,7 +1815,7 @@ class ActionsScreen(Screen):
             launch=self.run_build_compat_framework,
         )
 
-    @work(exclusive=True, thread=True, group="run_build_compat_framework")
+    @work(exclusive=True, thread=True, group="run_build_compat_framework", exit_on_error=False)
     def run_build_compat_framework(self, log: Callable[[str], None]) -> None:
         self._build_compat_framework_task(log)
 
@@ -1784,7 +1848,7 @@ class ActionsScreen(Screen):
             launch=self.run_build_mod_fixer_fork,
         )
 
-    @work(exclusive=True, thread=True, group="run_build_mod_fixer_fork")
+    @work(exclusive=True, thread=True, group="run_build_mod_fixer_fork", exit_on_error=False)
     def run_build_mod_fixer_fork(self, log: Callable[[str], None]) -> None:
         self._build_mod_fixer_fork_task(log)
 
@@ -1820,7 +1884,7 @@ class ActionsScreen(Screen):
             launch=self.run_update_all,
         )
 
-    @work(exclusive=True, thread=True, group="run_update_all")
+    @work(exclusive=True, thread=True, group="run_update_all", exit_on_error=False)
     def run_update_all(self, log: Callable[[str], None]) -> None:
         """Enchaîne dans l'ordre les 3 étapes "MAJ des outils" -> "Compiler
         Compat. Framework" -> "Forker Mod Fixer", en réutilisant leurs
@@ -1853,7 +1917,7 @@ class ActionsScreen(Screen):
         self.app.push_screen(ToolPickerScreen(
             executables, self._config.project_root), on_picked)
 
-    @work(exclusive=False, thread=True)
+    @work(exclusive=False, thread=True, exit_on_error=False)
     def run_launch_tool(self, exe_path: Path) -> None:
         def log(msg): return self.app.call_from_thread(self._tool_log, msg)
         log_dir = self._config.logs_dir
@@ -1864,11 +1928,33 @@ class ActionsScreen(Screen):
         except LauncherError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
+    @on(Button.Pressed, "#action-class-builder")
+    def handle_class_builder(self) -> None:
+        # Bouton désactivé dans compose() tant que le serveur Web ne tourne
+        # pas (voir _start_web_server/_stop_web_server) : le clic ne peut
+        # normalement survenir que serveur démarré, ce garde-fou n'est là
+        # que pour rester correct si l'état venait à diverger. Génération +
+        # écriture quasi instantanées (gabarit HTML en mémoire, aucun
+        # réseau/sous-processus) : pas besoin d'un worker `thread=True` ici.
+        if self._web_server_handle is None or not self._web_server_handle.is_running:
+            self._tool_log(
+                "[#D8C091]Démarre d'abord le serveur Web (bouton planète) pour "
+                "afficher le build de classes.[/#D8C091]"
+            )
+            return
+        try:
+            write_html(self._config.web_root_dir / DEFAULT_HTML_FILENAME)
+            url = self._web_base_url() + DEFAULT_HTML_FILENAME
+            webbrowser.open(url)
+            self._tool_log(f"Build de classes généré et ouvert : {url}")
+        except OSError as exc:
+            self._tool_log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+
     @on(Button.Pressed, "#action-protontricks")
     def handle_protontricks(self) -> None:
         self.run_protontricks()
 
-    @work(exclusive=False, thread=True)
+    @work(exclusive=False, thread=True, exit_on_error=False)
     def run_protontricks(self) -> None:
         def log(msg): return self.app.call_from_thread(self._tool_log, msg)
         log_dir = self._config.logs_dir
@@ -1891,7 +1977,7 @@ class ActionsScreen(Screen):
             launch=self.run_inventory,
         )
 
-    @work(exclusive=True, thread=True, group="run_inventory")
+    @work(exclusive=True, thread=True, group="run_inventory", exit_on_error=False)
     def run_inventory(self, log: Callable[[str], None]) -> None:
         log("=== Génération de l'inventaire des mods ===")
         try:
@@ -1924,7 +2010,7 @@ class ActionsScreen(Screen):
             launch=self.run_orphaned_archives,
         )
 
-    @work(exclusive=True, thread=True, group="run_orphaned_archives")
+    @work(exclusive=True, thread=True, group="run_orphaned_archives", exit_on_error=False)
     def run_orphaned_archives(self, log: Callable[[str], None]) -> None:
         log("=== Recherche des archives orphelines (_installees) ===")
         try:
@@ -2144,7 +2230,7 @@ class ActionsScreen(Screen):
             launch=self.run_resolve_pak_origins,
         )
 
-    @work(exclusive=True, thread=True, group="run_resolve_pak_origins")
+    @work(exclusive=True, thread=True, group="run_resolve_pak_origins", exit_on_error=False)
     def run_resolve_pak_origins(self, log: Callable[[str], None]) -> None:
         """Enchaîne les trois mécanismes de `pak_origin` sur les .pak
         isolés de Mods/ (voir le docstring de ce module) : nom, puis UUID
@@ -2259,7 +2345,7 @@ class ActionsScreen(Screen):
     def handle_validate_paks(self) -> None:
         self.run_validate_paks()
 
-    @work(exclusive=True, thread=True)
+    @work(exclusive=True, thread=True, exit_on_error=False)
     def run_validate_paks(self) -> None:
         """Sous-tâche 6c du TODO "Utilitaire standalone de validation .pak" :
         câble `pak_validator.validate_paks` sur tous les .pak actuellement
@@ -2321,7 +2407,7 @@ class ActionsScreen(Screen):
             launch=self.run_nexus_updates,
         )
 
-    @work(exclusive=True, thread=True, group="run_nexus_updates")
+    @work(exclusive=True, thread=True, group="run_nexus_updates", exit_on_error=False)
     def run_nexus_updates(self, log: Callable[[str], None]) -> None:
         """Sous-tâche 3 du TODO "Priorisation Nexus / Mod.io" : compare
         chaque archive Nexus connue localement à la version actuellement
@@ -2461,7 +2547,7 @@ class ActionsScreen(Screen):
             launch=lambda log: self.run_restore_profile(name, log),
         )
 
-    @work(exclusive=True, thread=True, group="run_restore_profile")
+    @work(exclusive=True, thread=True, group="run_restore_profile", exit_on_error=False)
     def run_restore_profile(self, name: str, log: Callable[[str], None]) -> None:
         self._restore_profile_task(name, log)
 
@@ -2516,7 +2602,7 @@ class ActionsScreen(Screen):
         except ProfileError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
-    @work(exclusive=True, thread=True, group="run_save_profile")
+    @work(exclusive=True, thread=True, group="run_save_profile", exit_on_error=False)
     def run_save_profile(self, name: str, log: Callable[[str], None]) -> None:
         log(f"=== Sauvegarde du profil « {name} » ===")
         try:
@@ -2556,7 +2642,7 @@ class ActionsScreen(Screen):
             launch=lambda log: self.run_export_profile(name, log),
         )
 
-    @work(exclusive=True, thread=True, group="run_export_profile")
+    @work(exclusive=True, thread=True, group="run_export_profile", exit_on_error=False)
     def run_export_profile(self, name: str, log: Callable[[str], None]) -> None:
         log(f"=== Export du profil « {name} » ===")
         try:
@@ -2597,7 +2683,7 @@ class ActionsScreen(Screen):
 
         self.app.push_screen(ImportArchivePromptScreen(), on_path)
 
-    @work(exclusive=True, thread=True, group="run_import_profile")
+    @work(exclusive=True, thread=True, group="run_import_profile", exit_on_error=False)
     def run_import_profile(self, archive_path: Path, log: Callable[[str], None]) -> None:
         log(f"=== Import du profil depuis {archive_path} ===")
         try:
@@ -2625,7 +2711,7 @@ class ActionsScreen(Screen):
     def handle_optimize_prefix(self) -> None:
         self.run_optimize_prefix()
 
-    @work(exclusive=True, thread=True)
+    @work(exclusive=True, thread=True, exit_on_error=False)
     def run_optimize_prefix(self) -> None:
         def log(msg): return self.app.call_from_thread(self._tool_log, msg)
         log("=== Optimisation du préfixe Proton pour les outils ===")
@@ -2709,13 +2795,20 @@ class ActionsScreen(Screen):
 
         self._web_server_handle = handle
         button.variant = "success"
+        self.query_one("#action-class-builder", Button).disabled = False
 
-        if self._config.public_url:
-            link = f"{self._config.public_url.rstrip('/')}:{self._config.public_port}/"
-        else:
-            link = f"http://127.0.0.1:{self._config.public_port}/"
+        link = self._web_base_url()
         self._web_log(link)
         self._web_log(f"Racine servie : {web_root}")
+
+    def _web_base_url(self) -> str:
+        """URL de base du serveur Web actuellement démarré (adresse publique
+        déclarée si renseignée, sinon boucle locale) — factorisé pour être
+        réutilisé par `_start_web_server` (message de log) et
+        `handle_class_builder` (page servie plutôt qu'ouverte en `file://`)."""
+        if self._config.public_url:
+            return f"{self._config.public_url.rstrip('/')}:{self._config.public_port}/"
+        return f"http://127.0.0.1:{self._config.public_port}/"
 
     def _stop_web_server(self) -> None:
         self._web_log("Arrêt du serveur...")
@@ -2723,3 +2816,4 @@ class ActionsScreen(Screen):
 
         button = self.query_one("#planet-button", Button)
         button.variant = "warning" if not self._config.has_public_address() else "error"
+        self.query_one("#action-class-builder", Button).disabled = True

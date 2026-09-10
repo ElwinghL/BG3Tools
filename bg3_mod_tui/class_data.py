@@ -6,11 +6,15 @@ Portée et limites (à lire avant de faire confiance aveuglément aux données) 
   Clerc, Druide, Guerrier, Moine, Paladin, Rôdeur, Roublard, Ensorceleur,
   Occultiste, Magicien), avec leurs sous-classes principales connues du jeu
   (édition définitive / derniers patchs au moment de l'écriture).
-- BG3 plafonne réellement les personnages au niveau 12. Ce planificateur
-  modélise volontairement la plage complète **1 → 20** de D&D 5e (comme
-  demandé dans le TODO), utile pour des mods qui repoussent le niveau max ou
-  pour une planification "pure 5e". Les niveaux 13-20 sont donc en partie
-  extrapolés depuis le SRD 5e plutôt qu'observés en jeu.
+- Portée strictement limitée au **niveau 1 → 12 vanilla** (le plafond réel de
+  BG3) : sur demande explicite d'Elwingh, plus aucune extrapolation au-delà
+  de ce qui est réellement vérifiable en jeu (les niveaux 13-20 et les
+  sous-classes non confirmées présents dans une version antérieure de ce
+  fichier ont été retirés). Les mods qui repoussent le niveau max ou ajoutent
+  des classes/sous-classes ne sont PAS pris en compte automatiquement — rien
+  ne permet de déduire le contenu d'un mod depuis son .pak — ils seront
+  ajoutés ici explicitement, mod par mod, seulement une fois listés par
+  Elwingh (voir TODO P3/10).
 - Les gains listés par niveau (`features_by_level`) ne sont **pas garantis
   exhaustifs ni patch-exacts** : ils reflètent une bonne approximation des
   mécaniques 5e/BG3 connues, avec une entrée générique de repli
@@ -21,6 +25,10 @@ Portée et limites (à lire avant de faire confiance aveuglément aux données) 
   paliers d'amélioration de caractéristique, attaques supplémentaires) et de
   la liste des classes/sous-classes telle que présentée dans BG3, sans accès
   à une base de données externe depuis cet environnement.
+- Les niveaux de `features_by_level`/`asi_levels`/`subclass_unlock_level`
+  sont relatifs au niveau **dans cette classe** (règle 5e standard de
+  multiclassage), pas au niveau total du personnage — voir
+  `class_builder._level_in_class`.
 
 Structure :
 
@@ -45,8 +53,9 @@ gains de classe + sous-classe pour un niveau donné, avec repli générique.
 
 from __future__ import annotations
 
-# Paliers standards d'amélioration de caractéristique (ASI) en 5e/BG3.
-_STANDARD_ASI_LEVELS = {4, 8, 12, 16, 19}
+# Paliers standards d'amélioration de caractéristique (ASI) en 5e/BG3,
+# limités au plafond vanilla (niveau 12) — voir portée en en-tête de module.
+_STANDARD_ASI_LEVELS = {4, 8, 12}
 
 GENERIC_FEATURE_FALLBACK = (
     "Progression de classe (sorts, ressources ou capacités supplémentaires "
@@ -70,9 +79,6 @@ CLASSES: dict[str, dict] = {
             7: ["Instinct féroce"],
             9: ["Critique brutal (1 dé supplémentaire)"],
             11: ["Rage implacable"],
-            15: ["Rage indomptable"],
-            18: ["Force indomptable"],
-            20: ["Champion primitif (capstone)"],
         },
         "subclasses": {
             "Berserker": {
@@ -81,7 +87,6 @@ CLASSES: dict[str, dict] = {
                     3: ["Furie sans limite"],
                     6: ["Emprise de la rage"],
                     10: ["Retribution intimidante"],
-                    14: ["Frénésie destructrice"],
                 },
             },
             "Wildheart": {
@@ -90,13 +95,6 @@ CLASSES: dict[str, dict] = {
                     3: ["Esprit animal (Aigle/Ours/Loup/Taureau/Tigre selon choix)"],
                     6: ["Aspect de l'esprit animal"],
                     10: ["Marche de l'esprit"],
-                    14: ["Résurgence de l'esprit"],
-                },
-            },
-            "Wrecker": {
-                "fr": "Voie du Briseur (ajout tardif, à vérifier)",
-                "features_by_level": {
-                    3: ["Bonus d'arme improvisée / dégâts d'objets accrus (à confirmer)"],
                 },
             },
         },
@@ -113,9 +111,6 @@ CLASSES: dict[str, dict] = {
             6: ["Contre-sort et contre-capacité"],
             9: ["Sorts de 5ᵉ cercle"],
             10: ["Toucher-à-tout amélioré", "Inspiration magique"],
-            14: ["Sorts de 7ᵉ cercle"],
-            18: ["Toucher-à-tout suprême"],
-            20: ["Chef d'orchestre suprême (capstone)"],
         },
         "subclasses": {
             "Lore": {
@@ -143,7 +138,6 @@ CLASSES: dict[str, dict] = {
             2: ["Aptitude de canalisation divine"],
             5: ["Destruction des morts-vivants"],
             10: ["Intervention divine"],
-            20: ["Intervention divine améliorée (capstone)"],
         },
         "subclasses": {
             "Life": {
@@ -183,8 +177,6 @@ CLASSES: dict[str, dict] = {
         "features_by_level": {
             1: ["Sorts de druide", "Druidique (langue)"],
             2: ["Forme sauvage", "Choix de cercle (sous-classe)"],
-            18: ["Formes sauvages illimitées"],
-            20: ["Archidruide (capstone)"],
         },
         "subclasses": {
             "Land": {
@@ -204,7 +196,7 @@ CLASSES: dict[str, dict] = {
     "Fighter": {
         "fr": "Guerrier",
         "subclass_unlock_level": 3,
-        "asi_levels": {4, 6, 8, 12, 14, 16, 19},
+        "asi_levels": {4, 6, 8, 12},
         "features_by_level": {
             1: ["Style de combat", "Récupération (Second Souffle)"],
             2: ["Sursaut d'action"],
@@ -212,7 +204,6 @@ CLASSES: dict[str, dict] = {
             5: ["Attaque supplémentaire (x2)"],
             9: ["Indomptable"],
             11: ["Attaques multiples (x3)"],
-            20: ["Attaques multiples (x4, capstone)"],
         },
         "subclasses": {
             "Battle Master": {
@@ -251,9 +242,6 @@ CLASSES: dict[str, dict] = {
             6: ["Frappes ki renforcées"],
             7: ["Évasion", "Perfection passive"],
             10: ["Purification du corps"],
-            14: ["Âme de diamant"],
-            18: ["Corps vide (invisibilité)"],
-            20: ["Corps parfait (capstone)"],
         },
         "subclasses": {
             "Open Hand": {
@@ -282,8 +270,6 @@ CLASSES: dict[str, dict] = {
             6: ["Aura de protection"],
             10: ["Aura de courage"],
             11: ["Arme sacrée renforcée"],
-            14: ["Toucher purificateur"],
-            20: ["Capstone de serment"],
         },
         "subclasses": {
             "Devotion": {
@@ -311,8 +297,6 @@ CLASSES: dict[str, dict] = {
             5: ["Attaque supplémentaire"],
             8: ["Pas du prédateur"],
             10: ["Cache-cache naturel"],
-            14: ["Disparition"],
-            20: ["Chasseur suprême (capstone)"],
         },
         "subclasses": {
             "Beast Master": {
@@ -340,10 +324,6 @@ CLASSES: dict[str, dict] = {
             5: ["Esquive totale"],
             7: ["Sens aiguisés (évasion)"],
             11: ["Fiabilité (Reliable Talent)"],
-            14: ["Perception aveugle"],
-            15: ["Bluff insaisissable"],
-            18: ["Élusif (Elusive)"],
-            20: ["Coup de chance (capstone)"],
         },
         "subclasses": {
             "Thief": {
@@ -368,7 +348,6 @@ CLASSES: dict[str, dict] = {
             1: ["Sorts d'ensorceleur", "Choix d'origine magique (sous-classe dès le niveau 1)"],
             2: ["Métamagie (2 options)"],
             3: ["Métamagie (options supplémentaires accessibles)"],
-            20: ["Restauration de sorcellerie (capstone)"],
         },
         "subclasses": {
             "Draconic Bloodline": {
@@ -378,10 +357,6 @@ CLASSES: dict[str, dict] = {
             "Wild Magic": {
                 "fr": "Magie sauvage",
                 "features_by_level": {1: ["Surtension de magie sauvage", "Chance ensorcelée"]},
-            },
-            "Storm": {
-                "fr": "Sorcellerie de la Tempête (ajout tardif, à vérifier)",
-                "features_by_level": {1: ["Vol de tempête (à confirmer)"]},
             },
         },
     },
@@ -394,7 +369,6 @@ CLASSES: dict[str, dict] = {
             2: ["Invocations occultes"],
             3: ["Choix de pacte (Lame/Chaîne/Tome)"],
             11: ["Arcanes mystiques"],
-            20: ["Maître occulte (capstone)"],
         },
         "subclasses": {
             "Fiend": {
@@ -418,8 +392,6 @@ CLASSES: dict[str, dict] = {
         "features_by_level": {
             1: ["Sorts de magicien", "Récupération arcanique"],
             2: ["Choix d'école de magie (sous-classe)"],
-            18: ["Maîtrise des sorts"],
-            20: ["Signature spectrale (capstone)"],
         },
         "subclasses": {
             "Evocation": {"fr": "École d'Évocation", "features_by_level": {2: ["Sculpteur de sorts"]}},

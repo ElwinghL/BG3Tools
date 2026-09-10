@@ -80,3 +80,8 @@ __pycache__/
 # compat_framework.py, qui reconstruit le .pak localement à partir
 # d'elles via Divine.exe) : pas notre code.
 /Tools/BG3-Compatibility-Framework/**
+
+# Rust (crates sous rust/, ex. pak_reader_rs) : artefacts de build Cargo,
+# pas notre code. Cargo.lock reste versionné (verrouiller les versions
+# évite les régressions silencieuses lors d'un nouveau `cargo build`).
+/rust/**/target/

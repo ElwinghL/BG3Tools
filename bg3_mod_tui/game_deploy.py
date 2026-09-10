@@ -68,11 +68,20 @@ def _replace_with_hardlink_backup(target: Path, source: Path, backup: Path, *, l
     sauvegardé sous `backup` (le vrai binaire original du jeu n'est
     sauvegardé qu'une seule fois — un `backup` déjà présent n'est jamais
     écrasé)."""
-    if target.exists() and target.stat().st_ino == source.stat().st_ino:
-        log(f"  '{target.name}' déjà un hardlink vers '{source}', rien à faire.")
-        return
-
-    if target.exists():
+    if target.is_symlink():
+        # Repli EXDEV (voir `link_or_symlink`) d'une exécution précédente, ou
+        # lien cassé (ex: `source` déplacé ailleurs) : `Path.exists()` suit
+        # les liens et renverrait False dans ce dernier cas, donc pas
+        # détecté par la branche générale ci-dessous — même bug/fix que
+        # `linking.py._replace_with_hardlink` pour modsettings.lsx.
+        if target.resolve() == source.resolve():
+            log(f"  '{target.name}' déjà un lien vers '{source}', rien à faire.")
+            return
+        target.unlink()
+    elif target.exists():
+        if target.stat().st_ino == source.stat().st_ino:
+            log(f"  '{target.name}' déjà un hardlink vers '{source}', rien à faire.")
+            return
         if not backup.exists():
             shutil.move(str(target), str(backup))
             log(f"  original sauvegardé : '{target.name}' -> '{backup.name}'")
@@ -130,10 +139,17 @@ def _hardlink_replace(target: Path, source: Path, *, log: LogFn) -> None:
     (fichier différent), il est simplement remplacé — utilisé pour des
     fichiers gérés par nous (pas de notion d'« original du jeu » à
     préserver, contrairement à `_replace_with_hardlink_backup`)."""
-    if target.exists() and target.stat().st_ino == source.stat().st_ino:
-        log(f"  '{target.name}' déjà un hardlink vers '{source}', rien à faire.")
-        return
-    if target.exists():
+    if target.is_symlink():
+        # Voir `_replace_with_hardlink_backup` : un lien cassé (repli EXDEV
+        # ou `source` déplacé) n'est pas détecté par `.exists()`.
+        if target.resolve() == source.resolve():
+            log(f"  '{target.name}' déjà un lien vers '{source}', rien à faire.")
+            return
+        target.unlink()
+    elif target.exists():
+        if target.stat().st_ino == source.stat().st_ino:
+            log(f"  '{target.name}' déjà un hardlink vers '{source}', rien à faire.")
+            return
         target.unlink()
     link_or_symlink(source, target)
     log(f"  '{target.name}' relié (hardlink) à notre copie gérée.")

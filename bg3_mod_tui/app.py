@@ -9,6 +9,7 @@ from textual.app import App
 from textual.binding import Binding
 
 from bg3_mod_tui.config import ModToolsConfig, load_config
+from bg3_mod_tui.crash_log import log_crash
 from bg3_mod_tui.screens.actions import ActionsScreen
 from bg3_mod_tui.screens.setup import SetupScreen
 from bg3_mod_tui.theme import BG3_THEME
@@ -50,3 +51,9 @@ class BG3ModTUIApp(App):
     def _go_to_main(self, config: ModToolsConfig) -> None:
         self.pop_screen()
         self.push_screen(ActionsScreen(config))
+
+    def _handle_exception(self, error: Exception) -> None:
+        # Le TUI tourne dans une fenêtre de terminal dédiée qui se referme
+        # trop vite pour lire une trace à l'écran : voir `bg3_mod_tui.crash_log`.
+        log_crash(error)
+        super()._handle_exception(error)

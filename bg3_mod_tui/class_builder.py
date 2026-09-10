@@ -1,4 +1,4 @@
-"""Planificateur de build classe/sous-classe niveau 1→20 (TODO P3.10).
+"""Planificateur de build classe/sous-classe niveau 1→12 (TODO P3.10).
 
 Fonctionnalité volontairement **autonome** : indépendante du profil actif,
 des mods installés et du reste de l'outil ModTools — voir `class_data.py`
@@ -7,11 +7,14 @@ pour les données et leurs limites documentées.
 Ce module porte la logique pure (testable sans navigateur) :
 
 - `LevelChoice` : le choix de classe/sous-classe fait à un niveau donné.
-- `validate_build` : applique la règle de « progression continue vs nouveau
-  choix » — on peut continuer indéfiniment la progression d'une classe déjà
-  prise, mais une classe ne peut être sélectionnée comme *nouveau* choix
-  qu'une seule fois sur l'ensemble du build (pas d'aller-retour entre deux
-  classes déjà utilisées, cf TODO 10a/10d : « aucune classe doublon »).
+- `validate_build` : vérifie la séquence de niveaux (continue, sans trou ni
+  doublon) et la cohérence des sous-classes (pas choisie avant son niveau
+  de déblocage *dans sa classe*, jamais changée une fois fixée). Aucune
+  restriction sur l'ordre des classes : en 5e réelle, le multiclassage
+  permet d'alterner librement entre classes déjà commencées à chaque
+  niveau (confirmé explicitement par Elwingh après une première version qui
+  imposait à tort « une classe fermée une fois quittée » — pas une vraie
+  règle 5e, retirée).
 - `build_report` : matérialise le build validé en une liste de gains par
   niveau (structure de données, réutilisée par `generate_html` pour la page
   exportable — voir la suite du TODO pour 10b/10c/10d).
@@ -31,7 +34,7 @@ from pathlib import Path
 from bg3_mod_tui.class_data import CLASSES, get_level_features
 
 MIN_LEVEL = 1
-MAX_LEVEL = 20
+MAX_LEVEL = 12  # plafond réel BG3 vanilla — voir class_data.py pour la portée
 
 DEFAULT_HTML_FILENAME = "build_classe_bg3.html"
 
@@ -45,24 +48,32 @@ class LevelChoice:
     subclass_name: str | None = None
 
 
+def _level_in_class(by_level: dict[int, LevelChoice], level: int, class_name: str) -> int:
+    """Niveau *au sein de* `class_name` atteint en incluant `level` — les
+    règles 5e de multiclassage (`features_by_level`/`asi_levels`/
+    `subclass_unlock_level` dans `class_data.py`) sont définies par rapport
+    au niveau DANS la classe, pas au niveau total du personnage (ex: Barbare
+    1 / Roublard 2 a les gains de "Roublard niveau 2", pas "niveau 3")."""
+    return sum(1 for lvl, choice in by_level.items() if lvl <= level and choice.class_name == class_name)
+
+
 def validate_build(choices: list[LevelChoice]) -> list[str]:
     """Valide un build niveau par niveau et retourne la liste des erreurs
     (vide si le build est valide). Règles appliquées :
 
     1. Les niveaux couverts doivent former la séquence continue 1..N (pas de
-       trou, pas de doublon de niveau) — N pouvant être inférieur à 20 pour
-       un build en cours de construction.
+       trou, pas de doublon de niveau) — N pouvant être inférieur à
+       `MAX_LEVEL` pour un build en cours de construction.
     2. Classe inconnue (absente de `class_data.CLASSES`) → erreur.
-    3. Sous-classe choisie avant le niveau de déblocage de la classe, ou
+    3. Sous-classe choisie avant le niveau de déblocage *dans sa classe*, ou
        sous-classe inconnue pour cette classe → erreur.
     4. Une fois une sous-classe choisie pour une classe, elle doit rester la
        même sur tous les niveaux ultérieurs de cette classe (on ne change
        pas de sous-classe en cours de route).
-    5. Règle de « nouveau choix » : le passage d'un niveau à l'autre vers une
-       classe différente de celle du niveau précédent est un *nouveau
-       choix*. Une classe ne peut faire l'objet que d'un seul nouveau choix
-       sur tout le build — une fois quittée pour une autre classe, elle ne
-       peut plus être reprise (pas de doublon de classe, cf TODO 10a).
+
+    Aucune restriction sur l'ordre des classes entre elles : on peut alterner
+    librement entre classes déjà commencées à chaque niveau (multiclassage
+    5e standard, pas de notion de classe "fermée" une fois quittée).
     """
     errors: list[str] = []
     if not choices:
@@ -83,9 +94,7 @@ def validate_build(choices: list[LevelChoice]) -> list[str]:
             errors.append(f"Niveau {expected} manquant (séquence non continue).")
             break
 
-    used_as_new_choice: set[str] = set()
     subclass_by_class: dict[str, str] = {}
-    prev_class: str | None = None
 
     for level in levels:
         choice = by_level[level]
@@ -93,18 +102,6 @@ def validate_build(choices: list[LevelChoice]) -> list[str]:
         if info is None:
             errors.append(f"Niveau {level} : classe inconnue « {choice.class_name} ».")
             continue
-
-        is_new_choice = choice.class_name != prev_class
-        if is_new_choice:
-            if choice.class_name in used_as_new_choice:
-                errors.append(
-                    f"Niveau {level} : la classe « {choice.class_name} » a déjà été "
-                    "quittée plus tôt dans le build — impossible de la reprendre "
-                    "comme nouveau choix (une classe ne peut être choisie qu'une "
-                    "seule fois comme nouveau choix, la progression continue est "
-                    "en revanche illimitée)."
-                )
-            used_as_new_choice.add(choice.class_name)
 
         if choice.subclass_name:
             if choice.subclass_name not in info["subclasses"]:
@@ -114,10 +111,12 @@ def validate_build(choices: list[LevelChoice]) -> list[str]:
                 )
             else:
                 unlock = info["subclass_unlock_level"]
-                if level < unlock:
+                level_in_class = _level_in_class(by_level, level, choice.class_name)
+                if level_in_class < unlock:
                     errors.append(
                         f"Niveau {level} : sous-classe choisie avant le niveau de "
-                        f"déblocage ({unlock}) pour {choice.class_name}."
+                        f"déblocage ({unlock}e niveau de {choice.class_name}, "
+                        f"actuellement {level_in_class}e) pour {choice.class_name}."
                     )
                 existing = subclass_by_class.get(choice.class_name)
                 if existing is not None and existing != choice.subclass_name:
@@ -128,8 +127,6 @@ def validate_build(choices: list[LevelChoice]) -> list[str]:
                     )
                 else:
                     subclass_by_class[choice.class_name] = choice.subclass_name
-
-        prev_class = choice.class_name
 
     return errors
 
@@ -150,10 +147,12 @@ def build_report(choices: list[LevelChoice]) -> list[dict]:
         if choice.subclass_name:
             subclass_by_class[choice.class_name] = choice.subclass_name
         active_subclass = subclass_by_class.get(choice.class_name)
+        level_in_class = _level_in_class(by_level, level, choice.class_name)
 
         report.append(
             {
                 "level": level,
+                "level_in_class": level_in_class,
                 "class_name": choice.class_name,
                 "class_fr": info.get("fr", choice.class_name),
                 "subclass_name": active_subclass,
@@ -162,7 +161,7 @@ def build_report(choices: list[LevelChoice]) -> list[dict]:
                     if active_subclass
                     else None
                 ),
-                "features": get_level_features(choice.class_name, level, active_subclass),
+                "features": get_level_features(choice.class_name, level_in_class, active_subclass),
             }
         )
 
@@ -230,8 +229,9 @@ _HTML_TEMPLATE = r"""<!doctype html>
     --text: #e7e9ee;
     --muted: #9aa2b1;
     --accent: #7aa2f7;
-    --error: #f7768e;
-    --ok: #9ece6a;
+    --confirmed-bg: #101216;
+    --choice-bg: #4b4f58;
+    --choice-bg-hover: #656a75;
   }
   * { box-sizing: border-box; }
   body {
@@ -244,40 +244,9 @@ _HTML_TEMPLATE = r"""<!doctype html>
   }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
   p.subtitle { color: var(--muted); margin: 0 0 16px; }
-  details.limits {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 14px;
-    margin-bottom: 16px;
-    max-width: 900px;
-  }
-  details.limits summary { cursor: pointer; color: var(--accent); font-weight: 600; }
-  details.limits ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); font-size: 0.9rem; }
-  #errors {
-    background: #3a1e26;
-    border: 1px solid var(--error);
-    color: var(--error);
-    border-radius: 8px;
-    padding: 10px 14px;
-    margin-bottom: 16px;
-    display: none;
-    max-width: 900px;
-  }
-  #errors.visible { display: block; }
-  #errors ul { margin: 4px 0 0; padding-left: 20px; }
-  #status-ok {
-    background: #1e3a26;
-    border: 1px solid var(--ok);
-    color: var(--ok);
-    border-radius: 8px;
-    padding: 8px 14px;
-    margin-bottom: 16px;
-    display: none;
-    max-width: 900px;
-  }
-  #status-ok.visible { display: block; }
-  .toolbar { margin-bottom: 16px; display: flex; gap: 8px; }
+  .toolbar { margin-bottom: 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .toolbar .buttons { display: flex; gap: 8px; }
+  .toolbar label { color: var(--muted); font-size: 0.85rem; display: flex; align-items: center; gap: 6px; cursor: pointer; }
   button {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -287,386 +256,445 @@ _HTML_TEMPLATE = r"""<!doctype html>
     cursor: pointer;
     font-size: 0.9rem;
   }
-  button:hover { border-color: var(--accent); }
-  table#levels {
-    width: 100%;
-    max-width: 1100px;
-    border-collapse: collapse;
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #class-summary { max-width: 1100px; }
+  #build-status { color: var(--accent); margin: 0 0 20px; display: none; }
+  #build-status.visible { display: block; }
+
+  #graph-wrapper { position: relative; }
+  #connector-svg { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+  #build-graph { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; }
+  .connector { width: 2px; height: 26px; background: var(--border); }
+  .node {
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+    text-align: center;
+    min-width: 110px;
+    max-width: 220px;
   }
-  table#levels th, table#levels td {
-    border-bottom: 1px solid var(--border);
-    padding: 6px 8px;
-    text-align: left;
-    vertical-align: top;
-    font-size: 0.9rem;
-  }
-  table#levels th { color: var(--muted); font-weight: 600; }
-  select {
-    background: var(--panel);
+  .node.confirmed {
+    background: var(--confirmed-bg);
     color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 4px 6px;
-    min-width: 160px;
+    border: 1px solid #000;
   }
-  select:disabled { opacity: 0.5; }
-  ul.gains { margin: 0; padding-left: 18px; }
-  ul.gains li { color: var(--muted); }
-  .row-new-choice { color: var(--accent); font-size: 0.8rem; }
-  .row-continuation { color: var(--muted); font-size: 0.8rem; }
-  section#mermaid-section { margin-top: 24px; max-width: 1100px; }
-  #mermaid-graph { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow-x: auto; }
-  #mermaid-source { white-space: pre-wrap; color: var(--muted); font-size: 0.8rem; }
+  .node-caption {
+    margin-top: 4px;
+    font-size: 0.72rem;
+    color: var(--muted);
+  }
+  #choices-heading {
+    position: relative;
+    z-index: 1;
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin: 12px 0 0;
+    text-align: center;
+  }
+  #choices-area {
+    position: relative;
+    z-index: 1;
+    height: 360px;
+  }
+  .node.choice {
+    position: absolute;
+    top: 0;
+    left: 0;
+    background: var(--choice-bg);
+    color: var(--text);
+    border: 1px solid #5a5f69;
+    cursor: pointer;
+    transition: background 0.12s;
+    will-change: transform;
+  }
+  .node.choice:hover { background: var(--choice-bg-hover); }
 </style>
 </head>
 <body>
 <h1>Planificateur de build — Baldur's Gate 3</h1>
 <p class="subtitle">
-  Page autonome (aucun serveur, aucun mod, aucun profil requis) — choisissez
-  une classe (et une sous-classe une fois débloquée) pour chaque niveau de
-  __MIN_LEVEL__ à __MAX_LEVEL__. Générée par ModTools (bg3_mod_tui/class_builder.py).
+  Page autonome (aucun serveur, aucun mod, aucun profil requis) — construisez
+  votre build niveau après niveau (__MIN_LEVEL__ à __MAX_LEVEL__, plafond
+  vanilla BG3) en cliquant les choix disponibles sous la chaîne actuelle.
+  Générée par ModTools (bg3_mod_tui/class_builder.py).
 </p>
 
-<details class="limits">
-  <summary>Limites des données (à lire)</summary>
-  <ul>
-    <li>BG3 plafonne réellement au niveau 12 — cette page couvre 1→20 (portée 5e complète), les niveaux 13-20 sont donc en partie extrapolés.</li>
-    <li>Les gains par niveau sont une approximation raisonnable, pas une source patch-exacte vérifiée en jeu ni en ligne (page générée hors-ligne).</li>
-    <li>Les sous-classes listées correspondent aux sous-classes principales connues de BG3 ; certaines mentions « à vérifier/à confirmer » signalent un contenu ajouté tardivement, moins certain.</li>
-    <li>Structure pensée pour être facilement corrigée : voir <code>bg3_mod_tui/class_data.py</code> dans le dépôt ModTools.</li>
-  </ul>
-</details>
-
 <div class="toolbar">
-  <button id="reset-btn" type="button">Réinitialiser le build</button>
+  <div class="buttons">
+    <button id="undo-btn" type="button">Annuler le dernier choix</button>
+    <button id="reset-btn" type="button">Réinitialiser le build</button>
+  </div>
+  <label><input type="checkbox" id="compact-toggle"> Affichage compact (masquer le détail des gains)</label>
 </div>
 
-<div id="errors"></div>
-<div id="status-ok">Build valide — aucune règle de progression enfreinte.</div>
 <div id="class-summary" class="subtitle"></div>
+<p id="build-status">Build complet — niveau __MAX_LEVEL__ atteint.</p>
 
-<table id="levels">
-  <thead>
-    <tr>
-      <th>Niveau</th>
-      <th>Classe</th>
-      <th>Sous-classe</th>
-      <th>Type de choix</th>
-      <th>Gains à ce niveau</th>
-    </tr>
-  </thead>
-  <tbody id="levels-body"></tbody>
-</table>
+<div id="graph-wrapper">
+  <svg id="connector-svg"></svg>
+  <div id="build-graph"></div>
+  <p id="choices-heading"></p>
+  <div id="choices-area"></div>
+</div>
 
-<section id="mermaid-section">
-  <h2>Graph de progression</h2>
-  <p class="subtitle" id="mermaid-status">
-    Rendu via <a href="https://mermaid.js.org" target="_blank" rel="noopener">Mermaid</a>
-    (chargé depuis un CDN — nécessite une connexion réseau). Hors ligne, le
-    code source Mermaid brut reste affiché ci-dessous, copiable dans
-    n'importe quel éditeur Mermaid.
-  </p>
-  <div id="mermaid-graph" class="mermaid"></div>
-  <details id="mermaid-source-details">
-    <summary>Code source Mermaid</summary>
-    <pre id="mermaid-source"></pre>
-  </details>
-</section>
-
-<!--
-  Mermaid chargé depuis un CDN (jsDelivr, version figée) : seule
-  dépendance externe de la page, strictement nécessaire pour le rendu du
-  graph (TODO 10c). Chargement synchrone (pas de defer/async) afin que le
-  script inline ci-dessous puisse tester de façon fiable si `window.mermaid`
-  est disponible avant de s'en servir. Hors ligne (échec de chargement), la
-  page reste pleinement fonctionnelle : le code source Mermaid brut est
-  affiché en repli (voir renderMermaid()).
--->
-<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
 <script>
 const CLASS_DATA = __CLASS_DATA_JSON__;
 const MIN_LEVEL = __MIN_LEVEL__;
 const MAX_LEVEL = __MAX_LEVEL__;
 const GENERIC_FALLBACK = "Progression de classe (sorts, ressources ou capacités supplémentaires selon la classe — non détaillé)";
 
-const build = {}; // level(int) -> { classId, subclassId }
-
-const MERMAID_AVAILABLE = typeof window.mermaid !== "undefined";
-if (MERMAID_AVAILABLE) {
-  mermaid.initialize({ startOnLoad: false, theme: "dark", securityLevel: "strict" });
-}
-
-function buildMermaidDefinition() {
-  const lines = ["graph TD"];
-  let prevNodeId = null;
-  let prevClass = null;
-  for (let level = MIN_LEVEL; level <= MAX_LEVEL; level++) {
-    const choice = build[level];
-    if (!choice || !choice.classId) continue;
-    const info = CLASS_DATA[choice.classId];
-    const subLabel = choice.subclassId ? " (" + info.subclasses[choice.subclassId].fr + ")" : "";
-    const label = ("Niv. " + level + " : " + info.fr + subLabel).replace(/"/g, "'");
-    const nodeId = "L" + level;
-    lines.push(nodeId + '["' + label + '"]');
-    if (prevNodeId) {
-      const isNewChoice = choice.classId !== prevClass;
-      lines.push(prevNodeId + " -->|" + (isNewChoice ? "nouveau choix" : "continuation") + "| " + nodeId);
-    }
-    prevNodeId = nodeId;
-    prevClass = choice.classId;
-  }
-  if (lines.length === 1) lines.push('EMPTY["Aucun niveau renseigné pour l\'instant"]');
-  return lines.join("\n");
-}
-
-async function renderMermaid() {
-  const definition = buildMermaidDefinition();
-  document.getElementById("mermaid-source").textContent = definition;
-  const graphEl = document.getElementById("mermaid-graph");
-  const statusEl = document.getElementById("mermaid-status");
-  if (!MERMAID_AVAILABLE) {
-    graphEl.innerHTML = "";
-    statusEl.textContent =
-      "Mermaid n'a pas pu être chargé depuis le CDN (hors ligne ?) — le code source ci-dessous reste disponible et copiable.";
-    return;
-  }
-  try {
-    const { svg } = await mermaid.render("mermaid-svg-" + Date.now(), definition);
-    graphEl.innerHTML = svg;
-  } catch (err) {
-    graphEl.innerHTML = "";
-    statusEl.textContent = "Erreur de rendu Mermaid (voir le code source ci-dessous) : " + err;
-  }
-}
+// État : une entrée par niveau du personnage déjà confirmé, dans l'ordre
+// (state[0] = niveau 1, state[state.length-1] = dernier niveau confirmé).
+// Construit uniquement en cliquant un choix proposé par computeNextOptions
+// -> impossible de construire un build qui enfreint la règle de
+// progression (continuation illimitée d'une classe active, un seul
+// nouveau choix par classe sur tout le build).
+const state = [];
 
 function classIds() {
   return Object.keys(CLASS_DATA).sort((a, b) => CLASS_DATA[a].fr.localeCompare(CLASS_DATA[b].fr, "fr"));
 }
 
-function getFeatures(classId, level, subclassId) {
+// Niveau *dans* classId en ne comptant que state[0..upToIndex-1] (miroir de
+// `class_builder._level_in_class` côté Python).
+function levelInClass(upToIndex, classId) {
+  let count = 0;
+  for (let i = 0; i < upToIndex; i++) {
+    if (state[i].classId === classId) count++;
+  }
+  return count;
+}
+
+function usedClassesSet() {
+  return new Set(state.map((choice) => choice.classId));
+}
+
+function getFeatures(classId, levelInClassValue, subclassId) {
   const info = CLASS_DATA[classId];
   if (!info) return [GENERIC_FALLBACK];
-  let feats = (info.features_by_level[String(level)] || []).slice();
-  if (info.asi_levels.includes(level) && !feats.some((f) => f.indexOf("Amélioration") !== -1)) {
+  let feats = (info.features_by_level[String(levelInClassValue)] || []).slice();
+  if (info.asi_levels.includes(levelInClassValue) && !feats.some((f) => f.indexOf("Amélioration") !== -1)) {
     feats.push("Amélioration de caractéristique (+2 ou +1/+1) ou Don");
   }
   if (subclassId) {
     const sub = info.subclasses[subclassId];
     if (sub) {
-      if (level === info.subclass_unlock_level) {
+      if (levelInClassValue === info.subclass_unlock_level) {
         feats.push("Choix de sous-classe : " + sub.fr);
       }
-      feats = feats.concat(sub.features_by_level[String(level)] || []);
+      feats = feats.concat(sub.features_by_level[String(levelInClassValue)] || []);
     }
   }
   if (feats.length === 0) feats.push(GENERIC_FALLBACK);
   return feats;
 }
 
-function validateBuild() {
-  const errors = [];
-  const levels = Object.keys(build)
-    .map(Number)
-    .filter((lvl) => build[lvl] && build[lvl].classId)
-    .sort((a, b) => a - b);
+// Choix disponibles pour le PROCHAIN niveau, calculés depuis `state` :
+// continuer N'IMPORTE QUELLE classe déjà commencée (avec fork en un choix
+// par sous-classe si ce niveau est justement celui du déblocage), ou
+// multiclasser vers une classe pas encore utilisée (même fork si sa
+// sous-classe se débloque dès son niveau 1 — Clerc/Ensorceleur/Occultiste).
+// Pas de notion de classe "fermée" : le multiclassage 5e permet d'alterner
+// librement entre classes déjà commencées, niveau après niveau.
+function computeNextOptions() {
+  if (state.length >= MAX_LEVEL) return [];
+  const options = [];
+  const used = usedClassesSet();
 
-  const usedAsNewChoice = new Set();
-  const subclassByClass = {};
-  let prevClass = null;
-
-  for (const level of levels) {
-    const choice = build[level];
-    const info = CLASS_DATA[choice.classId];
-    if (!info) {
-      errors.push("Niveau " + level + " : classe inconnue.");
-      continue;
-    }
-    const isNewChoice = choice.classId !== prevClass;
-    if (isNewChoice) {
-      if (usedAsNewChoice.has(choice.classId)) {
-        errors.push(
-          "Niveau " + level + " : « " + info.fr + " » a déjà été quittée plus tôt dans " +
-          "le build — impossible de la reprendre comme nouveau choix (progression " +
-          "continue illimitée, mais un seul nouveau choix par classe)."
-        );
+  for (const classId of classIds()) {
+    if (!used.has(classId)) continue;
+    const info = CLASS_DATA[classId];
+    const nextLevel = levelInClass(state.length, classId) + 1;
+    const alreadyHasSubclass = state.some((c) => c.classId === classId && c.subclassId);
+    if (nextLevel === info.subclass_unlock_level && !alreadyHasSubclass) {
+      for (const subId of Object.keys(info.subclasses)) {
+        options.push({
+          classId,
+          subclassId: subId,
+          label: "Continuer " + info.fr + " " + nextLevel + " (" + info.subclasses[subId].fr + ")",
+        });
       }
-      usedAsNewChoice.add(choice.classId);
+    } else {
+      options.push({ classId, subclassId: null, label: "Continuer " + info.fr + " " + nextLevel });
     }
-    if (choice.subclassId) {
-      const sub = info.subclasses[choice.subclassId];
-      if (!sub) {
-        errors.push("Niveau " + level + " : sous-classe inconnue.");
-      } else {
-        if (level < info.subclass_unlock_level) {
-          errors.push(
-            "Niveau " + level + " : sous-classe choisie avant le déblocage (niveau " +
-            info.subclass_unlock_level + ") pour " + info.fr + "."
-          );
-        }
-        const existing = subclassByClass[choice.classId];
-        if (existing && existing !== choice.subclassId) {
-          errors.push("Niveau " + level + " : changement de sous-classe non autorisé pour " + info.fr + ".");
-        } else {
-          subclassByClass[choice.classId] = choice.subclassId;
-        }
-      }
-    }
-    prevClass = choice.classId;
   }
-  return errors;
-}
 
-// État (classes déjà utilisées comme nouveau choix, classe du niveau
-// précédent) juste avant `level`, en ne considérant que les niveaux
-// inférieurs déjà renseignés — sert à désactiver dans le menu déroulant
-// les classes qui ne pourraient de toute façon plus être choisies comme
-// nouveau choix (TODO 10d : rendre visible/empêcher en amont, pas
-// seulement signaler l'erreur après coup).
-function computeStateBeforeLevel(level) {
-  const usedAsNewChoice = new Set();
-  let prevClass = null;
-  const levels = Object.keys(build)
-    .map(Number)
-    .filter((lvl) => lvl < level && build[lvl] && build[lvl].classId)
-    .sort((a, b) => a - b);
-  for (const lvl of levels) {
-    const choice = build[lvl];
-    if (choice.classId !== prevClass) usedAsNewChoice.add(choice.classId);
-    prevClass = choice.classId;
+  for (const classId of classIds()) {
+    if (used.has(classId)) continue;
+    const info = CLASS_DATA[classId];
+    const verb = state.length === 0 ? "Commencer" : "Multiclasser";
+    if (info.subclass_unlock_level === 1) {
+      for (const subId of Object.keys(info.subclasses)) {
+        options.push({
+          classId,
+          subclassId: subId,
+          label: verb + " : " + info.fr + " (" + info.subclasses[subId].fr + ")",
+        });
+      }
+    } else {
+      options.push({ classId, subclassId: null, label: verb + " : " + info.fr + " 1" });
+    }
   }
-  return { usedAsNewChoice, prevClass };
+
+  return options;
 }
 
 function renderClassSummary() {
   const el = document.getElementById("class-summary");
-  const { usedAsNewChoice, prevClass } = computeStateBeforeLevel(MAX_LEVEL + 1);
-  if (usedAsNewChoice.size === 0) {
+  const used = usedClassesSet();
+  if (used.size === 0) {
     el.textContent = "Aucune classe choisie pour l'instant.";
     return;
   }
-  const parts = Array.from(usedAsNewChoice).map((id) => {
-    const fr = CLASS_DATA[id].fr;
-    return id === prevClass ? fr + " (active — continuation possible)" : fr + " (quittée — indisponible pour un nouveau choix)";
-  });
-  el.textContent = "Classes utilisées dans ce build : " + parts.join(", ") + ".";
+  const parts = Array.from(used).map((id) => CLASS_DATA[id].fr + " " + levelInClass(state.length, id));
+  el.textContent = "Classes en cours dans ce build : " + parts.join(", ") + ".";
 }
 
-function renderErrors(errors) {
-  const box = document.getElementById("errors");
-  const ok = document.getElementById("status-ok");
-  if (errors.length === 0) {
-    box.classList.remove("visible");
-    box.innerHTML = "";
-    ok.classList.add("visible");
-  } else {
-    ok.classList.remove("visible");
-    box.classList.add("visible");
-    box.innerHTML =
-      "<strong>Build invalide :</strong><ul>" +
-      errors.map((e) => "<li>" + e + "</li>").join("") +
-      "</ul>";
+let compactMode = false;
+
+function makeConfirmedNode(choice, index) {
+  const info = CLASS_DATA[choice.classId];
+  const lvl = levelInClass(index + 1, choice.classId);
+  const label = info.fr + " " + lvl + (choice.subclassId ? " (" + info.subclasses[choice.subclassId].fr + ")" : "");
+  const feats = getFeatures(choice.classId, lvl, choice.subclassId);
+
+  const node = document.createElement("div");
+  node.className = "node confirmed";
+  node.title = feats.join("\n");
+
+  const title = document.createElement("div");
+  title.textContent = label;
+  node.appendChild(title);
+
+  if (!compactMode) {
+    const caption = document.createElement("div");
+    caption.className = "node-caption";
+    caption.textContent = feats.join(", ");
+    node.appendChild(caption);
   }
+
+  return node;
 }
 
-function renderLevelRow(level) {
-  const tr = document.createElement("tr");
-  tr.dataset.level = String(level);
+// Simulation à forces façon graphe orienté force (ressort + répulsion,
+// style Fruchterman-Reingold simplifié) — demandé explicitement par
+// Elwingh ("graph pieuvre") pour remplacer la grille rigide précédente :
+// chaque choix "flotte" autour de l'ancre (le dernier nœud confirmé),
+// repoussé par ses voisins pour ne jamais se chevaucher, avec un
+// déplacement fluide animé plutôt qu'un repositionnement instantané.
+const SPRING_K = 0.02;
+const REPULSION = 2600;
+const DAMPING = 0.82;
+const COLLISION_PADDING = 10;
 
-  const levelTd = document.createElement("td");
-  levelTd.textContent = level;
-  tr.appendChild(levelTd);
+let physicsNodes = []; // { x, y, vx, vy, el }
+let animationFrameId = null;
+let restLength = 150; // recalculé par render() selon le nombre de choix
 
-  const { usedAsNewChoice, prevClass } = computeStateBeforeLevel(level);
+function computeAnchor(wrapperRect) {
+  const confirmedNodes = document.querySelectorAll("#build-graph .node.confirmed");
+  if (confirmedNodes.length > 0) {
+    const lastRect = confirmedNodes[confirmedNodes.length - 1].getBoundingClientRect();
+    return {
+      x: lastRect.left + lastRect.width / 2 - wrapperRect.left,
+      y: lastRect.bottom - wrapperRect.top + 20,
+    };
+  }
+  const area = document.getElementById("choices-area");
+  return { x: area.getBoundingClientRect().width / 2, y: 30 };
+}
 
-  const classTd = document.createElement("td");
-  const classSelect = document.createElement("select");
-  classSelect.innerHTML =
-    '<option value="">— aucune —</option>' +
-    classIds()
-      .map((id) => {
-        // Une classe déjà quittée (nouveau choix consommé ailleurs qu'au
-        // niveau précédent) ne peut plus redevenir un nouveau choix ici —
-        // désactivée dans le menu plutôt que de laisser l'utilisateur
-        // découvrir l'erreur après coup (TODO 10d).
-        const closed = usedAsNewChoice.has(id) && id !== prevClass;
-        const attrs = closed ? ' disabled title="Déjà quittée plus tôt dans le build"' : "";
-        return '<option value="' + id + '"' + attrs + ">" + CLASS_DATA[id].fr + (closed ? " (indisponible)" : "") + "</option>";
-      })
-      .join("");
-  const current = build[level];
-  if (current && current.classId) classSelect.value = current.classId;
-  classSelect.addEventListener("change", () => {
-    build[level] = { classId: classSelect.value || null, subclassId: null };
-    renderAll();
-  });
-  classTd.appendChild(classSelect);
-  tr.appendChild(classTd);
+function stepPhysics(anchor, width, height) {
+  for (const n of physicsNodes) {
+    const dxA = n.x - anchor.x;
+    const dyA = n.y - anchor.y;
+    const distA = Math.max(Math.hypot(dxA, dyA), 1);
+    const springForce = (restLength - distA) * SPRING_K;
+    let fx = (dxA / distA) * springForce;
+    let fy = (dyA / distA) * springForce;
 
-  const subclassTd = document.createElement("td");
-  const choice = build[level];
-  if (choice && choice.classId) {
-    const info = CLASS_DATA[choice.classId];
-    const subSelect = document.createElement("select");
-    if (level < info.subclass_unlock_level) {
-      subSelect.disabled = true;
-      subSelect.innerHTML = '<option>débloquée niveau ' + info.subclass_unlock_level + "</option>";
-    } else {
-      subSelect.innerHTML =
-        '<option value="">— aucune —</option>' +
-        Object.keys(info.subclasses)
-          .map((id) => '<option value="' + id + '">' + info.subclasses[id].fr + "</option>")
-          .join("");
-      if (choice.subclassId) subSelect.value = choice.subclassId;
-      subSelect.addEventListener("change", () => {
-        build[level].subclassId = subSelect.value || null;
-        renderAll();
-      });
+    for (const other of physicsNodes) {
+      if (other === n) continue;
+      const dx = n.x - other.x;
+      const dy = n.y - other.y;
+      const distSq = Math.max(dx * dx + dy * dy, 1);
+      const force = REPULSION / distSq;
+      const dist = Math.sqrt(distSq);
+      fx += (dx / dist) * force;
+      fy += (dy / dist) * force;
     }
-    subclassTd.appendChild(subSelect);
-  }
-  tr.appendChild(subclassTd);
 
-  const typeTd = document.createElement("td");
-  if (choice && choice.classId) {
-    const isNewChoice = choice.classId !== prevClass;
-    typeTd.textContent = isNewChoice ? "Nouveau choix" : "Continuation";
-    typeTd.className = isNewChoice ? "row-new-choice" : "row-continuation";
-  }
-  tr.appendChild(typeTd);
+    n.vx = (n.vx + fx) * DAMPING;
+    n.vy = (n.vy + fy) * DAMPING;
+    n.x += n.vx;
+    n.y += n.vy;
 
-  const gainsTd = document.createElement("td");
-  if (choice && choice.classId) {
-    const ul = document.createElement("ul");
-    ul.className = "gains";
-    getFeatures(choice.classId, level, choice.subclassId).forEach((f) => {
-      const li = document.createElement("li");
-      li.textContent = f;
-      ul.appendChild(li);
-    });
-    gainsTd.appendChild(ul);
+    // Les tentacules s'étalent SOUS l'ancre (jamais par-dessus la chaîne
+    // confirmée) et restent dans la zone visible — pas de scroll requis.
+    if (n.y < anchor.y) {
+      n.y = anchor.y;
+      n.vy = Math.abs(n.vy) * 0.3;
+    }
+    n.x = Math.min(Math.max(n.x, 60), Math.max(width - 60, 60));
+    n.y = Math.min(n.y, height - 30);
   }
-  tr.appendChild(gainsTd);
-
-  return tr;
 }
 
-function renderAll() {
-  const tbody = document.getElementById("levels-body");
-  tbody.innerHTML = "";
-  for (let level = MIN_LEVEL; level <= MAX_LEVEL; level++) {
-    tbody.appendChild(renderLevelRow(level));
+// Passe de résolution de collision (AABB, plusieurs itérations) en plus
+// des forces ressort/répulsion : la répulsion seule (centre à centre) ne
+// tient pas compte de la largeur/hauteur réelle de chaque boîte (variable
+// selon la longueur du libellé), donc deux nœuds peuvent rester en
+// équilibre de force tout en ayant leurs rectangles qui se chevauchent —
+// cette passe garantit l'absence de chevauchement quel que soit le nombre
+// de choix, en poussant explicitement les boîtes qui se recouvrent le long
+// de leur axe de moindre chevauchement (séparation douce, pas un saut).
+function resolveCollisions(anchor, width, height) {
+  for (let iteration = 0; iteration < 3; iteration++) {
+    for (let i = 0; i < physicsNodes.length; i++) {
+      for (let j = i + 1; j < physicsNodes.length; j++) {
+        const a = physicsNodes[i];
+        const b = physicsNodes[j];
+        const aHalfW = a.el.offsetWidth / 2 + COLLISION_PADDING;
+        const aHalfH = a.el.offsetHeight / 2 + COLLISION_PADDING;
+        const bHalfW = b.el.offsetWidth / 2 + COLLISION_PADDING;
+        const bHalfH = b.el.offsetHeight / 2 + COLLISION_PADDING;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const overlapX = aHalfW + bHalfW - Math.abs(dx);
+        const overlapY = aHalfH + bHalfH - Math.abs(dy);
+        if (overlapX <= 0 || overlapY <= 0) continue;
+
+        if (overlapX < overlapY) {
+          const push = (overlapX / 2) * (dx < 0 ? -1 : 1);
+          a.x -= push;
+          b.x += push;
+        } else {
+          const push = (overlapY / 2) * (dy < 0 ? -1 : 1);
+          a.y -= push;
+          b.y += push;
+        }
+      }
+    }
+    for (const n of physicsNodes) {
+      if (n.y < anchor.y) n.y = anchor.y;
+      n.x = Math.min(Math.max(n.x, 60), Math.max(width - 60, 60));
+      n.y = Math.min(n.y, height - 30);
+    }
   }
-  renderErrors(validateBuild());
+}
+
+function tick() {
+  const wrapper = document.getElementById("graph-wrapper");
+  const wrapperRect = wrapper.getBoundingClientRect();
+  const areaRect = document.getElementById("choices-area").getBoundingClientRect();
+  const anchor = computeAnchor(wrapperRect);
+
+  stepPhysics(anchor, wrapperRect.width, areaRect.height);
+  resolveCollisions(anchor, wrapperRect.width, areaRect.height);
+
+  const svg = document.getElementById("connector-svg");
+  svg.innerHTML = "";
+  svg.setAttribute("width", wrapperRect.width);
+  svg.setAttribute("height", wrapperRect.height);
+
+  physicsNodes.forEach((n) => {
+    n.el.style.transform = "translate(" + (n.x - n.el.offsetWidth / 2) + "px, " + (n.y - n.el.offsetHeight / 2) + "px)";
+
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", anchor.x);
+    line.setAttribute("y1", anchor.y);
+    line.setAttribute("x2", n.x);
+    line.setAttribute("y2", n.y);
+    line.setAttribute("stroke", "#333844");
+    line.setAttribute("stroke-width", "2");
+    svg.appendChild(line);
+  });
+
+  animationFrameId = requestAnimationFrame(tick);
+}
+
+function makeChoiceNode(option) {
+  const node = document.createElement("div");
+  node.className = "node choice";
+  node.textContent = option.label;
+  node.addEventListener("click", () => {
+    state.push({ classId: option.classId, subclassId: option.subclassId });
+    render();
+  });
+  return node;
+}
+
+function render() {
+  const graph = document.getElementById("build-graph");
+  graph.innerHTML = "";
+  state.forEach((choice, index) => {
+    if (index > 0) {
+      const connector = document.createElement("div");
+      connector.className = "connector";
+      graph.appendChild(connector);
+    }
+    graph.appendChild(makeConfirmedNode(choice, index));
+  });
+
+  const options = computeNextOptions();
+  const heading = document.getElementById("choices-heading");
+  const area = document.getElementById("choices-area");
+  area.innerHTML = "";
+  heading.textContent = options.length === 0 ? "" : (
+    state.length === 0 ? "Choisissez une classe de départ :" : "Prochain niveau — choisissez :"
+  );
+
+  // Nouvel ensemble d'options -> on repart d'une simulation fraîche,
+  // dispersée autour de l'ancre (léger angle/rayon aléatoire pour éviter
+  // que deux nœuds démarrent exactement superposés) : ça donne l'effet
+  // "tentacules qui se déploient" à chaque nouveau choix.
+  const wrapperRect = document.getElementById("graph-wrapper").getBoundingClientRect();
+  const anchor = computeAnchor(wrapperRect);
+  // Rayon "au repos" proportionnel au nombre de choix : sinon le ressort
+  // tire tous les nœuds vers un anneau trop petit pour les contenir côte à
+  // côte, et la répulsion (centre à centre) ne suffit pas à elle seule à
+  // les en sortir — voir aussi `resolveCollisions` pour la garantie stricte
+  // de non-chevauchement.
+  restLength = Math.max(120, 60 + options.length * 26);
+  physicsNodes = options.map((option) => {
+    const el = makeChoiceNode(option);
+    area.appendChild(el);
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 10 + Math.random() * 20;
+    return {
+      x: anchor.x + Math.cos(angle) * radius,
+      y: anchor.y + Math.abs(Math.sin(angle)) * radius,
+      vx: 0,
+      vy: 0,
+      el,
+    };
+  });
+
+  document.getElementById("undo-btn").disabled = state.length === 0;
+  document.getElementById("build-status").classList.toggle("visible", state.length >= MAX_LEVEL);
   renderClassSummary();
-  renderMermaid();
 }
 
-document.getElementById("reset-btn").addEventListener("click", () => {
-  for (const key of Object.keys(build)) delete build[key];
-  renderAll();
+document.getElementById("undo-btn").addEventListener("click", () => {
+  state.pop();
+  render();
 });
 
-renderAll();
+document.getElementById("reset-btn").addEventListener("click", () => {
+  state.length = 0;
+  render();
+});
+
+document.getElementById("compact-toggle").addEventListener("change", (event) => {
+  compactMode = event.target.checked;
+  render();
+});
+
+render();
+if (animationFrameId === null) {
+  animationFrameId = requestAnimationFrame(tick);
+}
 </script>
 </body>
 </html>

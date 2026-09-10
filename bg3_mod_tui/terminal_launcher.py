@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -250,11 +251,28 @@ def _ensure_konsole_profile() -> str:
     return KONSOLE_PROFILE_NAME
 
 
+def _hold_on_failure(command: list[str]) -> list[str]:
+    """Enveloppe `command` pour que la fenêtre de terminal dédiée reste
+    ouverte si le TUI se termine avec un code de sortie non nul (crash),
+    au lieu de se fermer immédiatement et de masquer toute trace de
+    l'erreur. Ne change rien au comportement en cas de sortie normale
+    (code 0) — la fenêtre se ferme comme avant."""
+    script = (
+        f"{shlex.join(command)}; ec=$?; "
+        f"if [ $ec -ne 0 ]; then echo; "
+        f"echo 'Le programme a quitté avec le code '$ec' — appuyez sur Entrée pour fermer.'; "
+        f"read _; fi"
+    )
+    return ["bash", "-c", script]
+
+
 def _try_linux_terminal(command: list[str], env: dict[str, str]) -> bool:
+    wrapped = _hold_on_failure(command)
+
     if shutil.which("konsole"):
         profile_name = _ensure_konsole_profile()
         subprocess.Popen(
-            ["konsole", "--profile", profile_name, "-e", *command],
+            ["konsole", "--profile", profile_name, "-e", *wrapped],
             env=env,
             start_new_session=True,
         )
@@ -267,13 +285,13 @@ def _try_linux_terminal(command: list[str], env: dict[str, str]) -> bool:
     # que pour kitty/alacritty/xterm (flag direct), les autres s'ouvrent
     # avec leur police par défaut plutôt que de ne pas s'ouvrir du tout.
     fallbacks: list[list[str]] = [
-        ["kitty", "-o", f"font_family={FONT_NAME}", *command],
-        ["alacritty", "-o", f"font.normal.family={FONT_NAME}", "-e", *command],
-        ["xterm", "-fa", FONT_NAME, "-e", *command],
-        ["wezterm", "start", "--", *command],
-        ["gnome-terminal", "--", *command],
-        ["xfce4-terminal", "-e", subprocess.list2cmdline(command)],
-        ["terminator", "-x", *command],
+        ["kitty", "-o", f"font_family={FONT_NAME}", *wrapped],
+        ["alacritty", "-o", f"font.normal.family={FONT_NAME}", "-e", *wrapped],
+        ["xterm", "-fa", FONT_NAME, "-e", *wrapped],
+        ["wezterm", "start", "--", *wrapped],
+        ["gnome-terminal", "--", *wrapped],
+        ["xfce4-terminal", "-e", subprocess.list2cmdline(wrapped)],
+        ["terminator", "-x", *wrapped],
     ]
     for candidate in fallbacks:
         if shutil.which(candidate[0]):

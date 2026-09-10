@@ -43,24 +43,25 @@ def test_validate_build_continuation_illimitee_sans_erreur():
 
 
 def test_validate_build_changement_de_classe_autorise_une_seule_fois():
+    # Pas de sous-classe ici : Wizard la débloque à son propre niveau 2, pas
+    # au niveau 2 du personnage (voir test dédié au niveau "dans la classe").
     choices = [
         LevelChoice(1, "Fighter"),
-        LevelChoice(2, "Wizard", "Evocation"),
+        LevelChoice(2, "Wizard"),
     ]
     assert validate_build(choices) == []
 
 
-def test_validate_build_refuse_de_reprendre_une_classe_deja_quittee():
+def test_validate_build_autorise_de_reprendre_une_classe_deja_quittee():
+    # Confirmé explicitement par Elwingh : alterner entre classes déjà
+    # commencées est une vraie règle 5e (pas de classe "fermée").
     choices = [
         LevelChoice(1, "Fighter"),
         LevelChoice(2, "Fighter"),
-        LevelChoice(3, "Wizard", "Evocation"),
-        LevelChoice(4, "Fighter"),  # reprise de Fighter -> interdit
+        LevelChoice(3, "Wizard"),
+        LevelChoice(4, "Fighter"),  # reprise de Fighter -> désormais autorisé
     ]
-    errors = validate_build(choices)
-    assert len(errors) == 1
-    assert "Fighter" in errors[0]
-    assert "niveau 4" in errors[0].lower() or "Niveau 4" in errors[0]
+    assert validate_build(choices) == []
 
 
 def test_validate_build_detecte_niveau_manquant():
@@ -98,12 +99,25 @@ def test_validate_build_sous_classe_inconnue_est_une_erreur():
 
 
 def test_validate_build_multiclassage_realiste_barbare_puis_roublard():
-    # Un multiclassage 5e classique : Barbare 1-5 puis Roublard 6-20, sans
-    # jamais reprendre le Barbare -> doit rester valide.
+    # Un multiclassage 5e classique : Barbare 1-5 puis Roublard 6-MAX_LEVEL,
+    # sans jamais reprendre le Barbare -> doit rester valide.
     choices = _linear_fighter_build(0)  # liste vide, on construit à la main
     choices = [LevelChoice(lvl, "Barbarian", "Berserker" if lvl >= 3 else None) for lvl in range(1, 6)]
-    choices += [LevelChoice(lvl, "Rogue", "Thief" if lvl >= 9 else None) for lvl in range(6, 21)]
+    choices += [LevelChoice(lvl, "Rogue", "Thief" if lvl >= 9 else None) for lvl in range(6, MAX_LEVEL + 1)]
     assert validate_build(choices) == []
+
+
+def test_validate_build_deblocage_sous_classe_relatif_a_la_classe_pas_au_total():
+    # Wizard débloque sa sous-classe à SON niveau 2 (5e standard). En 2e
+    # position du build (donc niveau 2 du personnage mais 1er niveau de
+    # Wizard), la choisir doit être une erreur — Fighter 1 puis Wizard 1.
+    errors = validate_build([LevelChoice(1, "Fighter"), LevelChoice(2, "Wizard", "Evocation")])
+    assert any("déblocage" in e for e in errors)
+    # Alors qu'au 2e niveau de Wizard (donc niveau 3 du personnage), c'est valide.
+    errors = validate_build(
+        [LevelChoice(1, "Fighter"), LevelChoice(2, "Wizard"), LevelChoice(3, "Wizard", "Evocation")]
+    )
+    assert errors == []
 
 
 def test_class_data_classes_couvre_les_douze_classes_de_base_bg3():
@@ -167,6 +181,23 @@ def test_build_report_reflete_la_sous_classe_active_sur_toute_la_continuation():
     assert report[3]["subclass_name"] == "Battle Master"
 
 
+def test_build_report_utilise_le_niveau_dans_la_classe_pas_le_niveau_total():
+    # Fighter 1 (perso niveau 1) puis Wizard 1-2 (perso niveau 2-3) : les
+    # gains de Wizard au niveau 3 du perso doivent être ceux de SON niveau 2
+    # ("Choix d'école de magie"), pas ceux d'un Wizard niveau 3 (inexistant
+    # ici, le personnage n'a que 2 niveaux de Wizard).
+    choices = [
+        LevelChoice(1, "Fighter"),
+        LevelChoice(2, "Wizard"),
+        LevelChoice(3, "Wizard", "Evocation"),
+    ]
+    report = build_report(choices)
+    entry = report[2]
+    assert entry["level"] == 3
+    assert entry["level_in_class"] == 2
+    assert any("école" in f.lower() for f in entry["features"])
+
+
 def test_generate_html_est_autonome_et_bien_forme():
     html = generate_html()
     assert "__CLASS_DATA_JSON__" not in html
@@ -182,7 +213,10 @@ def test_generate_html_est_autonome_et_bien_forme():
     assert set(payload) == set(CLASSES)
 
 
-def test_generate_html_mentionne_mermaid_et_le_repli_hors_ligne():
+def test_generate_html_contient_le_graphe_et_aucune_dependance_externe():
     html = generate_html()
-    assert "mermaid" in html.lower()
-    assert "hors ligne" in html.lower() or "mermaid-source" in html
+    assert 'id="build-graph"' in html
+    assert 'id="choices-area"' in html
+    # Plus de dépendance CDN (Mermaid retiré au profit d'un graphe natif) :
+    # la page est maintenant utilisable entièrement hors ligne.
+    assert "<script src=" not in html
