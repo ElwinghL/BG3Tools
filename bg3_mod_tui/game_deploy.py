@@ -217,3 +217,64 @@ def deploy_loose_files(managed_dir: Path, game_data_dir: Path, *, log: LogFn) ->
         _hardlink_replace(target, item, log=log)
         count += 1
     return count
+
+
+def remove_stale_hardlinks(target_dir: Path, stale_names: set[str], *, log: LogFn) -> int:
+    """Supprime, sous `target_dir`, les fichiers dont le nom (ou chemin
+    relatif) figure dans `stale_names` — utilisé lors d'un changement de
+    profil pour défaire uniquement les hardlinks qu'on sait avoir créés
+    pour le profil quitté (voir `profiles.load_profile_hardlinks`) et qui
+    ne font plus partie du nouveau profil, sans jamais toucher aux autres
+    fichiers de `target_dir` (ex: les DLL propres à Native Mod Loader / au
+    Script Extender, non suivies par profil, ou tout fichier du jeu lui-même).
+    Retourne le nombre de fichiers effectivement supprimés."""
+    if not target_dir.is_dir():
+        return 0
+    removed = 0
+    for name in sorted(stale_names):
+        path = target_dir / name
+        if path.is_file():
+            path.unlink()
+            log(f"  hardlink retiré (ne fait plus partie du profil) : {name}")
+            removed += 1
+    return removed
+
+
+def sync_hardlinked_files(
+    managed_dir: Path,
+    target_dir: Path,
+    wanted: set[str],
+    previously_linked: set[str],
+    *,
+    log: LogFn,
+) -> set[str]:
+    """Aligne les hardlinks sous `target_dir` sur `wanted` (chemins relatifs
+    communs à `managed_dir` et `target_dir`, ex: les fichiers "loose" d'un
+    profil vers Data/ du jeu) sans tout supprimer/recréer sans discernement :
+    seules les entrées de `previously_linked` (ce qu'on sait avoir relié pour
+    le profil quitté, voir `profiles.load_profile_hardlinks`) qui ne sont
+    plus dans `wanted` sont retirées de `target_dir` (voir
+    `remove_stale_hardlinks`) — un fichier de `target_dir` absent de
+    `previously_linked` n'est jamais touché. Chaque entrée de `wanted` est
+    ensuite (re)reliée depuis `managed_dir` si sa source existe encore
+    (idempotent, voir `_hardlink_replace`) ; une source manquante est
+    seulement journalisée (mod supprimé du stockage géré global).
+    Retourne le sous-ensemble de `wanted` effectivement relié — à
+    sauvegarder comme nouveau `previously_linked` du profil actif (voir
+    `profiles.save_profile_hardlinks`)."""
+    remove_stale_hardlinks(target_dir, previously_linked - wanted, log=log)
+
+    linked: set[str] = set()
+    if not managed_dir.is_dir():
+        return linked
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for rel in sorted(wanted):
+        source = managed_dir / rel
+        if not source.is_file():
+            log(f"  source absente pour '{rel}', hardlink non (re)créé.")
+            continue
+        target = target_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        _hardlink_replace(target, source, log=log)
+        linked.add(rel)
+    return linked

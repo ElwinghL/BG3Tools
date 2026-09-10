@@ -1344,6 +1344,7 @@ class ActionsScreen(Screen):
                 loose_mods_dir=self._config.loose_mods_managed_dir,
                 game_data_dir=self._config.game_data_dir,
                 native_mods_dir=self._config.native_mods_deployed_dir,
+                previous_profile=self._config.active_profile,
                 log=log,
             )
             self._config.active_profile = name
