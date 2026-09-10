@@ -89,6 +89,7 @@ from bg3_mod_tui.mod_pipeline import (
 from bg3_mod_tui.providers.modio import ModIOAPIError, ModIOClient
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusClient
 from bg3_mod_tui.tools_manager import ToolsError, download_and_extract_tool, find_executables, parse_tools_table
+from bg3_mod_tui.usage_stats import increment_usage_stat, load_usage_stats, top_actions
 from bg3_mod_tui.widgets.console_log import ConsoleLog
 from bg3_mod_tui.widgets.download_console import DownloadProgressConsole
 
@@ -803,6 +804,22 @@ class ActionsScreen(Screen):
     #profile-select {
         width: 40;
     }
+    /* Barre des "quick actions" (3 boutons d'action les plus utilisés du
+       profil actif, voir `_refresh_quick_actions`) — masquée tant qu'aucun
+       bouton d'action n'a encore été utilisé (voir `top_actions`). */
+    #quick-actions-bar {
+        height: auto;
+        padding: 0 2;
+        margin-bottom: 1;
+        align: left middle;
+    }
+    #quick-actions-bar Label {
+        margin-right: 1;
+    }
+    #quick-actions-bar Button {
+        margin-right: 1;
+        width: auto;
+    }
     /* Bouton "internet" : un bouton normal comme les autres (couleur selon
        l'état via la variante warning/error/success standard de Button) —
        icône et image abandonnées (peu lisibles/non fiables selon le
@@ -822,6 +839,12 @@ class ActionsScreen(Screen):
     """
 
     BINDINGS = [("q", "quit_app", "Quitter")]
+
+    # Bouton d'action à ne PAS suivre par `usage_stats` malgré son id
+    # préfixé "action-" : "Quitter" n'est pas une action métier du menu
+    # (téléchargement, nettoyage, outil...) et n'a pas vocation à devenir
+    # une quick action.
+    _UNTRACKED_ACTION_ID = "action-quit"
 
     def __init__(self, config: ModToolsConfig) -> None:
         super().__init__()
@@ -852,6 +875,12 @@ class ActionsScreen(Screen):
                 id="planet-button",
                 variant="warning" if not self._config.has_public_address() else "error",
             )
+        # Rempli/rafraîchi dynamiquement par `_refresh_quick_actions` (rien
+        # à monter tout de suite : les boutons "action-*" originaux, dont on
+        # a besoin pour connaître libellé/tooltip, ne sont eux-mêmes montés
+        # qu'après compose()).
+        with Horizontal(id="quick-actions-bar"):
+            yield Label("Actions rapides :")
         with Horizontal(id="actions-body"):
             with Vertical(id="actions-menu"):
                 yield Label("BG3 Mod Tools", classes="title")
@@ -1102,6 +1131,103 @@ class ActionsScreen(Screen):
     def _tool_log(self, message: str) -> None:
         self.query_one("#tools-log", ConsoleLog).write(message)
         self._mark_log_tab_active("tools-log-tab")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Hook générique de suivi d'usage (sous-tâche "Compteur
+        d'utilisation par bouton/outil/profil", voir `usage_stats.py`) et de
+        déclenchement des quick actions (sous-tâche "3 actions les plus
+        utilisées en boutons quick-action", voir `_refresh_quick_actions`) :
+        incrémente le compteur persistant de CHAQUE bouton d'action réel
+        (id `action-*`, hors `_UNTRACKED_ACTION_ID`) et relance un clic sur
+        le bouton original quand c'est une quick action (id `quick-*`) qui
+        a été pressée — sans dupliquer les ~30 handlers
+        `@on(Button.Pressed, "#action-xxx")` déjà en place un par un, et
+        sans dupliquer leur logique pour les quick actions.
+
+        Choix délibéré plutôt qu'un décorateur à ajouter sur chacun d'eux :
+        Textual invoque, pour un même widget, TOUS les handlers qui
+        correspondent à un message donné — les méthodes décorées `@on`
+        (sélecteur par sélecteur) ET la méthode "par convention de nommage"
+        `on_<event>` — indépendamment les unes des autres (voir
+        `MessagePump._get_dispatch_methods`/`_on_message` dans
+        `textual.message_pump`, vérifié dans les sources de la version
+        installée). Cette méthode ne fait donc jamais `event.stop()` ni
+        `event.prevent_default()` : même si elle le faisait, ça n'empêche
+        ni le déclenchement des autres handlers de CE widget (déjà
+        déterminé avant l'appel), ni celui du handler spécifique de
+        l'action pressée — seule la PROPAGATION vers un widget parent
+        serait coupée, ce qui n'a aucune incidence ici (aucun handler ne
+        fait remonter l'événement plus haut que `ActionsScreen`). Risque de
+        régression donc nul sur les handlers existants.
+
+        Pour une quick action, `Button.press()` sur le bouton original
+        poste un NOUVEAU `Button.Pressed` (id `action-*`) qui repasse par ce
+        même hook : le clic est donc compté une seule fois (sur l'id
+        original, pas sur `quick-*`) et déclenche le handler spécifique
+        normalement, sans logique dupliquée ici."""
+        button_id = event.button.id or ""
+
+        if button_id.startswith("quick-"):
+            original_id = button_id.removeprefix("quick-")
+            try:
+                self.query_one(f"#{original_id}", Button).press()
+            except Exception:
+                pass
+            return
+
+        if not button_id.startswith("action-") or button_id == self._UNTRACKED_ACTION_ID:
+            return
+        increment_usage_stat(
+            self._config.profiles_dir, self._config.active_profile, button_id
+        )
+        self._refresh_quick_actions()
+
+    def on_mount(self) -> None:
+        self._refresh_quick_actions()
+
+    def _action_button_lookup(self) -> dict[str, Button]:
+        """Ids -> bouton d'action original (`action-*`, hors
+        `_UNTRACKED_ACTION_ID`), pour retrouver leur libellé/tooltip lors de
+        la construction des quick actions sans dupliquer les ~30
+        définitions de `compose()`."""
+        return {
+            button.id: button
+            for button in self.query("#menu-buttons Button")
+            if button.id and button.id.startswith("action-") and button.id != self._UNTRACKED_ACTION_ID
+        }
+
+    def _refresh_quick_actions(self) -> None:
+        """(Re)construit la barre de quick actions (les 3 boutons d'action
+        les plus utilisés pour le profil actif — voir `usage_stats.top_actions`)
+        en haut de l'écran. Appelée au montage de l'écran (`on_mount`) ET
+        après chaque incrément d'usage (`on_button_pressed`) : recalcul en
+        temps réel plutôt que seulement au prochain lancement, plus simple
+        à obtenir ici qu'il n'y paraît puisqu'il suffit de démonter/remonter
+        les 0 à 3 boutons de cette petite barre dédiée (pas de mise en page
+        complexe à recalculer).
+
+        Chaque quick action clone juste le libellé/tooltip du bouton
+        original (id `quick-<id_original>`) — aucune logique dupliquée, le
+        clic est redirigé vers le bouton original par `on_button_pressed`
+        ci-dessus."""
+        bar = self.query_one("#quick-actions-bar")
+        for old_button in bar.query(Button):
+            old_button.remove()
+
+        lookup = self._action_button_lookup()
+        stats = load_usage_stats(self._config.profiles_dir, self._config.active_profile)
+        top_ids = [button_id for button_id in top_actions(stats) if button_id in lookup]
+
+        bar.display = bool(top_ids)
+        for button_id in top_ids:
+            original = lookup[button_id]
+            bar.mount(
+                Button(
+                    str(original.label),
+                    id=f"quick-{button_id}",
+                    tooltip=original.tooltip,
+                )
+            )
 
     @on(Button.Pressed, "#action-download-mods")
     def handle_download_mods(self) -> None:

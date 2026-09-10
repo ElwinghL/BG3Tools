@@ -41,8 +41,8 @@
 
 ### 8. Profils + quick actions
 
-- **8a.** Compteur d'utilisation par bouton/outil/profil (persistant)
-- **8b.** Affichage des 3 actions les plus utilisées en boutons quick-action en haut d'écran
+- ~~**8a.** Compteur d'utilisation par bouton/outil/profil (persistant)~~ — fait : `bg3_mod_tui/usage_stats.py` (même pattern que `profiles.py`, JSON par profil), hook générique `ActionsScreen.on_button_pressed` incrémentant chaque bouton `action-*` (hors "Quitter") sans toucher aux ~30 handlers `@on` existants
+- ~~**8b.** Affichage des 3 actions les plus utilisées en boutons quick-action en haut d'écran~~ — fait : barre `#quick-actions-bar` (`_refresh_quick_actions`), recalculée en temps réel à chaque clic — un clic quick action rejoue `Button.press()` sur le bouton original, sans dupliquer sa logique
 
 ### 9. Fusion bouton "Mise à jour outils" + "Compil Compat Framework" + "ModFixerFork"
 
