@@ -60,3 +60,8 @@ __pycache__/
 # pas notre code. Cargo.lock reste versionné (verrouiller les versions
 # évite les régressions silencieuses lors d'un nouveau `cargo build`).
 /rust/**/target/
+
+# Rapports générés par scripts/compare_pak_reader.py (chronométrage +
+# tables de fichiers par outil) : reproductibles à la demande, pas du
+# code, pas la peine de les versionner.
+/reports/

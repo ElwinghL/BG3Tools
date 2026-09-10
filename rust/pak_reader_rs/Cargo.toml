@@ -1,0 +1,16 @@
+[package]
+name = "pak_reader_rs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "pak_reader_rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+bg3rustpaklib = "0.1"
+pyo3 = { version = "0.29", features = ["extension-module"] }
+roxmltree = "0.20"
+regex = "1"
+flate2 = { version = "1.0", default-features = false, features = ["zlib-ng"] }

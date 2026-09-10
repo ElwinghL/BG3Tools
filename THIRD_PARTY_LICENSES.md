@@ -1,12 +1,13 @@
 # Licences tierces
 
-Ce projet (ModTools / `bg3-mod-tui`) s'appuie sur des dépendances Python et
-télécharge/pilote des outils tiers pour Baldur's Gate 3. Cette page recense
-leurs licences respectives, telles que vérifiées sur leur dépôt/page
-d'origine (dates de vérification : 2026-09-10). ModTools ne redistribue
-aucun de ces outils dans le dépôt git (voir `.gitignore` et
-`Tools/TOOLS.md`) — ils sont téléchargés à la demande depuis leur source
-d'origine.
+Ce projet (ModTools / `bg3-mod-tui`, licence **MIT**, voir `LICENSE`)
+s'appuie sur des dépendances Python/Rust et pilote des outils tiers pour
+Baldur's Gate 3. Cette page recense leurs licences respectives, telles que
+vérifiées sur leur dépôt/page d'origine (dates de vérification :
+2026-09-10). ModTools ne redistribue le code d'aucun de ces outils dans ce
+dépôt — les outils sous `Tools/` sont suivis comme des sous-modules git
+séparés, chacun avec sa propre licence (voir `.gitmodules` et
+`Tools/TOOLS.md`), pas vendorisés ici.
 
 ## 1. Dépendances Python (`pyproject.toml`)
 
@@ -146,6 +147,17 @@ format est due au travail de reverse engineering de **Norbyte** dans LSLib
 - **Usage dans ModTools** : listé dans `Tools/TOOLS.md`
   (`Tools/MoreReactiveCompanionsConfigApp/`), téléchargé/lancé tel quel.
 
+## 11. bg3rustpaklib / bg3pythonpaklib / dépendances Rust (`rust/pak_reader_rs`)
+
+- **bg3rustpaklib** ([ElwinghL/bg3rustpaklib](https://github.com/ElwinghL/bg3rustpaklib)) et **bg3pythonpaklib**
+  ([ElwinghL/bg3pythonpaklib](https://github.com/ElwinghL/bg3pythonpaklib)) sont deux projets sœurs de ModTools
+  (lecteurs LSPK natifs, Rust et Python), tous deux sous **licence MIT** — cohérente avec ce dépôt. Suivis
+  comme sous-modules git sous `Tools/` (voir `Tools/TOOLS.md`) ; `bg3rustpaklib` est aussi une dépendance
+  Cargo directe de `rust/pak_reader_rs` (crate de comparaison, voir `scripts/compare_pak_reader.py`).
+- Dépendances Cargo de `rust/pak_reader_rs` (`cargo metadata`, vérifié le 2026-09-11) : `pyo3` (**MIT OR
+  Apache-2.0**), `roxmltree` (**MIT OR Apache-2.0**), `regex` (**MIT OR Apache-2.0**), `flate2` (**MIT OR
+  Apache-2.0**). Toutes permissives et compatibles avec la licence MIT de ce dépôt.
+
 ## Résumé
 
 | Outil/dépendance            | Licence                              | Statut de vérification |
@@ -160,6 +172,8 @@ format est due au travail de reverse engineering de **Norbyte** dans LSLib
 | BG3 Compatibility Framework    | MIT                                   | Vérifié (API GitHub)      |
 | Mod Fixer (Norbyte, Nexus #141) | Non spécifiée (conditions Nexus par défaut) | Page Nexus non accessible (403) — non vérifié directement |
 | MoreReactiveCompanions (Nexus #5447) | Non spécifiée (conditions Nexus par défaut) | Page Nexus non accessible (403) — non vérifié directement |
+| bg3rustpaklib / bg3pythonpaklib (ElwinghL) | MIT | Vérifié (fichier LICENSE de chaque dépôt) |
+| pyo3, roxmltree, regex, flate2 (Cargo, `rust/pak_reader_rs`) | MIT OR Apache-2.0 | Vérifié (`cargo metadata`) |
 
 Aucun code source tiers n'est copié verbatim dans ce dépôt git : les
 outils listés ci-dessus sont soit des dépendances Python installées via
