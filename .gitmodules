@@ -19,3 +19,6 @@
 [submodule "Tools/BG3-Compatibility-Framework"]
 	path = Tools/BG3-Compatibility-Framework
 	url = https://github.com/BG3-Community-Library-Team/BG3-Compatibility-Framework.git
+[submodule "Tools/bg3pythonpaklib"]
+	path = Tools/bg3pythonpaklib
+	url = https://github.com/ElwinghL/bg3pythonpaklib.git

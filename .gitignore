@@ -32,9 +32,8 @@ __pycache__/
 # (voir tools_manager.py, _add_or_update_git_submodule) — un vrai dépôt
 # épinglé à un commit dans notre historique, donc PAS ignoré ici (BG3
 # Load Order Optimizer, LSLib/ExportTools, Para Tool, BG3 Mod Manager,
-# BG3 Script Extender, BG3 Compatibility Framework, bg3rustpaklib).
-# bg3pythonpaklib reste ci-dessous tant que son dépôt amont est vide (pas
-# encore de commit à épingler comme sous-module).
+# BG3 Script Extender, BG3 Compatibility Framework, bg3rustpaklib,
+# bg3pythonpaklib).
 
 # Marqueur de version écrit par tools_manager.py dans chaque dossier
 # d'outil, pour savoir si un nouveau téléchargement est nécessaire.
@@ -56,12 +55,6 @@ __pycache__/
 /Tools/*.zip
 /Tools/*.rar
 /Tools/*.7z
-
-# Miroir en lecture de notre propre dépôt source (bg3pythonpaklib — voir
-# Tools/TOOLS.md) : dépôt GitHub encore vide, pas encore ajoutable comme
-# sous-module (aucun commit à épingler). À retirer d'ici et ajouter comme
-# sous-module dès qu'il aura un premier commit.
-/Tools/bg3pythonpaklib/**
 
 # Rust (crates sous rust/, ex. pak_reader_rs) : artefacts de build Cargo,
 # pas notre code. Cargo.lock reste versionné (verrouiller les versions
