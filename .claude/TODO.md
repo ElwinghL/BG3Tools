@@ -85,6 +85,46 @@
   panic = "abort"      # Supprime la gestion du unwinding si non nécessaire
   ```
 
+### 19. Build complet du fork LSLib (`Tools/ExportTools`, remote ElwinghL/lslib)
+
+Objectif du fork : lire/écrire/éditer des `.pak` — rien d'autre en priorité. Si le
+reste de LSLib (Story/Osiris, GR2/Granny, VirtualTextures, savegames) doit être
+sacrifié pour y arriver, tant pis.
+
+- ~~**19a.** Corriger le crash de `extract-packages` (mode batch, action native LSLib
+  pour extraire tous les .pak d'un dossier en un seul lancement de process — voir
+  `scripts/compare_pak_reader.py --divine-mode batch`)~~ — fait : `SetUpAndValidate`
+  parsait `--input-format` via `GetResourceFormatByString` (LSX/LSB/LSF/LSJ
+  seulement, jamais "pak") même pour `extract-packages`, provoquant une
+  `ArgumentException` non gérée (crash CLR complet sous Wine) avant même d'atteindre
+  `BatchExtract` (qui n'utilise que la chaîne brute). Correctif poussé sur
+  `ElwinghL/lslib`, branche `fix/PakBatchExtractSupport` (pas encore mergé sur
+  `main` du fork — en attente d'accord explicite, cf. règle CLAUDE.md sur les
+  merges).
+- **19b.** Build complet du fork non vérifié localement — bloqué par deux
+  dépendances Windows-only :
+  - `LSLibNative` (`.vcxproj`, C++ natif utilisé par le lecteur GR2/Granny) —
+    nécessite MSVC, indisponible sous Linux.
+  - Le parser Osiris (Story/Goal) — nécessite GPLex 1.2.2 + GPPG 1.5.2 (générateurs
+    lexer/parser, exécutables Windows, liens de téléchargement dans le README du
+    fork), absents du dépôt.
+  - Pistes envisagées (détaillées dans le README du fork, section "About this
+    fork") : lancer GPLex/GPPG via Wine (simples outils console, probable que ça
+    marche tel quel) ; une VM Windows (ou runner CI Windows) dédiée pour compiler
+    les releases ; ou retirer purement et simplement Story/Granny/VirtualTextures
+    du fork puisque hors objectif (option "tant pis" assumée).
+  - Tenté : SDK .NET 8 installé via un conteneur `distrobox` dédié
+    (`bg3tools-dotnet`, Fedora) pour contourner l'immutabilité de Bazzite — a permis
+    de builder Divine.csproj jusqu'à buter sur LSLibNative, puis en cascade sur
+    Story/Granny/VirtualTextures en tentant de les exclure du build (trop de
+    fichiers interdépendants pour une exclusion ciblée simple).
+- **19c.** Une fois un build fonctionnel obtenu : basculer `Tools/ExportTools`
+  (sous-module git, actuellement `Norbyte/lslib`) vers `ElwinghL/lslib`, mettre à
+  jour `Tools/TOOLS.md`, re-épingler le commit, et relancer
+  `scripts/compare_pak_reader.py --divine-mode batch` sur le profil réel pour
+  mesurer l'écart avec le mode per-file (voir `THIRD_PARTY_LICENSES.md` à ajuster
+  aussi si la source du binaire change).
+
 ## P3 — Annexe (avant V2/V3/V4)
 
 ### 10. Build de classes (page web autonome)

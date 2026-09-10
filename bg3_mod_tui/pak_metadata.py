@@ -47,7 +47,9 @@ class PakMetadataError(RuntimeError):
     """Échec de lecture des métadonnées d'un .pak — message utilisateur."""
 
 
-def _run_divine(divine_exe: Path, args: list[str], *, reference_path: Path) -> None:
+def _run_divine(
+    divine_exe: Path, args: list[str], *, reference_path: Path, timeout: float | None = None
+) -> None:
     env = None
     if is_windows():
         command = [str(divine_exe), *args]
@@ -68,7 +70,7 @@ def _run_divine(divine_exe: Path, args: list[str], *, reference_path: Path) -> N
             capture_output=True,
             text=True,
             errors="replace",
-            timeout=_DIVINE_TIMEOUT_SECONDS,
+            timeout=timeout if timeout is not None else _DIVINE_TIMEOUT_SECONDS,
         )
     except subprocess.TimeoutExpired as exc:
         raise PakMetadataError(f"Timeout Divine.exe : {exc}") from exc

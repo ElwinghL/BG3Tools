@@ -97,18 +97,29 @@ def _pick_sample_names(entries: dict[str, dict[str, int]], cap: int) -> list[str
     return sample
 
 
-def _write_report(out_path: Path, tool: str, sample_cap: int, records: dict[str, PakRecord]) -> None:
+def _write_report(
+    out_path: Path,
+    tool: str,
+    sample_cap: int,
+    records: dict[str, PakRecord],
+    *,
+    extra: dict[str, Any] | None = None,
+) -> None:
     """Écrit (ou réécrit) le rapport JSON à partir de `records` tel quel à
     l'instant de l'appel — appelée après chaque `.pak` traité (pas
     seulement une fois à la fin) pour qu'une interruption ou une erreur
     inattendue au milieu d'un lot laisse un rapport partiel exploitable au
     lieu de rien du tout (même principe que `_flush_orphans_progress`
-    ailleurs dans le projet)."""
+    ailleurs dans le projet). `extra` : champs additionnels au niveau
+    racine du rapport (ex: mode batch Divine.exe, temps total brut avant
+    répartition par fichier) — jamais dans `paks[...]` pour ne pas être
+    confondu avec les champs par-fichier existants."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
         "tool": tool,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sample_cap": sample_cap,
+        **(extra or {}),
         "paks": {name: asdict(record) for name, record in records.items()},
     }
     out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -229,6 +240,124 @@ def _run_rust(
 # Voie Divine.exe (référence)
 # --------------------------------------------------------------------------
 
+def _finalize_divine_extraction(
+    record: PakRecord, work_dir: Path, sample_cap: int, *, reference_path: Path
+) -> None:
+    """Remplit `record` (entries/identity/content_hashes) à partir des
+    fichiers déjà extraits par Divine.exe dans `work_dir` — partagé entre
+    le mode per-file et le mode batch, qui ne diffèrent que dans la façon
+    dont l'extraction elle-même est chronométrée/lancée. `reference_path`
+    n'est plus utilisé ici (gardé pour signature symétrique avec l'appelant)
+    mais aucune écriture n'a lieu : uniquement des lectures dans `work_dir`
+    (jamais dans le `.pak` source lui-même)."""
+    disk_files = {
+        str(p.relative_to(work_dir)).replace("\\", "/"): p for p in work_dir.rglob("*") if p.is_file()
+    }
+    record.entries = {name: {"size": p.stat().st_size, "compression": -1} for name, p in disk_files.items()}
+
+    from bg3_mod_tui.pak_reader import extract_uuid_from_lsf_bytes
+
+    lsx_matches = [n for n in disk_files if n.lower().endswith("meta.lsx")]
+    if lsx_matches:
+        identity = parse_meta_lsx(disk_files[lsx_matches[0]])
+        if identity is not None:
+            record.identity = identity
+    else:
+        lsf_matches = [n for n in disk_files if n.lower().endswith("meta.lsf")]
+        if lsf_matches:
+            uuid = extract_uuid_from_lsf_bytes(disk_files[lsf_matches[0]].read_bytes())
+            if uuid:
+                record.identity = (uuid, "")
+
+    start = time.monotonic()
+    for name in _pick_sample_names(record.entries, sample_cap):
+        try:
+            record.content_hashes[name] = _sha256(disk_files[name].read_bytes())
+        except Exception as exc:  # noqa: BLE001 - une entrée en erreur ne doit pas interrompre le run
+            record.content_errors[name] = f"{type(exc).__name__}: {exc}"
+    record.content_seconds = time.monotonic() - start
+
+
+def _run_divine_batch_tool(
+    pak_paths: list[Path],
+    scan_dir: Path,
+    sample_cap: int,
+    *,
+    divine_exe: Path,
+    reference_path: Path,
+    records: dict[str, PakRecord] | None = None,
+    on_progress: Callable[[], None] | None = None,
+) -> tuple[dict[str, PakRecord], float]:
+    """Équivalent de `_run_divine_tool`, mais via l'action native
+    `extract-packages` de LSLib (voir `Divine/CLI/CommandLinePackageProcessor.
+    BatchExtract` dans `Tools/ExportTools`) : un seul lancement de process
+    Divine.exe qui extrait tous les `.pak` de `scan_dir` lui-même, au lieu
+    d'un lancement (et donc d'un démarrage Wine/CLR complet) par fichier.
+    Bien plus représentatif d'un usage réel en lot.
+
+    Sécurité : `scan_dir` (le dossier de mods réel, lu par Divine.exe via
+    `-s`) n'est JAMAIS le dossier de destination — l'extraction va
+    toujours dans un `tempfile.TemporaryDirectory` séparé (`-d`), donc
+    aucune écriture n'a lieu sur les `.pak` sources ni dans leur dossier.
+
+    Retourne `(records, temps_total_extraction_secondes)` : le temps total
+    de l'unique appel Divine.exe n'est pas mesurable par fichier (un seul
+    process pour tout le lot), donc chaque `record.index_or_extract_seconds`
+    reçoit une valeur *amortie* (temps total / nombre de fichiers) — le
+    temps brut est retourné séparément pour rester transparent plutôt que
+    de le cacher derrière une moyenne."""
+    if records is None:
+        records = {}
+    for pak_path in pak_paths:
+        records[pak_path.name] = PakRecord(file=pak_path.name)
+
+    with tempfile.TemporaryDirectory(prefix="bg3_compare_divine_batch_") as tmp:
+        dest_root = Path(tmp)
+        assert dest_root.resolve() != scan_dir.resolve() and dest_root.resolve() not in scan_dir.resolve().parents, (
+            "la destination d'extraction ne doit jamais être (ou contenir) le dossier source des .pak"
+        )
+
+        use_wine_path = not is_windows()
+        start = time.monotonic()
+        try:
+            _run_divine(
+                divine_exe,
+                [
+                    "-g", "bg3",
+                    "-a", "extract-packages",
+                    "-s", _path_arg(scan_dir, use_wine_path=use_wine_path),
+                    "-d", _path_arg(dest_root, use_wine_path=use_wine_path),
+                    "-i", "pak",
+                    "-u",
+                ],
+                reference_path=reference_path,
+                timeout=max(600, 5 * len(pak_paths)),
+            )
+        except PakMetadataError as exc:
+            error = str(exc)
+            for record in records.values():
+                record.error = error
+                if on_progress is not None:
+                    on_progress()
+            return records, time.monotonic() - start
+        total_seconds = time.monotonic() - start
+
+        for pak_path in pak_paths:
+            record = records[pak_path.name]
+            record.index_or_extract_seconds = total_seconds / len(pak_paths)
+            work_dir = dest_root / pak_path.stem
+            if not work_dir.is_dir():
+                record.error = "non extrait par le batch Divine.exe (dossier de sortie absent)"
+                if on_progress is not None:
+                    on_progress()
+                continue
+            _finalize_divine_extraction(record, work_dir, sample_cap, reference_path=reference_path)
+            if on_progress is not None:
+                on_progress()
+
+    return records, total_seconds
+
+
 def _run_divine_tool(
     pak_paths: list[Path],
     sample_cap: int,
@@ -238,8 +367,14 @@ def _run_divine_tool(
     records: dict[str, PakRecord] | None = None,
     on_progress: Callable[[], None] | None = None,
 ) -> dict[str, PakRecord]:
-    from bg3_mod_tui.pak_reader import extract_uuid_from_lsf_bytes
-
+    """Un lancement de process Divine.exe *par `.pak`* (action `extract-
+    package`, singulier) — le pire cas côté coût de démarrage (Wine/CLR
+    relancé à chaque fichier), mais reflète un usage ponctuel isolé (ex:
+    `pak_metadata.read_pak_identity`, appelé une seule fois à la demande
+    dans BG3Tools, jamais en boucle serrée). Voir `_run_divine_batch_tool`
+    pour l'action `extract-packages` (pluriel), qui amortit ce coût sur
+    tout un lot en un seul process — bien plus représentatif d'une
+    comparaison en lot comme celle-ci."""
     if records is None:
         records = {}
     with tempfile.TemporaryDirectory(prefix="bg3_compare_divine_") as tmp:
@@ -270,32 +405,7 @@ def _run_divine_tool(
                 continue
             record.index_or_extract_seconds = time.monotonic() - start
 
-            disk_files = {
-                str(p.relative_to(work_dir)).replace("\\", "/"): p
-                for p in work_dir.rglob("*")
-                if p.is_file()
-            }
-            record.entries = {name: {"size": p.stat().st_size, "compression": -1} for name, p in disk_files.items()}
-
-            lsx_matches = [n for n in disk_files if n.lower().endswith("meta.lsx")]
-            if lsx_matches:
-                identity = parse_meta_lsx(disk_files[lsx_matches[0]])
-                if identity is not None:
-                    record.identity = identity
-            else:
-                lsf_matches = [n for n in disk_files if n.lower().endswith("meta.lsf")]
-                if lsf_matches:
-                    uuid = extract_uuid_from_lsf_bytes(disk_files[lsf_matches[0]].read_bytes())
-                    if uuid:
-                        record.identity = (uuid, "")
-
-            start = time.monotonic()
-            for name in _pick_sample_names(record.entries, sample_cap):
-                try:
-                    record.content_hashes[name] = _sha256(disk_files[name].read_bytes())
-                except Exception as exc:  # noqa: BLE001 - une entrée en erreur ne doit pas interrompre le run
-                    record.content_errors[name] = f"{type(exc).__name__}: {exc}"
-            record.content_seconds = time.monotonic() - start
+            _finalize_divine_extraction(record, work_dir, sample_cap, reference_path=reference_path)
 
             shutil.rmtree(work_dir, ignore_errors=True)
             if on_progress is not None:
@@ -307,27 +417,43 @@ def _run_divine_tool(
 # CLI : run
 # --------------------------------------------------------------------------
 
-def _resolve_pak_paths(args: argparse.Namespace, config) -> list[Path]:
+def _resolve_pak_paths(args: argparse.Namespace, config) -> tuple[list[Path], Path | None]:
+    """Retourne `(chemins_.pak, dossier_scanné)` — le dossier est `None`
+    quand des `.pak` précis ont été passés en positionnels plutôt qu'un
+    `--dir`/la config (le mode batch Divine.exe a besoin d'un vrai dossier
+    à passer tel quel à `-s`, pas d'une liste arbitraire de fichiers)."""
     if args.paks:
-        return [Path(p) for p in args.paks]
+        return [Path(p) for p in args.paks], None
     scan_dir = args.dir or config.appdata_mods_dir
     if not scan_dir.is_dir():
         raise SystemExit(f"Dossier introuvable : {scan_dir} (précise --dir ou configure bg3_appdata_dir).")
-    return sorted(scan_dir.glob("*.pak"))
+    return sorted(scan_dir.glob("*.pak")), scan_dir
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     config = load_config()
-    pak_paths = _resolve_pak_paths(args, config)
+    pak_paths, scan_dir = _resolve_pak_paths(args, config)
     if not pak_paths:
         print("Aucun .pak à traiter.")
         return 0
 
-    print(f"[{args.tool}] {len(pak_paths)} .pak, échantillon de contenu = {args.sample}")
+    divine_mode = getattr(args, "divine_mode", "per-file")
+    if args.tool == "divine" and divine_mode == "batch" and scan_dir is None:
+        print(
+            "--divine-mode batch a besoin d'un vrai dossier à scanner "
+            "(--dir, ou la config bg3_appdata_dir) — incompatible avec une liste de .pak explicite."
+        )
+        return 2
+
+    print(
+        f"[{args.tool}] {len(pak_paths)} .pak, échantillon de contenu = {args.sample}"
+        + (", mode batch" if args.tool == "divine" and divine_mode == "batch" else "")
+    )
 
     out_path = args.out or (REPORTS_DIR / f"{args.tool}_report.json")
     records: dict[str, PakRecord] = {}
     flush = lambda: _write_report(out_path, args.tool, args.sample, records)  # noqa: E731
+    extra: dict[str, Any] = {}
 
     if args.tool == "python":
         _run_python(pak_paths, args.sample, records=records, on_progress=flush)
@@ -342,14 +468,28 @@ def cmd_run(args: argparse.Namespace) -> int:
         if not reference_path.is_dir():
             print(f"Chemin de référence introuvable : {reference_path} (précise --reference-path).")
             return 2
-        _run_divine_tool(
-            pak_paths,
-            args.sample,
-            divine_exe=divine_exe,
-            reference_path=reference_path,
-            records=records,
-            on_progress=flush,
-        )
+        if divine_mode == "batch":
+            extra["divine_mode"] = "batch"
+            _, batch_total_seconds = _run_divine_batch_tool(
+                pak_paths,
+                scan_dir,
+                args.sample,
+                divine_exe=divine_exe,
+                reference_path=reference_path,
+                records=records,
+                on_progress=flush,
+            )
+            extra["batch_total_extract_seconds"] = batch_total_seconds
+        else:
+            extra["divine_mode"] = "per-file"
+            _run_divine_tool(
+                pak_paths,
+                args.sample,
+                divine_exe=divine_exe,
+                reference_path=reference_path,
+                records=records,
+                on_progress=flush,
+            )
 
     errors = sum(1 for r in records.values() if r.error)
     content_errors = sum(len(r.content_errors) for r in records.values())
@@ -363,7 +503,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         f"({total_hashed} fichiers hashés)"
     )
 
-    _write_report(out_path, args.tool, args.sample, records)
+    _write_report(out_path, args.tool, args.sample, records, extra=extra)
     print(f"[{args.tool}] rapport écrit : {out_path}")
     return 0
 
@@ -462,6 +602,18 @@ def main() -> int:
     run_parser.add_argument("--dir", type=Path, help="Dossier à scanner (*.pak)")
     run_parser.add_argument("--sample", type=int, default=60, help="Fichiers de contenu hashés par .pak (défaut 60)")
     run_parser.add_argument("--divine-exe", type=Path, help="Chemin vers Divine.exe (outil divine seulement)")
+    run_parser.add_argument(
+        "--divine-mode",
+        choices=["per-file", "batch"],
+        default="per-file",
+        help=(
+            "Outil divine seulement : 'per-file' (défaut) lance Divine.exe une fois par .pak "
+            "(extract-package) ; 'batch' lance Divine.exe une seule fois sur tout --dir "
+            "(extract-packages, action batch native de LSLib) — amortit le coût de démarrage "
+            "Wine/CLR sur tout le lot au lieu de le payer par fichier. Nécessite --dir "
+            "(incompatible avec une liste de .pak explicite)."
+        ),
+    )
     run_parser.add_argument("--reference-path", type=Path, help="Chemin de référence Proton/WINEPREFIX")
     run_parser.add_argument("--out", type=Path, help="Chemin du rapport JSON (défaut reports/<tool>_report.json)")
     run_parser.set_defaults(func=cmd_run)
