@@ -50,6 +50,7 @@ from bg3_mod_tui.native_mods import (
     load_manifest as load_native_mods_manifest,
 )
 from bg3_mod_tui.pak_metadata import archive_pak_identities, build_deployed_uuid_index
+from bg3_mod_tui.pak_validator import validate_paks
 from bg3_mod_tui.pak_origin import (
     find_orphaned_paks,
     load_manual_origins,
@@ -977,6 +978,19 @@ class ActionsScreen(Screen):
                         ),
                     )
                     yield Button(
+                        "Valider les .pak déployés...",
+                        id="action-validate-paks",
+                        tooltip=(
+                            "Check structurel natif (sans Divine.exe) de chaque .pak "
+                            "actuellement présent dans Mods/ : ouvre le header LSPK et "
+                            "décompresse un échantillon de ses entrées pour détecter une "
+                            "corruption — rapport dans pak_validation.md sous le profil "
+                            "actif. Lecture seule : ne génère pas modsettings.lsx et ne "
+                            "lance pas le jeu. Pas un remplacement fiable à 100% de "
+                            "Divine.exe, juste un check rapide (voir pak_validator.py)."
+                        ),
+                    )
+                    yield Button(
                         "Vérifier les mises à jour Nexus...",
                         id="action-nexus-updates",
                         tooltip=(
@@ -1775,6 +1789,62 @@ class ActionsScreen(Screen):
             self.app.push_screen(ManualPakOriginPromptScreen(pak_file), on_url)
 
         prompt_next(0)
+
+    @on(Button.Pressed, "#action-validate-paks")
+    def handle_validate_paks(self) -> None:
+        self.run_validate_paks()
+
+    @work(exclusive=True, thread=True)
+    def run_validate_paks(self) -> None:
+        """Sous-tâche 6c du TODO "Utilitaire standalone de validation .pak" :
+        câble `pak_validator.validate_paks` sur tous les .pak actuellement
+        déployés dans Mods/ — lecture seule au sens strict (voir
+        `pak_validator`, docstring du module) : n'écrit rien d'autre que le
+        rapport `pak_validation.md`, ne régénère pas modsettings.lsx et ne
+        lance pas le jeu."""
+        def log(msg): return self.app.call_from_thread(self._log, msg)
+        log("=== Validation des .pak déployés (check structurel natif) ===")
+
+        pak_paths = sorted(self._config.managed_mods_link.glob("*.pak"))
+        if not pak_paths:
+            log("Aucun .pak actuellement déployé dans Mods/.")
+            return
+
+        log(f"{len(pak_paths)} .pak à valider (échantillonnage sur les gros .pak, voir pak_validator)...")
+        report = validate_paks(pak_paths)
+        self._write_pak_validation_report(report)
+
+    def _write_pak_validation_report(self, report: dict[str, list]) -> None:
+        def log(msg): return self.app.call_from_thread(self._log, msg)
+
+        invalid = report["invalid"]
+        valid = report["valid"]
+        report_dir = profile_data_dir(self._config.profiles_dir, self._config.active_profile)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "pak_validation.md"
+
+        lines = ["# Validation structurelle des .pak déployés\n"]
+        lines.append(
+            "Check natif (sans Divine.exe) : header LSPK + échantillon des entrées "
+            "décompressées avec succès. **Ne remplace pas Divine.exe** (pas de "
+            "génération de modsettings.lsx, pas de lancement du jeu) — voir "
+            "`pak_validator.py` pour les limites détaillées.\n"
+        )
+        if invalid:
+            lines.append(f"{len(invalid)} .pak invalide(s) sur {len(report['valid']) + len(invalid)} :\n")
+            for result in sorted(invalid, key=lambda r: r.path.name):
+                lines.append(f"## {result.path.name}\n")
+                for error in result.errors:
+                    lines.append(f"- {error}")
+                lines.append("")
+        else:
+            lines.append(f"Les {len(valid)} .pak déployé(s) sont structurellement valides (échantillon vérifié).")
+
+        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        if invalid:
+            log(f"[#C46F6F]{len(invalid)} .pak invalide(s)[/#C46F6F] sur {len(valid) + len(invalid)} -> {report_path}")
+        else:
+            log(f"{len(valid)} .pak valide(s) -> {report_path}")
 
     @on(Button.Pressed, "#action-nexus-updates")
     def handle_nexus_updates(self) -> None:
