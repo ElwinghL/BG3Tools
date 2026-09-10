@@ -8,7 +8,7 @@
 ### 1. Lecteur natif `.pak` (remplacer Divine.exe)
 
 - ~~**1a-1e.**~~ — fait : `bg3_mod_tui/pak_reader.py` (mmap, header LSPK v15/16/18, index LZ4), parsing meta.lsx/meta.lsf, intégré dans `pak_metadata.read_pak_identity` (le point d'usage réel de Divine.exe — `inventory._match_pak_to_archive` ne lit aucun .pak, seulement les noms de fichiers), avec repli automatique sur Divine.exe y compris sur exception imprévue (`1e`)
-  - ⚠️ **non validé contre un vrai `.pak` BG3** (aucun fichier réel disponible dans l'environnement de dev) — tests construits à la main uniquement ; à vérifier en usage réel avant de faire confiance aveuglément aux résultats natifs. Impact limité en pratique : sert à la détection d'archives orphelines, qui ne fait que produire un rapport, jamais de suppression automatique
+  - ⚠️ **validé depuis contre de vrais `.pak` BG3** via `scripts/compare_pak_reader.py` (croisement Python/Rust/Divine.exe) : identité, table de fichiers et hash de contenu décompressé corrects, MAIS un vrai bug détecté — certaines entrées rapportent une taille de **0** au lieu de la vraie valeur (confirmée par Rust et Divine.exe), cause non encore identifiée — voir `Tools/bg3pythonpaklib/README.md#comparisons`. Impact limité en pratique : sert à la détection d'archives orphelines, qui ne fait que produire un rapport, jamais de suppression automatique — mais le bug de taille reste à corriger avant d'étendre l'usage de ce lecteur (ex: 16b)
 
 ### 2. Archives orphelines — écriture incrémentale du rapport
 
@@ -33,7 +33,7 @@
 ### 6. Utilitaire standalone de validation `.pak`
 
 - ~~**6a-6c.**~~ — fait : `bg3_mod_tui/pak_validator.py`, réutilise `pak_reader.PakArchive` (pas de réimplémentation), échantillonne et décompresse les entrées pour détecter une corruption, rapport `{"valid": [...], "invalid": [...]}` + `pak_validation.md`, aucune génération modsettings.lsx ni lancement du jeu
-  - ⚠️ hérite de la même limite que `pak_reader` : jamais validé contre un vrai `.pak` BG3, et **pas de repli Divine.exe** ici (contrairement à `pak_metadata`) — une erreur de lecture native est rapportée telle quelle comme "invalide"
+  - ⚠️ hérite du bug de taille désormais connu sur `pak_reader` (voir section 1 ci-dessus), et **pas de repli Divine.exe** ici (contrairement à `pak_metadata`) — une erreur de lecture native est rapportée telle quelle comme "invalide"
 
 ### 7. Vue par onglets (Console principale / Outils / Serveur web)
 
@@ -64,6 +64,18 @@
 - **16a.** Parcourir la doc des mods (première étape, sans lecture .pak) pour lister classes/sous-classes/dons/objets
 - **16b.** Étendre au contenu réel des .pak (réutiliser `pak_reader.py`) une fois 16a en place
 - **16c.** Sortie dans des structures JSON adaptées (une structure par type d'entité)
+
+### 17. Optimisation du build Rust (`rust/pak_reader_rs`) — profil release
+
+- **17a.** Auditer un profil `[profile.release]` optimisé pour `rust/pak_reader_rs` et comparer les performances AVANT/APRÈS sur `scripts/compare_pak_reader.py` — le AVANT est déjà connu : `maturin develop` (sans `--release`) produit un build **debug**, identifié comme cause du ralentissement mesuré sur l'extraction/décompression de contenu par rapport à Python et Divine.exe (voir `Tools/bg3rustpaklib/README.md#comparisons`, "build debug, pas une comparaison équitable")
+
+  ```
+  [profile.release]
+  opt-level = 3
+  lto = "fat"          # Link-Time Optimization globale
+  codegen-units = 1    # Maximise les optimisations du compilateur au détriment du temps de build
+  panic = "abort"      # Supprime la gestion du unwinding si non nécessaire
+  ```
 
 ## P3 — Annexe (avant V2/V3/V4)
 
