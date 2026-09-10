@@ -19,9 +19,9 @@
 
 ### 4. Priorisation Nexus / Mod.io
 
-- **4a.** Règle : si Mod.io version > Nexus version → privilégier Mod.io
-- **4b.** (un)subscribe auto sur Mod.io lors du switch de source
-- **4c.** Process de vérification de version entre archives locales et Nexus (compare version strings)
+- **4a.** Règle : si Mod.io version > Nexus version → privilégier Mod.io — bloqué : aucune correspondance fiable Nexus↔mod.io dans le code (ArchiveEntry ne modélise que Nexus), et aucun endpoint (un)subscribe mod.io vérifié — un mapping par nom serait une heuristique dangereuse pour déclencher une action automatique
+- **4b.** (un)subscribe auto sur Mod.io lors du switch de source — bloqué pour la même raison que 4a ; en attendant, un vrai bug latent a été corrigé : `extract_archives_to_mods` plantait toute la boucle si un seul .pak était verrouillé (jeu en cours) — désormais isolé par fichier, loggé, `report["failed"]`, archive retentée au passage suivant
+- ~~**4c.** Process de vérification de version entre archives locales et Nexus~~ — fait : bouton "Vérifier les mises à jour Nexus...", rapport `nexus_updates.md` (lecture seule, nécessite NEXUS_API_KEY)
 
 ### 5. Téléchargements parallèles
 
