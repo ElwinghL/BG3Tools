@@ -22,7 +22,11 @@ __pycache__/
 /build/
 /dist/
 .vscode/
-.claude/
+
+# Tout .claude/ est local (état d'agents, settings...) sauf TODO.md,
+# volontairement suivi et partagé entre sessions/collaborateurs.
+.claude/*
+!.claude/TODO.md
 
 # Outils tiers téléchargés : on garde la structure des dossiers (.gitkeep)
 # mais on ignore les fichiers eux-mêmes (binaires/archives, pas notre code).
