@@ -14,7 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from bg3_mod_tui.launcher import resolve_wine_bin
-from bg3_mod_tui.platform_utils import find_proton_prefix, is_windows
+from bg3_mod_tui.platform_utils import find_proton_prefix, is_windows, to_wine_path
 
 LogFn = Callable[[str], None]
 
@@ -71,15 +71,14 @@ def build_pak(
     mods_dir.mkdir(parents=True, exist_ok=True)
     dest_pak = mods_dir / PAK_NAME
 
-    args_tail = [
-        "--game", "bg3",
-        "--action", "create-package",
-        "--source", str(source_root),
-        "--destination", str(dest_pak),
-    ]
-
     env = None
     if is_windows():
+        args_tail = [
+            "--game", "bg3",
+            "--action", "create-package",
+            "--source", str(source_root),
+            "--destination", str(dest_pak),
+        ]
         command = [str(divine_exe), *args_tail]
     else:
         prefix = find_proton_prefix(reference_path)
@@ -88,6 +87,16 @@ def build_pak(
         wine_bin = resolve_wine_bin(prefix)
         env = os.environ.copy()
         env["WINEPREFIX"] = str(prefix)
+        # Divine.exe (.NET) valide ses arguments de chemin via `System.Uri` :
+        # un chemin Unix brut (`/run/media/...`) n'est pas reconnu et fait
+        # planter l'outil (exception "relative URI") — il faut lui donner
+        # le chemin Windows équivalent (voir `to_wine_path`).
+        args_tail = [
+            "--game", "bg3",
+            "--action", "create-package",
+            "--source", to_wine_path(source_root),
+            "--destination", to_wine_path(dest_pak),
+        ]
         command = [wine_bin, str(divine_exe), *args_tail]
 
     log(f"Empaquetage de {PAK_NAME} via Divine.exe...")

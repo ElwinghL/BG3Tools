@@ -15,7 +15,11 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.widgets import Button, Footer, Input, Label, ListItem, ListView, Select, SelectionList
 
-from bg3_mod_tui.compat_framework import CompatibilityFrameworkError, build_pak as build_compat_framework_pak
+from bg3_mod_tui.compat_framework import (
+    CompatibilityFrameworkError,
+    build_pak as build_compat_framework_pak,
+    find_divine_exe,
+)
 from bg3_mod_tui.config import ModToolsConfig, save_config
 from bg3_mod_tui.game_deploy import deploy_native_mod_loader, deploy_script_extender
 from bg3_mod_tui.inventory import (
@@ -33,6 +37,7 @@ from bg3_mod_tui.native_mods import (
     deploy_native_mods_from_manifest,
     load_manifest as load_native_mods_manifest,
 )
+from bg3_mod_tui.pak_metadata import archive_pak_identities, build_deployed_uuid_index
 from bg3_mod_tui.platform_utils import find_proton_prefix, has_graphical_display, is_windows
 from bg3_mod_tui.profile_archive import (
     ARCHIVE_SUFFIX,
@@ -1135,44 +1140,133 @@ class ActionsScreen(Screen):
             log(f"[#D8C091]Manifeste des mods natifs ignoré : {exc}[/#D8C091]")
             native_manifest = {}
 
-        orphans = find_orphaned_archives(inventory, native_manifest)
-        if not orphans:
+        candidates = find_orphaned_archives(inventory, native_manifest)
+        if not candidates:
             log("Aucune archive orpheline : chaque archive de _installees correspond à un .pak/DLL actuellement déployé.")
             return
 
-        orphans.sort(key=lambda a: a["size_bytes"], reverse=True)
-        total_bytes = sum(a["size_bytes"] for a in orphans)
-
-        report_path = self._config.project_root / "archives_orphelines.md"
-        lines = [
-            "# Archives potentiellement orphelines\n",
-            (
-                f"{len(orphans)} archive(s) dans `_installees` sans .pak/DLL "
-                f"actuellement déployé correspondant ({_human_size(total_bytes)} au total).\n"
-            ),
-            (
-                "Association par nom (best-effort) : à vérifier avant "
-                "suppression, pas une liste garantie sans faux positif — "
-                "voir `inventory.find_orphaned_archives`.\n"
-            ),
-            "| Archive | Taille | Origine | Modifiée |",
-            "|---|---|---|---|",
-        ]
-        for archive in orphans:
-            origin = (
-                f"[{archive['mod_name_guess']}]({archive['nexus_url']})"
-                if archive.get("nexus_url")
-                else (archive.get("mod_name_guess") or "?")
+        divine_exe = find_divine_exe(self._config.tools_dir)
+        if divine_exe is None:
+            log(
+                f"[#D8C091]Divine.exe introuvable sous Tools/ExportTools/ — "
+                f"télécharge d'abord LSLib via « MAJ des outils » pour vérifier "
+                f"ces {len(candidates)} candidat(e)s par UUID plutôt que par nom "
+                f"seul (peu fiable, voir tooltip).[/#D8C091]"
             )
-            lines.append(
-                f"| {archive['file']} | {_human_size(archive['size_bytes'])} | "
-                f"{origin} | {archive['modified'][:10]} |"
-            )
-        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self._write_orphans_report(candidates, verified=False)
+            return
 
         log(
-            f"{len(orphans)} archive(s) orpheline(s) ({_human_size(total_bytes)} à "
-            f"potentiellement récupérer) -> {report_path}"
+            f"{len(candidates)} candidat(e)s d'après le nom de fichier (peu "
+            f"fiable) — vérification par UUID réel du .pak (via Divine.exe) "
+            f"pour écarter les faux positifs. Ça va prendre un moment..."
+        )
+
+        pak_paths = sorted(self._config.managed_mods_link.glob("*.pak"))
+        log(f"Lecture de l'UUID de {len(pak_paths)} .pak actuellement déployé(s)...")
+        deployed_uuids = build_deployed_uuid_index(
+            pak_paths,
+            divine_exe=divine_exe,
+            reference_path=self._config.project_root,
+            log=log,
+        )
+
+        confirmed: list[dict] = []
+        unverifiable: list[dict] = []
+        for index, archive in enumerate(candidates, start=1):
+            archive_path = self._config.archives_installed_dir / archive["file"]
+            identities = archive_pak_identities(
+                archive_path,
+                divine_exe=divine_exe,
+                reference_path=self._config.project_root,
+                log=log,
+            )
+            if not identities:
+                # Pas de .pak dedans (mod "loose files") ou lecture échouée :
+                # la méthode par UUID ne s'applique pas, on ne peut pas
+                # confirmer — gardé à part plutôt que déclaré orphelin à tort.
+                unverifiable.append(archive)
+            elif not any(uuid in deployed_uuids for uuid, _name in identities):
+                confirmed.append(archive)
+            if index % 10 == 0 or index == len(candidates):
+                log(f"  {index}/{len(candidates)} archive(s) vérifiée(s)...")
+
+        discarded = len(candidates) - len(confirmed) - len(unverifiable)
+        log(
+            f"Vérification terminée : {len(confirmed)} orpheline(s) confirmée(s), "
+            f"{discarded} faux positif(s) écarté(s) (mod toujours déployé, même "
+            f"nom de fichier différent), {len(unverifiable)} non vérifiable(s) "
+            f"(pas de .pak dedans)."
+        )
+        self._write_orphans_report(confirmed, verified=True, unverifiable=unverifiable)
+
+    def _write_orphans_report(
+        self,
+        orphans: list[dict],
+        *,
+        verified: bool,
+        unverifiable: list[dict] | None = None,
+    ) -> None:
+        def log(msg): return self.app.call_from_thread(self._log, msg)
+
+        if not orphans and not unverifiable:
+            log("Aucune archive orpheline confirmée.")
+            return
+
+        def _table(archives: list[dict]) -> list[str]:
+            rows = [
+                "| Archive | Taille | Origine | Modifiée |",
+                "|---|---|---|---|",
+            ]
+            for archive in sorted(archives, key=lambda a: a["size_bytes"], reverse=True):
+                origin = (
+                    f"[{archive['mod_name_guess']}]({archive['nexus_url']})"
+                    if archive.get("nexus_url")
+                    else (archive.get("mod_name_guess") or "?")
+                )
+                rows.append(
+                    f"| {archive['file']} | {_human_size(archive['size_bytes'])} | "
+                    f"{origin} | {archive['modified'][:10]} |"
+                )
+            return rows
+
+        total_bytes = sum(a["size_bytes"] for a in orphans)
+        lines = ["# Archives potentiellement orphelines\n"]
+        if verified:
+            lines.append(
+                f"{len(orphans)} archive(s) confirmée(s) orpheline(s) par UUID "
+                f"réel du .pak (Divine.exe) : aucun .pak actuellement déployé "
+                f"ne partage l'UUID de celui contenu dans l'archive — "
+                f"{_human_size(total_bytes)} à potentiellement récupérer.\n"
+            )
+        else:
+            lines.append(
+                f"{len(orphans)} archive(s) dans `_installees` sans .pak/DLL "
+                f"actuellement déployé correspondant ({_human_size(total_bytes)} au total).\n\n"
+                "Association par **nom de fichier** seulement (Divine.exe "
+                "indisponible pour vérifier par UUID réel) — best-effort, pas "
+                "une liste garantie sans faux positif : à vérifier avant "
+                "suppression, voir `inventory.find_orphaned_archives`.\n"
+            )
+        lines += _table(orphans)
+
+        if unverifiable:
+            lines += [
+                "\n## Non vérifiables (pas de .pak dans l'archive)\n",
+                (
+                    "Mods \"loose files\" ou mods natifs sans entrée dans "
+                    "`native_mods_manifest.json` — la vérification par UUID ne "
+                    "s'applique qu'aux .pak, à vérifier manuellement.\n"
+                ),
+            ]
+            lines += _table(unverifiable)
+
+        report_path = self._config.project_root / "archives_orphelines.md"
+        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        log(
+            f"{len(orphans)} archive(s) orpheline(s)"
+            f"{' confirmée(s) par UUID' if verified else ''} "
+            f"({_human_size(total_bytes)}) -> {report_path}"
         )
 
     @on(Button.Pressed, "#action-nexus-blacklist")

@@ -27,6 +27,10 @@ __pycache__/
 # Outils tiers téléchargés : on garde la structure des dossiers (.gitkeep)
 # mais on ignore les fichiers eux-mêmes (binaires/archives, pas notre code).
 
+# Marqueur de version écrit par tools_manager.py dans chaque dossier
+# d'outil, pour savoir si un nouveau téléchargement est nécessaire.
+/Tools/**/.bg3modtools_version
+
 /Tools/Archives_installees/**
 
 /Tools/BG3-Load-Order-Optimizer/**/*.dll

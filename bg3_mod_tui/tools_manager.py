@@ -23,6 +23,13 @@ _TABLE_ROW_RE = re.compile(
 _GITHUB_REPO_RE = re.compile(r"github\.com/([^/\s]+)/([^/\s]+?)(?:/|\s|$)")
 _BACKTICKED_PATH_RE = re.compile(r"`([^`]+)`")
 
+# Fichier marqueur écrit dans le dossier de chaque outil après installation,
+# contenant la version installée (tag de release, ou hash court du dernier
+# commit pour un dépôt sans release) — permet à une prochaine "MAJ des
+# outils" de savoir si un nouveau téléchargement est nécessaire plutôt que
+# de retélécharger/écraser à chaque fois, peu importe l'état actuel.
+VERSION_MARKER_NAME = ".bg3modtools_version"
+
 
 class ToolsError(RuntimeError):
     pass
@@ -64,27 +71,58 @@ def parse_tools_table(path: Path) -> list[ToolEntry]:
     return entries
 
 
-def _github_asset_url(owner: str, repo: str) -> tuple[str, str]:
-    """Retourne (nom, url) du meilleur asset à télécharger : le premier
-    asset .zip d'une release GitHub, ou à défaut l'archive source zip."""
+@dataclass
+class ToolRelease:
+    asset_name: str
+    download_url: str
+    version: str
+    """Tag de la release GitHub, ou hash court du dernier commit du
+    répertoire par défaut pour un dépôt sans release — sert uniquement à
+    détecter si l'outil déjà installé est à jour, pas affiché comme un
+    vrai numéro de version sémantique."""
+
+
+def _github_release(owner: str, repo: str) -> ToolRelease:
+    """Retourne le meilleur asset à télécharger (premier .zip d'une
+    release GitHub, ou à défaut l'archive source zip) avec sa version."""
     with httpx.Client(timeout=15, headers={"Accept": "application/vnd.github+json"}) as client:
         resp = client.get(f"https://api.github.com/repos/{owner}/{repo}/releases/latest")
         if resp.status_code == 200:
             data = resp.json()
+            tag = data.get("tag_name") or "latest"
             for asset in data.get("assets", []):
                 if asset.get("name", "").lower().endswith(".zip"):
-                    return asset["name"], asset["browser_download_url"]
+                    return ToolRelease(asset["name"], asset["browser_download_url"], tag)
             if data.get("zipball_url"):
-                return f"{repo}-{data.get('tag_name', 'latest')}.zip", data["zipball_url"]
+                return ToolRelease(f"{repo}-{tag}.zip", data["zipball_url"], tag)
 
         resp = client.get(f"https://api.github.com/repos/{owner}/{repo}")
         if resp.status_code != 200:
             raise ToolsError(f"Dépôt GitHub introuvable : {owner}/{repo} ({resp.status_code}).")
         default_branch = resp.json().get("default_branch", "main")
-        return (
+
+        # Pas de release : la "version" est le hash du dernier commit de la
+        # branche par défaut, seul moyen de détecter un changement réel
+        # (sinon rien ne distinguerait deux téléchargements du même zip
+        # source à des moments différents).
+        commit_resp = client.get(f"https://api.github.com/repos/{owner}/{repo}/commits/{default_branch}")
+        version = commit_resp.json()["sha"][:12] if commit_resp.status_code == 200 else default_branch
+
+        return ToolRelease(
             f"{repo}-{default_branch}.zip",
             f"https://github.com/{owner}/{repo}/archive/refs/heads/{default_branch}.zip",
+            version,
         )
+
+
+def _installed_version(dest_dir: Path) -> str | None:
+    version_file = dest_dir / VERSION_MARKER_NAME
+    if not version_file.is_file():
+        return None
+    try:
+        return version_file.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
 
 
 def download_and_extract_tool(
@@ -105,17 +143,26 @@ def download_and_extract_tool(
     dest_dir = project_root / entry.local_dir
 
     try:
-        name, url = _github_asset_url(entry.github_owner, entry.github_repo)
+        release = _github_release(entry.github_owner, entry.github_repo)
     except ToolsError as exc:
         log(f"[{entry.name}] {exc}")
         return
 
+    installed = _installed_version(dest_dir)
+    if installed == release.version:
+        log(f"[{entry.name}] déjà à jour ({release.version}).")
+        return
+    if installed:
+        log(f"[{entry.name}] mise à jour : {installed} -> {release.version}.")
+    else:
+        log(f"[{entry.name}] installation ({release.version})...")
+
     with tempfile.TemporaryDirectory(prefix="bg3modtools_tool_") as tmp:
         tmp_path = Path(tmp)
-        archive_path = tmp_path / name
-        log(f"[{entry.name}] téléchargement de {name}...")
+        archive_path = tmp_path / release.asset_name
+        log(f"[{entry.name}] téléchargement de {release.asset_name}...")
         try:
-            with httpx.stream("GET", url, timeout=30, follow_redirects=True) as resp:
+            with httpx.stream("GET", release.download_url, timeout=30, follow_redirects=True) as resp:
                 resp.raise_for_status()
                 with archive_path.open("wb") as fh:
                     for chunk in resp.iter_bytes(65536):
@@ -146,7 +193,8 @@ def download_and_extract_tool(
                     target.unlink()
             shutil.move(str(item), str(target))
 
-        log(f"[{entry.name}] installé dans {dest_dir}.")
+        (dest_dir / VERSION_MARKER_NAME).write_text(release.version, encoding="utf-8")
+        log(f"[{entry.name}] installé dans {dest_dir} ({release.version}).")
 
 
 def find_executables(tools_root: Path) -> list[Path]:

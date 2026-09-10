@@ -176,6 +176,18 @@ def find_proton_wine_bin(prefix: Path) -> Path | None:
     return wine_bin if wine_bin.is_file() else None
 
 
+def to_wine_path(path: Path) -> str:
+    """Convertit un chemin Linux en chemin Windows tel qu'attendu par les
+    validations internes (`System.Uri`) de certains outils .NET tournant
+    sous Wine — ex: Divine.exe (LSLib) plante avec une exception "relative
+    URI" sur un chemin absolu Unix passé tel quel en argument, ne le
+    reconnaissant pas comme un chemin valide. `Z:` est par convention le
+    lecteur que Wine mappe sur la racine `/` (comportement par défaut,
+    présent dans tout préfixe standard) — cette conversion n'a de sens que
+    sous Linux, pas sous Windows où le chemin natif suffit."""
+    return "Z:" + str(path.resolve()).replace("/", "\\")
+
+
 def default_env_appdata() -> str | None:
     """Retourne le chemin AppData local par défaut selon la plateforme,
     utilisé comme suggestion initiale dans l'assistant de configuration."""
