@@ -368,10 +368,19 @@ def extract_archives_to_mods(
     Si rien de tout ça n'est trouvé, l'archive est déplacée telle quelle
     dans `pending_dir` pour examen manuel.
 
-    Retourne {"installed": [...], "pending": [...], "failed": [(name, err)]}.
+    Un .pak dont le nom existe déjà dans `mods_dir` n'est pas copié en
+    doublon (avec un suffixe "(1)") : il est ignoré, pour ne pas se
+    retrouver avec deux fois le même mod (ex: extraction relancée deux
+    fois sur la même archive, ou archive contenant un .pak déjà installé
+    sous un autre biais). Si tous les .pak d'une archive sont ainsi déjà
+    présents, l'archive est tout de même déplacée vers `installed_dir`
+    (rien à en tirer de plus dans `archives_dir`).
+
+    Retourne {"installed": [...], "pending": [...], "skipped": [...],
+    "failed": [(name, err)]}.
     """
     mods_dir.mkdir(parents=True, exist_ok=True)
-    report: dict[str, list] = {"installed": [], "pending": [], "failed": []}
+    report: dict[str, list] = {"installed": [], "pending": [], "skipped": [], "failed": []}
 
     can_handle_native = native_mods_manifest_path is not None and native_mods_managed_dir is not None and managed_dir is not None
     native_manifest: dict[str, str] = {}
@@ -436,12 +445,29 @@ def extract_archives_to_mods(
 
             paks = list(tmp_path.rglob("*.pak"))
             if paks:
-                for pak in paks:
-                    shutil.copy2(pak, _unique_destination(mods_dir, pak.name))
-                log(fmt_row(archive.name, STATUS_SUCCES, detail=f"{len(paks)} .pak installé(s)"))
+                new_paks = [pak for pak in paks if not (mods_dir / pak.name).exists()]
+                duplicate_paks = [pak for pak in paks if pak not in new_paks]
+                for pak in new_paks:
+                    shutil.copy2(pak, mods_dir / pak.name)
+
+                if new_paks:
+                    detail = f"{len(new_paks)} .pak installé(s)"
+                    if duplicate_paks:
+                        detail += f", {len(duplicate_paks)} déjà présent(s) ignoré(s)"
+                    log(fmt_row(archive.name, STATUS_SUCCES, detail=detail))
+                    report["installed"].append(archive.name)
+                else:
+                    log(
+                        fmt_row(
+                            archive.name,
+                            STATUS_IGNORE,
+                            detail=f"{len(duplicate_paks)} .pak déjà présent(s), rien à installer",
+                        )
+                    )
+                    report["skipped"].append(archive.name)
+
                 dest = _unique_destination(installed_dir, archive.name)
                 shutil.move(str(archive), str(dest))
-                report["installed"].append(archive.name)
                 continue
 
             can_handle_loose = loose_mods_dir is not None and game_data_dir is not None
