@@ -351,8 +351,11 @@ def cleanup_duplicate_archives(
         if len(by_hash) > 1:
             conflicts.append(base_name)
             log(
-                f"Doublons potentiels ignorés (contenus différents) : "
-                f"{base_name} ({len(by_hash)} versions distinctes, à examiner manuellement)."
+                fmt_row(
+                    base_name,
+                    STATUS_EXAMEN,
+                    detail=f"{len(by_hash)} versions distinctes de contenu — conservées telles quelles",
+                )
             )
             continue
 
@@ -364,7 +367,13 @@ def cleanup_duplicate_archives(
             path.unlink()
             freed += size
             removed.append(path.name)
-            log(f"Doublon supprimé : {path.name} (conservé : {keep.name})")
+            log(
+                fmt_row(
+                    path.name,
+                    STATUS_IGNORE,
+                    detail=f"doublon de {keep.name} ({_human_size(size)} récupéré(s))",
+                )
+            )
 
     report["removed"] = removed
     report["freed_bytes"] = freed
