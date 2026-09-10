@@ -58,19 +58,19 @@ SAMPLE_CAP=1000000
 echo "=== 1/4 Python ==="
 uv run python scripts/compare_pak_reader.py run --tool python --verbose --sample "$SAMPLE_CAP" "${PAK_FILES[@]}"
 
-echo "=== 2/4 Divine.exe (per-file) ==="
-uv run python scripts/compare_pak_reader.py run --tool divine --verbose --sample "$SAMPLE_CAP" "${PAK_FILES[@]}" \
-    --divine-exe "$DIVINE_EXE"
-
-echo "=== 3/4 Rust (debug) ==="
+echo "=== 2/4 Rust (debug) ==="
 uv run maturin develop --manifest-path rust/pak_reader_rs/Cargo.toml
 uv run python scripts/compare_pak_reader.py run --tool rust --verbose --sample "$SAMPLE_CAP" "${PAK_FILES[@]}" \
     --out "$REPORTS_DIR/rust_debug_report.json"
 
-echo "=== 4/4 Rust (release) ==="
+echo "=== 3/4 Rust (release) ==="
 uv run maturin develop --release --manifest-path rust/pak_reader_rs/Cargo.toml
 uv run python scripts/compare_pak_reader.py run --tool rust --verbose --sample "$SAMPLE_CAP" "${PAK_FILES[@]}" \
     --out "$REPORTS_DIR/rust_release_report.json"
+
+echo "=== 4/4 Divine.exe (per-file) ==="
+uv run python scripts/compare_pak_reader.py run --tool divine --verbose --sample "$SAMPLE_CAP" "${PAK_FILES[@]}" \
+    --divine-exe "$DIVINE_EXE"
 
 echo
 echo "=== Temps totaux par variante ==="
