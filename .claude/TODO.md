@@ -4,11 +4,8 @@
 
 ### 1. Lecteur natif `.pak` (remplacer Divine.exe)
 
-- **1a.** Implémenter `pak_reader.py` : lecture mmap + parse header LSPK v16/v18 + decompression LZ4 index
-- **1b.** Parser `meta.lsx` (XML) → extraction UUID + Name + Folder
-- **1c.** Parser `meta.lsf` (binaire) → extraction UUID par regex sur la table de chaînes
-- **1d.** Intégrer dans `inventory.py` : `_match_pak_to_archive` utilise `pak_reader` au lieu de Divine.exe
-- **1e.** Fallback sur Divine.exe si échec lecture native (version inconnue / fichier corrompu)
+- ~~**1a-1e.**~~ — fait : `bg3_mod_tui/pak_reader.py` (mmap, header LSPK v15/16/18, index LZ4), parsing meta.lsx/meta.lsf, intégré dans `pak_metadata.read_pak_identity` (le point d'usage réel de Divine.exe — `inventory._match_pak_to_archive` ne lit aucun .pak, seulement les noms de fichiers), avec repli automatique sur Divine.exe y compris sur exception imprévue (`1e`)
+  - ⚠️ **non validé contre un vrai `.pak` BG3** (aucun fichier réel disponible dans l'environnement de dev) — tests construits à la main uniquement ; à vérifier en usage réel avant de faire confiance aveuglément aux résultats natifs. Impact limité en pratique : sert à la détection d'archives orphelines, qui ne fait que produire un rapport, jamais de suppression automatique
 
 ### 2. Archives orphelines — écriture incrémentale du rapport
 
