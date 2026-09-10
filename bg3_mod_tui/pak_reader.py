@@ -62,6 +62,7 @@ import struct
 import zlib
 from dataclasses import dataclass
 from pathlib import Path
+from xml.etree import ElementTree
 
 try:
     import lz4.block as _lz4_block
@@ -328,3 +329,76 @@ class PakArchive:
             )
         raw = bytes(self._mmap[entry.offset : end])
         return _decompress_entry(raw, entry.compression_method, entry.uncompressed_size)
+
+
+def parse_meta_lsx_bytes(data: bytes) -> tuple[str, str, str] | None:
+    """Extrait `(UUID, Name, Folder)` du nœud `ModuleInfo` d'un `meta.lsx`
+    déjà en mémoire (typiquement lu via `PakArchive.read`, contrairement à
+    `pak_metadata.parse_meta_lsx` qui lit un fichier déjà extrait sur
+    disque — même logique d'extraction, adaptée pour opérer sur des
+    octets). Ignore volontairement tout UUID sous `Dependencies` en
+    ciblant précisément le nœud `ModuleInfo` (voir
+    `pak_metadata.parse_meta_lsx` pour le détail de ce choix). `Folder` est
+    vide si absent (certains `meta.lsx` très anciens n'ont pas cet
+    attribut). Retourne None si le XML est invalide ou sans UUID."""
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return None
+    module_info = root.find(".//node[@id='ModuleInfo']")
+    if module_info is None:
+        return None
+    uuid = None
+    name = None
+    folder = None
+    for attribute in module_info.findall("attribute"):
+        attr_id = attribute.get("id")
+        if attr_id == "UUID":
+            uuid = attribute.get("value")
+        elif attr_id == "Name":
+            name = attribute.get("value")
+        elif attr_id == "Folder":
+            folder = attribute.get("value")
+    return (uuid, name or "", folder or "") if uuid else None
+
+
+def read_pak_identity_native(pak_path: Path) -> tuple[str, str] | None:
+    """Équivalent natif de `pak_metadata.read_pak_identity`, sans
+    Divine.exe : ouvre `pak_path` via `PakArchive`, localise son
+    `meta.lsx` (par suffixe — le dossier du mod dans `Mods/<Dossier>/` est
+    inconnu à l'avance) et en extrait `(UUID, Name)`. Ne gère pas encore
+    `meta.lsf` (voir `pak_metadata.read_meta_lsf_bytes`, utilisé
+    séparément par l'appelant en repli si aucun `meta.lsx` n'est trouvé).
+
+    Lève `PakReaderError` (`UnsupportedPakVersion`/`CorruptedPak`) si le
+    .pak n'est pas exploitable nativement — l'appelant doit alors replier
+    sur Divine.exe. Retourne None (pas d'exception) si le .pak est
+    exploitable mais ne contient simplement aucun `meta.lsx` (mod avec
+    seulement un `meta.lsf`, ou .pak sans métadonnées de mod)."""
+    with PakArchive.open(pak_path) as pak:
+        entry = pak.find_suffix("meta.lsx")
+        if entry is None:
+            return None
+        content = pak.read(entry)
+    identity = parse_meta_lsx_bytes(content)
+    if identity is None:
+        return None
+    uuid, name, _folder = identity
+    return uuid, name
+
+
+def read_meta_lsx_or_lsf_bytes(pak_path: Path) -> tuple[str, bytes] | None:
+    """Ouvre `pak_path` et retourne `(suffixe, contenu brut)` du premier
+    `meta.lsx` trouvé, sinon du premier `meta.lsf` trouvé (`suffixe` vaut
+    `"lsx"` ou `"lsf"`) — sert de point d'entrée commun pour l'appelant qui
+    veut essayer XML puis binaire sans ouvrir/parser le .pak deux fois.
+    None si ni l'un ni l'autre n'est présent. Lève `PakReaderError` si le
+    .pak n'est pas exploitable nativement."""
+    with PakArchive.open(pak_path) as pak:
+        lsx_entry = pak.find_suffix("meta.lsx")
+        if lsx_entry is not None:
+            return "lsx", pak.read(lsx_entry)
+        lsf_entry = pak.find_suffix("meta.lsf")
+        if lsf_entry is not None:
+            return "lsf", pak.read(lsf_entry)
+    return None
