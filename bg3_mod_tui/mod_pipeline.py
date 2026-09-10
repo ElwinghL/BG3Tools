@@ -148,11 +148,22 @@ def download_mods_from_links_file(
     valeur prudente qui reste sous ce plafond). En revanche, `select_files`
     (le wizard de sélection de variantes, un écran modal Textual — voir
     `ActionsScreen._select_nexus_files`) reste appelé de façon strictement
-    SÉQUENTIELLE : toute la phase de préparation (info + fichiers + choix des
-    variantes pour chaque mod) tourne d'abord sur le thread appelant, avant
-    que le pool de téléchargement ne démarre — afficher plusieurs wizards à
-    la fois n'aurait pas de sens (un seul écran modal visible à la fois de
-    toute façon) et risquerait une vraie course sur `push_screen`.
+    SÉQUENTIELLE : la préparation (info + fichiers + choix des variantes)
+    d'un mod tourne toujours sur le thread appelant, jamais sur un thread du
+    pool de téléchargement — afficher plusieurs wizards à la fois n'aurait
+    pas de sens (un seul écran modal visible à la fois de toute façon) et
+    risquerait une vraie course sur `push_screen`.
+
+    Sous-tâche 5d ("pipeline") : la préparation du mod suivant n'attend PAS
+    la fin du téléchargement du mod courant — dès qu'un mod est prêt (info +
+    fichiers récupérés, variantes choisies si besoin), son téléchargement
+    est soumis au pool (non bloquant) et la boucle de préparation passe
+    immédiatement au mod suivant. Concrètement : pendant qu'un
+    téléchargement lent tourne sur l'un des threads du pool, l'API Nexus est
+    déjà interrogée pour le mod suivant et son wizard de sélection de
+    variantes (s'il en a besoin) peut déjà s'afficher — la queue entière
+    n'est donc pas bloquée derrière un seul téléchargement lent avant de
+    pouvoir commencer à choisir les fichiers du mod suivant.
 
     `on_download_progress` (sous-tâche 5c), si fourni, reçoit la progression
     de chaque téléchargement individuel — un slot par fichier (`nexus-
@@ -175,70 +186,13 @@ def download_mods_from_links_file(
     report: dict[str, list] = {"downloaded": [], "skipped": [], "failed": []}
     report_lock = threading.Lock()
 
-    # Phase de préparation (séquentielle, cf. docstring ci-dessus) : décide,
-    # pour chaque mod, les fichiers à télécharger — sans rien télécharger
-    # encore. `jobs` ne contient que les mods ayant effectivement quelque
-    # chose à télécharger ; les autres cas (déjà présent, tout blacklisté,
-    # rien retenu, erreur API) sont journalisés et reportés directement ici,
-    # comme avant.
-    jobs: list[tuple[int, str, str, list[tuple[int, str]]]] = []
-    total = len(mod_ids)
-    for index, mod_id in enumerate(mod_ids, start=1):
-        progress = f"[{index}/{total}]"
-        try:
-            info = client.mod_info(mod_id)
-            label = f"{progress} {mod_id} {info.name}"
-            version = info.version
-        except NexusAPIError:
-            label = f"{progress} {mod_id}"
-            info = None
-            version = ""
-
-        if mod_id in already_present_ids:
-            log(fmt_row(label, STATUS_IGNORE, version=version, detail="déjà présent"))
-            report["skipped"].append(mod_id)
-            continue
-        try:
-            files = client.latest_files(mod_id)
-            excluded_ids = set(blacklist.get(mod_id, {}))
-            candidates = [(fid, fname) for fid, fname in files if fid not in excluded_ids]
-
-            if not candidates:
-                log(fmt_row(label, STATUS_IGNORE, version=version, detail="toutes les variantes sont blacklistées"))
-                report["skipped"].append(mod_id)
-                continue
-
-            if len(candidates) > 1 and select_files is not None:
-                mod_name = info.name if info is not None else label
-                chosen_ids = set(select_files(mod_id, mod_name, candidates))
-                rejected = {fid: fname for fid, fname in candidates if fid not in chosen_ids}
-                if rejected:
-                    blacklist.setdefault(mod_id, {}).update(rejected)
-                    blacklist_dirty = True
-                to_download = [pair for pair in candidates if pair[0] in chosen_ids]
-            else:
-                to_download = candidates
-
-            if not to_download:
-                log(fmt_row(label, STATUS_IGNORE, version=version, detail="aucune variante retenue"))
-                report["skipped"].append(mod_id)
-                continue
-
-            jobs.append((mod_id, label, version, to_download))
-        except NexusAPIError as exc:
-            log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
-            report["failed"].append((mod_id, str(exc)))
-        except Exception as exc:
-            log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
-            report["failed"].append((mod_id, str(exc)))
-
     def _download_job(job: tuple[int, str, str, list[tuple[int, str]]]) -> None:
-        """Télécharge tous les fichiers retenus pour UN mod (job de la phase
-        de préparation ci-dessus), sur son propre thread du pool. Toute
-        erreur (API ou autre) fait échouer le mod entier plutôt qu'un seul
-        fichier — cohérent avec le comportement historique séquentiel, où
-        une exception sur un fichier interrompait aussi les suivants du même
-        mod."""
+        """Télécharge tous les fichiers retenus pour UN mod (job soumis par
+        la boucle de préparation ci-dessous, dès qu'il est prêt), sur son
+        propre thread du pool. Toute erreur (API ou autre) fait échouer le
+        mod entier plutôt qu'un seul fichier — cohérent avec le comportement
+        historique séquentiel, où une exception sur un fichier interrompait
+        aussi les suivants du même mod."""
         mod_id, label, version, to_download = job
         try:
             for file_id, _file_name in to_download:
@@ -268,10 +222,76 @@ def download_mods_from_links_file(
             with report_lock:
                 report["failed"].append((mod_id, str(exc)))
 
-    if jobs:
-        max_workers = min(len(jobs), _NEXUS_MAX_DOWNLOAD_THREADS)
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="nexus-dl") as executor:
-            list(executor.map(_download_job, jobs))
+    # Sous-tâche 5d du TODO "Téléchargements parallèles" (pipeline) : le pool
+    # est ouvert AVANT la boucle de préparation, et chaque job est SOUMIS
+    # (`executor.submit`, non bloquant) dès qu'il est prêt, au lieu
+    # d'attendre d'avoir préparé tous les mods avant de lancer le premier
+    # téléchargement (ancien comportement, où toute la phase de préparation
+    # passait avant toute la phase de téléchargement). Pendant qu'un
+    # téléchargement tourne sur l'un des `_NEXUS_MAX_DOWNLOAD_THREADS`
+    # threads du pool, la boucle ci-dessous continue d'avancer sur le thread
+    # appelant : interroge l'API pour le mod suivant, et affiche si besoin
+    # son wizard de sélection de variantes (`select_files`, toujours
+    # strictement séquentiel — voir la docstring de la fonction) SANS
+    # attendre la fin des téléchargements déjà en cours. `submit` met en
+    # file d'attente sans bloquer si les `_NEXUS_MAX_DOWNLOAD_THREADS`
+    # threads sont déjà occupés ; `max_workers` reste la seule borne sur le
+    # parallélisme réel des téléchargements.
+    total = len(mod_ids)
+    with ThreadPoolExecutor(max_workers=_NEXUS_MAX_DOWNLOAD_THREADS, thread_name_prefix="nexus-dl") as executor:
+        for index, mod_id in enumerate(mod_ids, start=1):
+            progress = f"[{index}/{total}]"
+            try:
+                info = client.mod_info(mod_id)
+                label = f"{progress} {mod_id} {info.name}"
+                version = info.version
+            except NexusAPIError:
+                label = f"{progress} {mod_id}"
+                info = None
+                version = ""
+
+            if mod_id in already_present_ids:
+                log(fmt_row(label, STATUS_IGNORE, version=version, detail="déjà présent"))
+                report["skipped"].append(mod_id)
+                continue
+            try:
+                files = client.latest_files(mod_id)
+                excluded_ids = set(blacklist.get(mod_id, {}))
+                candidates = [(fid, fname) for fid, fname in files if fid not in excluded_ids]
+
+                if not candidates:
+                    log(fmt_row(label, STATUS_IGNORE, version=version, detail="toutes les variantes sont blacklistées"))
+                    report["skipped"].append(mod_id)
+                    continue
+
+                if len(candidates) > 1 and select_files is not None:
+                    mod_name = info.name if info is not None else label
+                    chosen_ids = set(select_files(mod_id, mod_name, candidates))
+                    rejected = {fid: fname for fid, fname in candidates if fid not in chosen_ids}
+                    if rejected:
+                        blacklist.setdefault(mod_id, {}).update(rejected)
+                        blacklist_dirty = True
+                    to_download = [pair for pair in candidates if pair[0] in chosen_ids]
+                else:
+                    to_download = candidates
+
+                if not to_download:
+                    log(fmt_row(label, STATUS_IGNORE, version=version, detail="aucune variante retenue"))
+                    report["skipped"].append(mod_id)
+                    continue
+
+                executor.submit(_download_job, (mod_id, label, version, to_download))
+            except NexusAPIError as exc:
+                log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
+                report["failed"].append((mod_id, str(exc)))
+            except Exception as exc:
+                log(fmt_row(label, STATUS_ECHEC, version=version, detail=str(exc)))
+                report["failed"].append((mod_id, str(exc)))
+        # Sortir du bloc `with` attend la fin de tous les jobs soumis
+        # (`ThreadPoolExecutor.__exit__` appelle `shutdown(wait=True)`) —
+        # nécessaire : le reste de la fonction (sauvegarde de la blacklist,
+        # retrait des liens traités) suppose `report` définitivement
+        # complet.
 
     if blacklist_dirty and profiles_dir is not None:
         save_blacklisted_files(profiles_dir, profile_name, blacklist)
