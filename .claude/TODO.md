@@ -29,9 +29,8 @@
 
 ### 6. Utilitaire standalone de validation `.pak`
 
-- **6a.** Port du check `divinity.exe` en Python pur (ou Rust via `fast_bg3_pak`)
-- **6b.** Output : statut valid/invalid + détail des erreurs par `.pak`
-- **6c.** Exclure : génération `modsettings.lsx` et lancement jeu
+- ~~**6a-6c.**~~ — fait : `bg3_mod_tui/pak_validator.py`, réutilise `pak_reader.PakArchive` (pas de réimplémentation), échantillonne et décompresse les entrées pour détecter une corruption, rapport `{"valid": [...], "invalid": [...]}` + `pak_validation.md`, aucune génération modsettings.lsx ni lancement du jeu
+  - ⚠️ hérite de la même limite que `pak_reader` : jamais validé contre un vrai `.pak` BG3, et **pas de repli Divine.exe** ici (contrairement à `pak_metadata`) — une erreur de lecture native est rapportée telle quelle comme "invalide"
 
 ## P2 — Moyen terme
 
