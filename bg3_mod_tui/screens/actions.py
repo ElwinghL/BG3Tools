@@ -13,7 +13,18 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
-from textual.widgets import Button, Footer, Input, Label, ListItem, ListView, Select, SelectionList
+from textual.widgets import (
+    Button,
+    Footer,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    Select,
+    SelectionList,
+    TabbedContent,
+    TabPane,
+)
 
 from bg3_mod_tui.compat_framework import (
     CompatibilityFrameworkError,
@@ -602,24 +613,21 @@ class ActionsScreen(Screen):
         width: 100%;
         margin-bottom: 1;
     }
-    #logs-panel {
+    #logs-tabs {
         margin-left: 2;
         width: 1fr;
+        height: 1fr;
     }
-    #actions-log-label {
-        height: auto;
+    #logs-tabs TabPane {
+        padding: 0;
     }
     #actions-log {
         border: round $panel;
         height: 1fr;
     }
-    #tools-log-label {
-        margin-top: 1;
-        height: auto;
-    }
     #tools-log {
         border: round $accent;
-        height: 10;
+        height: 1fr;
     }
     #actions-body {
         height: 1fr;
@@ -648,16 +656,6 @@ class ActionsScreen(Screen):
     #planet-button {
         margin-left: 2;
         width: 14;
-    }
-    #web-console-panel {
-        width: 30;
-        height: 1fr;
-        margin-left: 2;
-    }
-    #web-console-label {
-        height: auto;
-        text-style: bold;
-        color: $text-accent;
     }
     #web-console-log {
         border: round $accent;
@@ -837,21 +835,59 @@ class ActionsScreen(Screen):
                         tooltip="Importe une archive de profil (.tar.zst) exportée par un autre BG3 Mod TUI.",
                     )
                 yield Button("Quitter", id="action-quit", variant="error")
-            with Vertical(id="logs-panel"):
-                yield Label("Console tâches", id="actions-log-label")
-                yield ConsoleLog(id="actions-log", wrap=True, highlight=True, markup=True)
-                yield Label("Console outils", id="tools-log-label")
-                yield ConsoleLog(id="tools-log", wrap=True, highlight=True, markup=True)
-            with Vertical(id="web-console-panel"):
-                yield Label("Console Web", id="web-console-label")
-                yield ConsoleLog(id="web-console-log", wrap=True, highlight=True, markup=True)
+            with TabbedContent(id="logs-tabs"):
+                with TabPane("Tâches", id="actions-log-tab"):
+                    yield ConsoleLog(id="actions-log", wrap=True, highlight=True, markup=True)
+                with TabPane("Outils", id="tools-log-tab"):
+                    yield ConsoleLog(id="tools-log", wrap=True, highlight=True, markup=True)
+                with TabPane("Web", id="web-console-log-tab"):
+                    yield ConsoleLog(id="web-console-log", wrap=True, highlight=True, markup=True)
         yield Footer()
+
+    # Libellés de base des onglets de consoles (utilisés pour reconstruire le
+    # texte avec l'indicateur "●" quand un onglet inactif reçoit un message).
+    _LOG_TAB_LABELS = {
+        "actions-log-tab": "Tâches",
+        "tools-log-tab": "Outils",
+        "web-console-log-tab": "Web",
+    }
+
+    def _mark_log_tab_active(self, tab_id: str) -> None:
+        """Ajoute un indicateur "●" au libellé de l'onglet `tab_id` si ce
+        n'est pas l'onglet actuellement affiché, pour signaler discrètement
+        qu'une console en arrière-plan a reçu un nouveau message."""
+        try:
+            tabbed_content = self.query_one("#logs-tabs", TabbedContent)
+        except Exception:
+            return
+        if tabbed_content.active == tab_id:
+            return
+        try:
+            tab = tabbed_content.get_tab(tab_id)
+        except Exception:
+            return
+        base_label = self._LOG_TAB_LABELS.get(tab_id, str(tab.label))
+        tab.label = f"{base_label} ●"
+
+    def _clear_log_tab_indicator(self, tab_id: str) -> None:
+        try:
+            tabbed_content = self.query_one("#logs-tabs", TabbedContent)
+            tab = tabbed_content.get_tab(tab_id)
+        except Exception:
+            return
+        tab.label = self._LOG_TAB_LABELS.get(tab_id, str(tab.label))
+
+    @on(TabbedContent.TabActivated, "#logs-tabs")
+    def handle_log_tab_activated(self, event: TabbedContent.TabActivated) -> None:
+        self._clear_log_tab_indicator(event.pane.id or "")
 
     def _log(self, message: str) -> None:
         self.query_one("#actions-log", ConsoleLog).write(message)
+        self._mark_log_tab_active("actions-log-tab")
 
     def _tool_log(self, message: str) -> None:
         self.query_one("#tools-log", ConsoleLog).write(message)
+        self._mark_log_tab_active("tools-log-tab")
 
     @on(Button.Pressed, "#action-download-mods")
     def handle_download_mods(self) -> None:
@@ -1552,6 +1588,7 @@ class ActionsScreen(Screen):
             self.query_one("#web-console-log", ConsoleLog).write(message)
         except Exception:
             pass
+        self._mark_log_tab_active("web-console-log-tab")
 
     @on(Button.Pressed, "#planet-button")
     def handle_planet_button(self) -> None:
