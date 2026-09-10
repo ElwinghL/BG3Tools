@@ -12,13 +12,16 @@ import time
 import zipfile
 from pathlib import Path
 
+from bg3_mod_tui.inventory import ArchiveEntry
 from bg3_mod_tui.mod_pipeline import (
     _unique_destination,
+    check_nexus_updates,
     cleanup_duplicate_archives,
     download_subscribed_modio_mods,
     extract_archives_to_mods,
 )
 from bg3_mod_tui.providers.modio import ModIOMod
+from bg3_mod_tui.providers.nexus import NexusAPIError, NexusMod
 
 
 def _make_zip(path: Path, *entries: tuple[str, bytes]) -> None:
@@ -288,6 +291,100 @@ def test_extract_archives_to_mods_zip_imbrique_sans_callback_garde_tout_par_defa
 
     assert report["installed"] == ["Conteneur.zip"]
     assert (dirs["mods_dir"] / "Interne.pak").read_bytes() == b"contenu interne"
+
+
+def _archive_entry(**overrides) -> ArchiveEntry:
+    base = dict(
+        file="MonMod-42-1-0-1700000000.zip",
+        status="disponible",
+        size_bytes=100,
+        modified="2024-01-01T00:00:00+00:00",
+        nexus_mod_id=42,
+        nexus_url="https://www.nexusmods.com/baldursgate3/mods/42",
+        version="1.0",
+        mod_name_guess="MonMod",
+    )
+    base.update(overrides)
+    return ArchiveEntry(**base)
+
+
+class _FakeNexusClient:
+    def __init__(self, mods_by_id: dict[int, NexusMod], *, fail_ids: set[int] | None = None) -> None:
+        self._mods_by_id = mods_by_id
+        self._fail_ids = fail_ids or set()
+
+    def mod_info(self, mod_id: int) -> NexusMod:
+        if mod_id in self._fail_ids:
+            raise NexusAPIError(f"Mod Nexus {mod_id} introuvable (404).")
+        return self._mods_by_id[mod_id]
+
+
+def test_check_nexus_updates_detecte_une_version_plus_recente():
+    archive = _archive_entry()
+    client = _FakeNexusClient({42: NexusMod(mod_id=42, name="MonMod", version="1.1", summary="")})
+
+    report = check_nexus_updates(client, [archive])
+
+    assert report["up_to_date"] == []
+    assert report["failed"] == []
+    assert len(report["outdated"]) == 1
+    entry = report["outdated"][0]
+    assert entry["nexus_mod_id"] == 42
+    assert entry["local_version"] == "1.0"
+    assert entry["remote_version"] == "1.1"
+
+
+def test_check_nexus_updates_deja_a_jour():
+    archive = _archive_entry(version="1.1")
+    client = _FakeNexusClient({42: NexusMod(mod_id=42, name="MonMod", version="1.1", summary="")})
+
+    report = check_nexus_updates(client, [archive])
+
+    assert report["outdated"] == []
+    assert report["up_to_date"] == [42]
+
+
+def test_check_nexus_updates_ignore_les_archives_sans_id_nexus():
+    archive = _archive_entry(nexus_mod_id=None, version=None)
+    client = _FakeNexusClient({})
+
+    report = check_nexus_updates(client, [archive])
+
+    assert report == {"outdated": [], "up_to_date": [], "failed": []}
+
+
+def test_check_nexus_updates_compare_a_la_meilleure_copie_locale():
+    # Deux exemplaires locaux du même mod (ex: un vieux dans _installees,
+    # un plus récent dans disponible/) : on compare à la meilleure version
+    # locale, pas à la première rencontrée, et un seul appel API est fait.
+    old_copy = _archive_entry(file="MonMod-42-1-0-1700000000.zip", version="1.0", status="installee")
+    new_copy = _archive_entry(file="MonMod-42-1-2-1700000001.zip", version="1.2", status="disponible")
+    calls = []
+
+    class _CountingClient(_FakeNexusClient):
+        def mod_info(self, mod_id: int) -> NexusMod:
+            calls.append(mod_id)
+            return super().mod_info(mod_id)
+
+    client = _CountingClient({42: NexusMod(mod_id=42, name="MonMod", version="1.2", summary="")})
+
+    report = check_nexus_updates(client, [old_copy, new_copy])
+
+    assert calls == [42]
+    assert report["outdated"] == []
+    assert report["up_to_date"] == [42]
+
+
+def test_check_nexus_updates_erreur_api_est_reportee_en_echec():
+    archive = _archive_entry()
+    client = _FakeNexusClient({}, fail_ids={42})
+
+    report = check_nexus_updates(client, [archive])
+
+    assert report["outdated"] == []
+    assert report["up_to_date"] == []
+    assert len(report["failed"]) == 1
+    assert report["failed"][0][0] == 42
 
 
 class _FakeModIOClient:

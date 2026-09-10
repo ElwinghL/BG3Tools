@@ -15,7 +15,7 @@ from pathlib import Path
 from bg3_mod_tui.archives import ArchiveError, extract_archive, is_supported_archive
 from bg3_mod_tui.downloader import download_file, resolve_remote_filename
 from bg3_mod_tui.game_deploy import deploy_loose_files
-from bg3_mod_tui.inventory import known_mod_ids, known_modio_ids
+from bg3_mod_tui.inventory import ArchiveEntry, known_mod_ids, known_modio_ids
 from bg3_mod_tui.native_mods import (
     NativeModsManifestError,
     deploy_native_mod_archive,
@@ -36,6 +36,7 @@ from bg3_mod_tui.providers.nexus import (
     parse_mod_links_file,
     remove_mod_links,
 )
+from bg3_mod_tui.versioning import is_newer, parse_version
 
 LogFn = Callable[[str], None]
 # Reçoit (mod_id, nom du mod, [(file_id, file_name), ...] variantes encore
@@ -179,6 +180,83 @@ def download_mods_from_links_file(
         remove_mod_links(links_file, done_ids)
         log(f"{len(done_ids)} lien(s) retiré(s) de {links_file.name}.")
 
+    return report
+
+
+def check_nexus_updates(
+    client: NexusClient,
+    archives: list[ArchiveEntry],
+    *,
+    log: LogFn = lambda _msg: None,
+) -> dict[str, list]:
+    """Sous-tâche 3 du TODO ("Process de vérification de version entre
+    archives locales et Nexus") : pour chaque mod Nexus connu localement
+    (`archives`, voir `inventory.scan_all_archives` — `ArchiveEntry.version`
+    est extrait du NOM du fichier téléchargé, pas du contenu), interroge
+    `NexusClient.mod_info` pour connaître la version actuellement publiée
+    et la compare à la version locale via `versioning.is_newer` — objectif :
+    repérer les mods obsolètes localement (ex: téléchargés il y a longtemps,
+    jamais mis à jour depuis) sans dépendre d'un ordre alphabétique naïf.
+
+    Un même `nexus_mod_id` peut apparaître dans plusieurs `ArchiveEntry`
+    (une copie dans `disponible/`, une autre déjà `installee`...) : on ne
+    fait qu'un seul appel API par ID, en comparant à la MEILLEURE version
+    locale connue parmi ces exemplaires (`max` par `versioning.parse_version`)
+    — sinon un vieux doublon oublié ferait remonter un faux "obsolète" alors
+    qu'une copie plus récente existe déjà en local.
+
+    Ne vérifie que les archives avec un `nexus_mod_id` reconnu (voir
+    `inventory.parse_archive_metadata` — une archive dont le nom ne suit
+    aucune des conventions de téléchargement connues n'a pas d'ID et ne peut
+    pas être vérifiée par cette fonction).
+
+    Retourne {"outdated": [{"archive", "nexus_mod_id", "nexus_url",
+    "mod_name_guess", "local_version", "remote_version"}, ...],
+    "up_to_date": [nexus_mod_id, ...], "failed": [(nexus_mod_id, err), ...]}."""
+    by_mod_id: dict[int, list[ArchiveEntry]] = {}
+    for archive in archives:
+        if archive.nexus_mod_id is not None:
+            by_mod_id.setdefault(archive.nexus_mod_id, []).append(archive)
+
+    report: dict[str, list] = {"outdated": [], "up_to_date": [], "failed": []}
+    log(f"{len(by_mod_id)} mod(s) Nexus connu(s) localement à vérifier...")
+
+    for mod_id, entries in by_mod_id.items():
+        best_local = max(entries, key=lambda a: parse_version(a.version))
+        label = best_local.mod_name_guess or best_local.file
+        try:
+            info = client.mod_info(mod_id)
+        except NexusAPIError as exc:
+            log(fmt_row(label, STATUS_ECHEC, detail=str(exc)))
+            report["failed"].append((mod_id, str(exc)))
+            continue
+
+        if is_newer(info.version, best_local.version):
+            log(
+                fmt_row(
+                    label,
+                    STATUS_EXAMEN,
+                    version=info.version,
+                    detail=f"local : {best_local.version or '?'}",
+                )
+            )
+            report["outdated"].append(
+                {
+                    "archive": best_local.file,
+                    "nexus_mod_id": mod_id,
+                    "nexus_url": best_local.nexus_url,
+                    "mod_name_guess": best_local.mod_name_guess,
+                    "local_version": best_local.version,
+                    "remote_version": info.version,
+                }
+            )
+        else:
+            report["up_to_date"].append(mod_id)
+
+    log(
+        f"{len(report['outdated'])} mod(s) obsolète(s) sur {len(by_mod_id)} "
+        f"vérifié(s), {len(report['failed'])} échec(s)."
+    )
     return report
 
 
