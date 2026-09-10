@@ -14,11 +14,19 @@ nécessite une app Textual en cours d'exécution (event loop, DOM monté) —
 pas raisonnablement extractible en fonction pure, donc pas testé ici. Un
 test de bout en bout (lancer deux actions, vérifier qu'un second onglet
 apparaît) relèverait plutôt d'un test Pilot Textual, hors du scope de
-cette sous-tâche."""
+cette sous-tâche.
+
+Ce fichier teste aussi `_run_task_sequence` (TODO "Fusion bouton MAJ
+outils + Compat Framework + ModFixerFork", sous-tâche 9a) : la fonction
+d'enchaînement/arrêt-au-premier-échec utilisée par le bouton unifié "Tout
+mettre à jour", elle aussi factorisée en fonction module-level pure pour
+rester testable sans app Textual — les 3 étapes qu'elle enchaîne en
+pratique (`_download_tools_task` et consorts) restent, elles, couplées à
+`ActionsScreen._config` et à Divine.exe/le réseau, donc non testées ici."""
 
 from __future__ import annotations
 
-from bg3_mod_tui.screens.actions import _resource_conflict
+from bg3_mod_tui.screens.actions import _resource_conflict, _run_task_sequence
 
 
 def test_no_conflict_when_no_active_task() -> None:
@@ -57,3 +65,53 @@ def test_conflict_reports_every_shared_tag() -> None:
     active = [frozenset({"mods-dir"}), frozenset({"native-mods"})]
     conflict = _resource_conflict(active, frozenset({"mods-dir", "native-mods", "tools-dir"}))
     assert conflict == frozenset({"mods-dir", "native-mods"})
+
+
+def test_run_task_sequence_runs_all_steps_in_order_on_success() -> None:
+    calls: list[str] = []
+
+    def make_step(name: str):
+        def step(log) -> bool:
+            calls.append(name)
+            return True
+        return step
+
+    steps = [("un", make_step("un")), ("deux", make_step("deux")), ("trois", make_step("trois"))]
+    logs: list[str] = []
+    assert _run_task_sequence(steps, logs.append) is True
+    assert calls == ["un", "deux", "trois"]
+    # Progression [i/3] journalisée avant chaque étape.
+    assert any("[1/3]" in line and "un" in line for line in logs)
+    assert any("[2/3]" in line and "deux" in line for line in logs)
+    assert any("[3/3]" in line and "trois" in line for line in logs)
+
+
+def test_run_task_sequence_stops_at_first_failure() -> None:
+    """Étape 2 échoue : l'étape 3 ne doit PAS être tentée (arrêt à la
+    première erreur — voir docstring de `_run_task_sequence`, les étapes du
+    bouton "Tout mettre à jour" ont des dépendances explicites entre
+    elles)."""
+    calls: list[str] = []
+
+    def ok(log) -> bool:
+        calls.append("ok")
+        return True
+
+    def fail(log) -> bool:
+        calls.append("fail")
+        return False
+
+    def should_not_run(log) -> bool:
+        calls.append("should_not_run")
+        return True
+
+    steps = [("un", ok), ("deux", fail), ("trois", should_not_run)]
+    logs: list[str] = []
+    assert _run_task_sequence(steps, logs.append) is False
+    assert calls == ["ok", "fail"]
+    assert any("échoué" in line for line in logs)
+
+
+def test_run_task_sequence_empty_steps_succeeds_trivially() -> None:
+    logs: list[str] = []
+    assert _run_task_sequence([], logs.append) is True
