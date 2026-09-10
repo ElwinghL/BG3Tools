@@ -65,6 +65,14 @@
 - **16b.** Étendre au contenu réel des .pak (réutiliser `pak_reader.py`) une fois 16a en place
 - **16c.** Sortie dans des structures JSON adaptées (une structure par type d'entité)
 
+### 18. Audit de compatibilité et de syntaxe des mods (BG3 Compatibility Framework)
+
+- Objectif : outil parcourant nos mods pour vérifier que chaque mod enregistre correctement ses classes/sous-classes/sorts/passifs pour l'injection dynamique par le Compatibility Framework — à faire marcher avec `data-extractor` (section 16, notamment 16a qui parcourt déjà la doc des mods)
+- **18a.** Fichiers de config et dépendances : dépendance au Script Extender et/ou au Compatibility Framework déclarée (`meta.lsx` ou config JSON) ; présence de `CompatibilityFrameworkConfig.json` (ou appel API Lua dans `ScriptExtender/Lua/BootstrapServer.lua`) ; JSON valide (linter/validateur)
+- **18b.** Syntaxe des GUIDs : tous les identifiants (`ClassGuid`, `SubClassGuid`, `SpellListGuid`, `PassiveGuid`, etc.) au format UUID v4 valide ; pas de GUID factice/exemple (`00000000-0000-0000-0000-000000000000`) ; pour les sous-classes, `ParentGuid` correspond bien au `ClassGuid` de la classe parente (vanilla ou custom)
+- **18c.** Déclarations d'injection : nommage exact des mots-clés d'action (`AddSubclass`, `InsertSpell`, `InsertPassive`, `AddSelector`, etc.) ; `Target` pointe vers la bonne table/liste de sorts existante (vanilla ou lib communautaire) ; cas particuliers — `Level` renseigné quand nécessaire pour sorts/passifs, `Remove`/action dédiée correcte pour suppressions/remplacements
+- **18d.** Test et validation en jeu : logs Script Extender sans erreur/avertissement du Compatibility Framework au chargement (ex. `[CF] Error: Invalid UUID`, `[CF] Failed to insert...`) ; validation visuelle en jeu (création de perso / montée de niveau) que l'élément apparaît sans écraser les autres mods actifs — ce point reste manuel (nécessite le jeu lancé), 18a-18c peuvent être automatisés statiquement
+
 ### 17. Optimisation du build Rust (`rust/pak_reader_rs`) — profil release
 
 - **17a.** Auditer un profil `[profile.release]` optimisé pour `rust/pak_reader_rs` et comparer les performances AVANT/APRÈS sur `scripts/compare_pak_reader.py` — le AVANT est déjà connu : `maturin develop` (sans `--release`) produit un build **debug**, identifié comme cause du ralentissement mesuré sur l'extraction/décompression de contenu par rapport à Python et Divine.exe (voir `Tools/bg3rustpaklib/README.md#comparisons`, "build debug, pas une comparaison équitable")
