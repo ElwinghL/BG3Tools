@@ -1,5 +1,10 @@
-"""Lecture de l'UUID/Name réels embarqués dans le `meta.lsx` d'un .pak, via
-Divine.exe (LSLib, voir `compat_framework.py` et Tools/ExportTools/).
+"""Lecture de l'UUID/Name réels embarqués dans le `meta.lsx`/`meta.lsf` d'un
+.pak — d'abord via le lecteur natif `pak_reader` (mmap + parsing Python pur
+du format LSPK, sans sous-processus), avec repli automatique sur
+Divine.exe (LSLib, voir `compat_framework.py` et Tools/ExportTools/) quand
+la lecture native échoue (version LSPK/LSF non gérée par `pak_reader`,
+fichier corrompu...) — voir `_read_pak_identity_native` et son usage dans
+`read_pak_identity`.
 
 Sert à identifier un mod de façon fiable — l'UUID de son `ModuleInfo` est
 l'identifiant que le jeu lui-même utilise, indépendant du nom de fichier du
@@ -21,6 +26,12 @@ from xml.etree import ElementTree
 from bg3_mod_tui.archives import ArchiveError, extract_archive
 from bg3_mod_tui.compat_framework import find_divine_exe
 from bg3_mod_tui.launcher import resolve_wine_bin
+from bg3_mod_tui.pak_reader import (
+    PakReaderError,
+    extract_uuid_from_lsf_bytes,
+    parse_meta_lsx_bytes,
+    read_meta_lsx_or_lsf_bytes,
+)
 from bg3_mod_tui.platform_utils import find_proton_prefix, is_windows, to_wine_path
 
 LogFn = Callable[[str], None]
@@ -98,6 +109,37 @@ def parse_meta_lsx(meta_path: Path) -> tuple[str, str] | None:
     return (uuid, name or "") if uuid else None
 
 
+def _read_pak_identity_native(pak_path: Path) -> tuple[str, str] | None:
+    """Tente de lire `(UUID, Name)` directement depuis `pak_path` via
+    `pak_reader` (mmap + parsing Python pur), sans sous-processus. Essaie
+    `meta.lsx` (XML, UUID+Name fiables) puis, à défaut, `meta.lsf`
+    (binaire, UUID seulement — voir la limite documentée sur
+    `pak_reader.extract_uuid_from_lsf_bytes` : approche par regex, `Name`
+    reste vide dans ce cas).
+
+    Retourne None si le .pak est lisible nativement mais ne contient
+    simplement aucun `meta.lsx`/`meta.lsf` exploitable (pas une erreur —
+    équivalent au retour None historique de la voie Divine.exe). Laisse
+    remonter `pak_reader.PakReaderError` (version LSPK/LSF non gérée,
+    fichier corrompu...) : c'est le signal pour l'appelant de replier sur
+    Divine.exe, pas un cas à absorber ici."""
+    found = read_meta_lsx_or_lsf_bytes(pak_path)
+    if found is None:
+        return None
+    kind, content = found
+    if kind == "lsx":
+        identity = parse_meta_lsx_bytes(content)
+        if identity is None:
+            return None
+        uuid, name, _folder = identity
+        return uuid, name
+    # kind == "lsf" : seul l'UUID est extractible de façon fiable par
+    # l'approche regex (voir pak_reader.extract_uuid_from_lsf_bytes) — pas
+    # de Name, à la différence de la voie meta.lsx/Divine.exe.
+    uuid = extract_uuid_from_lsf_bytes(content)
+    return (uuid, "") if uuid else None
+
+
 def read_pak_identity(
     pak_path: Path,
     *,
@@ -105,12 +147,24 @@ def read_pak_identity(
     reference_path: Path,
     work_dir: Path,
 ) -> tuple[str, str] | None:
-    """Retourne `(UUID, Name)` du mod contenu dans `pak_path`, en extrayant
-    uniquement son `meta.lsx` (pas le reste du .pak — assets potentiellement
-    énormes) via Divine.exe. `work_dir` doit exister et être vide/dédié
-    (nettoyé par l'appelant) ; None si le .pak n'a pas de `meta.lsx`
-    exploitable (rare : mod purement "loose files" empaqueté à part, ou
-    .pak corrompu). Lève `PakMetadataError` si Divine.exe échoue."""
+    """Retourne `(UUID, Name)` du mod contenu dans `pak_path`.
+
+    Essaie d'abord la lecture native (`pak_reader`, rapide, sans
+    sous-processus) — voir `_read_pak_identity_native`. Si celle-ci lève
+    `PakReaderError` (version LSPK/LSF non gérée par `pak_reader`, .pak
+    corrompu, structure inattendue...), replie silencieusement sur
+    Divine.exe (comportement historique, inchangé) : `work_dir` doit
+    exister et être vide/dédié (nettoyé par l'appelant) dans ce cas.
+
+    None si le .pak n'a pas de `meta.lsx`/`meta.lsf` exploitable (rare :
+    mod purement "loose files" empaqueté à part) — que ce None vienne de
+    la voie native ou du repli Divine.exe. Lève `PakMetadataError`
+    uniquement si le repli Divine.exe lui-même échoue."""
+    try:
+        return _read_pak_identity_native(pak_path)
+    except PakReaderError:
+        pass  # lecture native indisponible pour ce .pak -> repli Divine.exe
+
     use_wine_path = not is_windows()
     _run_divine(
         divine_exe,
