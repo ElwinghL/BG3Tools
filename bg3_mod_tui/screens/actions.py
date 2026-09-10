@@ -50,6 +50,7 @@ from bg3_mod_tui.profiles import (
     ensure_default_profile,
     list_profiles,
     load_blacklisted_files,
+    profile_data_dir,
     restore_profile,
     save_blacklisted_files,
     save_profile,
@@ -786,7 +787,8 @@ class ActionsScreen(Screen):
                             "Liste les archives de _installees qu'aucun .pak/DLL "
                             "actuellement déployé ne référence (mod probablement "
                             "désinstallé depuis) — rapport dans "
-                            "archives_orphelines.md, rien n'est supprimé "
+                            "archives_orphelines.md sous le profil actif "
+                            "(BG3_Managed/Profiles/...), rien n'est supprimé "
                             "automatiquement."
                         ),
                     )
@@ -1262,7 +1264,9 @@ class ActionsScreen(Screen):
             ]
             lines += _table(unverifiable)
 
-        report_path = self._config.project_root / "archives_orphelines.md"
+        report_dir = profile_data_dir(self._config.profiles_dir, self._config.active_profile)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "archives_orphelines.md"
         report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         log(
             f"{len(orphans)} archive(s) orpheline(s)"

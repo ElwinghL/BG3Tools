@@ -80,12 +80,13 @@ def slugify_profile_name(name: str) -> str:
     return slug
 
 
-def _profile_choices_dir(profiles_dir: Path, profile_name: str) -> Path:
-    """Dossier où stocker les données liées au profil `profile_name` mais
-    qui ne font pas partie du manifeste (voir `load_blacklisted_files`) —
-    utilise le même slug que `save_profile`, ou un slug dédié quand aucun
-    profil n'est actif (`profile_name` vide), pour que ce cas ait lui aussi
-    sa propre blacklist plutôt que de retomber sur celle d'un profil précis."""
+def profile_data_dir(profiles_dir: Path, profile_name: str) -> Path:
+    """Dossier où stocker des données liées au profil `profile_name` mais
+    qui ne font pas partie du manifeste (voir `load_blacklisted_files`, ou
+    le rapport d'archives orphelines dans `screens/actions.py`) — utilise
+    le même slug que `save_profile`, ou un slug dédié quand aucun profil
+    n'est actif (`profile_name` vide), pour que ce cas ait lui aussi ses
+    propres données plutôt que de retomber sur celles d'un profil précis."""
     slug = slugify_profile_name(profile_name) if profile_name else _NO_PROFILE_SLUG
     return profiles_dir / slug
 
@@ -99,7 +100,7 @@ def load_blacklisted_files(profiles_dir: Path, profile_name: str) -> dict[int, d
     resélection) sans requête réseau supplémentaire. Liée au profil : deux
     profils peuvent avoir fait des choix différents pour un même mod
     multi-fichiers."""
-    path = _profile_choices_dir(profiles_dir, profile_name) / FILE_CHOICES_FILENAME
+    path = profile_data_dir(profiles_dir, profile_name) / FILE_CHOICES_FILENAME
     if not path.is_file():
         return {}
     try:
@@ -115,7 +116,7 @@ def load_blacklisted_files(profiles_dir: Path, profile_name: str) -> dict[int, d
 def save_blacklisted_files(
     profiles_dir: Path, profile_name: str, blacklist: dict[int, dict[int, str]]
 ) -> None:
-    dest_dir = _profile_choices_dir(profiles_dir, profile_name)
+    dest_dir = profile_data_dir(profiles_dir, profile_name)
     dest_dir.mkdir(parents=True, exist_ok=True)
     serializable = {
         str(mod_id): {str(file_id): file_name for file_id, file_name in files.items()}
