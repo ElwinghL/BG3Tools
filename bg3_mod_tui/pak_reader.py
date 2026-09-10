@@ -144,6 +144,15 @@ def _decompress_lz4_block(data: bytes, uncompressed_size: int) -> bytes:
 
 
 def _decompress_entry(data: bytes, method: int, uncompressed_size: int) -> bytes:
+    # Entrée vide (fichier de taille 0 stocké dans le .pak, ex: un stub
+    # "_Init.lua") : `data` et `uncompressed_size` sont alors tous les deux
+    # à 0, quelle que soit la méthode de compression déclarée — rien à
+    # décompresser. Court-circuit nécessaire ici : le paquet `lz4` lève une
+    # LZ4BlockError sur `decompress(b"", uncompressed_size=0)` au lieu de
+    # renvoyer `b""` (repli LZ4 vérifié empiriquement contre bg3rustpaklib,
+    # qui applique le même court-circuit côté Rust).
+    if not data:
+        return b""
     method &= _COMPRESSION_METHOD_MASK
     if method == _COMPRESSION_NONE:
         return data
