@@ -152,9 +152,13 @@ def read_pak_identity(
     Essaie d'abord la lecture native (`pak_reader`, rapide, sans
     sous-processus) — voir `_read_pak_identity_native`. Si celle-ci lève
     `PakReaderError` (version LSPK/LSF non gérée par `pak_reader`, .pak
-    corrompu, structure inattendue...), replie silencieusement sur
-    Divine.exe (comportement historique, inchangé) : `work_dir` doit
-    exister et être vide/dédié (nettoyé par l'appelant) dans ce cas.
+    corrompu, structure inattendue...) *ou toute autre exception* (filet
+    de sécurité : le format n'a pas pu être validé contre un vrai .pak
+    BG3 dans l'environnement de développement de ce module, une hypothèse
+    de format erronée pourrait donc lever autre chose qu'un
+    `PakReaderError` propre), replie silencieusement sur Divine.exe
+    (comportement historique, inchangé) : `work_dir` doit exister et être
+    vide/dédié (nettoyé par l'appelant) dans ce cas.
 
     None si le .pak n'a pas de `meta.lsx`/`meta.lsf` exploitable (rare :
     mod purement "loose files" empaqueté à part) — que ce None vienne de
@@ -163,7 +167,19 @@ def read_pak_identity(
     try:
         return _read_pak_identity_native(pak_path)
     except PakReaderError:
-        pass  # lecture native indisponible pour ce .pak -> repli Divine.exe
+        pass  # cas prévu (version LSPK/LSF non gérée, .pak corrompu) -> repli Divine.exe
+    except Exception:  # noqa: BLE001 - filet de sécurité volontairement large
+        # `pak_reader` n'a jamais été validé contre un vrai .pak BG3 dans cet
+        # environnement de développement (voir sa docstring) : une hypothèse de
+        # format erronée pourrait lever un type d'exception non anticipé
+        # (struct.error, IndexError, UnicodeDecodeError...) plutôt qu'un
+        # PakReaderError propre. Mieux vaut replier silencieusement sur
+        # Divine.exe dans ce cas que de faire planter tout l'appelant (scan
+        # d'inventaire, résolution d'origine) pour un seul .pak récalcitrant —
+        # cette tolérance disparaîtra si/quand le format est un jour validé
+        # contre des .pak réels et que chaque cas d'échec est reclassé en
+        # PakReaderError explicite ci-dessus.
+        pass
 
     use_wine_path = not is_windows()
     _run_divine(
