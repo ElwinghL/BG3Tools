@@ -94,3 +94,4 @@
 - texte doublons supprimés codifié (fmt_row, statuts colorés)
 - matching mods glisser-déposer → Nexus/Mod.io (nom, UUID meta.lsx, fallback lien manuel mémorisé)
 - analyse BG3-pyUpgrade + mod armes existants
+- fork local de Mod Fixer avec meta.lsx propre (remplace ModFixer.pak, backup dans ModFixer.pak.orig, UUID stable entre reconstructions)
