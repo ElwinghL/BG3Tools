@@ -8,15 +8,19 @@ installé/en attente)."""
 from __future__ import annotations
 
 import os
+import threading
 import time
 import zipfile
 from pathlib import Path
 
+import bg3_mod_tui.mod_pipeline as mod_pipeline
 from bg3_mod_tui.inventory import ArchiveEntry
 from bg3_mod_tui.mod_pipeline import (
+    MODIO_MAX_DOWNLOAD_THREADS,
     _unique_destination,
     check_nexus_updates,
     cleanup_duplicate_archives,
+    download_mods_from_links_file,
     download_subscribed_modio_mods,
     extract_archives_to_mods,
 )
@@ -581,5 +585,192 @@ def test_cleanup_duplicate_archives_ignore_les_fichiers_non_archives(tmp_path):
     report = cleanup_duplicate_archives(tmp_path)
 
     assert report["removed"] == []
+
+
+# --- Sous-tâche P1 "Téléchargements parallèles" (5a/5b/5c/5d) ------------
+#
+# Tests de la logique de parallélisation elle-même (agrégation du rapport
+# malgré la concurrence, bornes sur le nombre de threads, sérialisation du
+# wizard Nexus), sans dépendance réseau : `download_file`/
+# `resolve_remote_filename` sont remplacés par des fakes qui simulent un
+# téléchargement lent (un petit `time.sleep`) tout en comptant le nombre de
+# téléchargements réellement actifs en même temps (`_ConcurrencyTracker`) —
+# assez pour observer un vrai parallélisme et vérifier qu'il ne dépasse
+# jamais la borne attendue.
+
+
+class _ConcurrencyTracker:
+    """Compte le nombre d'appels actifs en même temps (protégé par un
+    verrou — appelé depuis plusieurs threads de téléchargement) et retient
+    le pic observé, pour vérifier a posteriori qu'un pool de téléchargement
+    a bien travaillé en parallèle (pic > 1) sans jamais dépasser sa borne
+    (pic <= max_workers attendu)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.current = 0
+        self.peak = 0
+
+    def __enter__(self) -> "_ConcurrencyTracker":
+        with self._lock:
+            self.current += 1
+            self.peak = max(self.peak, self.current)
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        with self._lock:
+            self.current -= 1
+
+
+def test_download_subscribed_modio_mods_parallelise_et_agrege_le_rapport(tmp_path, monkeypatch):
+    # Reproduit la sous-tâche 5a : mod.io n'a pas de wizard bloquant, les
+    # téléchargements doivent donc tourner en parallèle. On vérifie ici
+    # deux choses à la fois : un vrai parallélisme a lieu (pic > 1) ET le
+    # rapport final agrège bien TOUS les mods malgré la concurrence (pas de
+    # perte d'entrée par une éventuelle course sur `report`).
+    dest_dir = tmp_path / "a_traiter"
+    tracker = _ConcurrencyTracker()
+    nb_mods = 12
+
+    mods = [
+        ModIOMod(mod_id=i, name=f"Mod{i}", summary="", download_url=f"https://modio.example/download?{i}")
+        for i in range(nb_mods)
+    ]
+    client = _FakeModIOClient(mods)
+
+    def fake_resolve_remote_filename(url, *, fallback_stem=None):
+        return f"{fallback_stem}.zip"
+
+    def fake_download_file(url, destination_dir, *, fallback_stem=None, on_progress=None):
+        with tracker:
+            time.sleep(0.02)
+            path = Path(destination_dir) / f"{fallback_stem}.zip"
+            path.write_bytes(b"contenu")
+            return path
+
+    monkeypatch.setattr(mod_pipeline, "resolve_remote_filename", fake_resolve_remote_filename)
+    monkeypatch.setattr(mod_pipeline, "download_file", fake_download_file)
+
+    report = download_subscribed_modio_mods(client, dest_dir)
+
+    assert sorted(report["downloaded"]) == sorted(mod.name for mod in mods)
+    assert report["skipped"] == []
+    assert report["failed"] == []
+    assert tracker.peak > 1, "aucun parallélisme observé (pic de concurrence <= 1)"
+    assert tracker.peak <= MODIO_MAX_DOWNLOAD_THREADS
+
+
+class _FakeNexusClientDownloads:
+    """Fake NexusClient complet (mod_info/latest_files/download_link) pour
+    les tests de `download_mods_from_links_file` — `_FakeNexusClient`
+    existant (plus haut dans ce fichier) ne couvre que `mod_info`, utilisé
+    par `check_nexus_updates`."""
+
+    def __init__(self, mods: dict[int, NexusMod], files: dict[int, list[tuple[int, str]]]) -> None:
+        self._mods = mods
+        self._files = files
+
+    def mod_info(self, mod_id: int) -> NexusMod:
+        return self._mods[mod_id]
+
+    def latest_files(self, mod_id: int) -> list[tuple[int, str]]:
+        return self._files.get(mod_id, [])
+
+    def download_link(self, mod_id: int, file_id: int) -> str:
+        return f"https://nexus.example/{mod_id}/{file_id}"
+
+
+def _write_links_file(path: Path, mod_ids: list[int]) -> None:
+    lines = [f"https://www.nexusmods.com/baldursgate3/mods/{mod_id}" for mod_id in mod_ids]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_download_mods_from_links_file_parallelise_sans_depasser_6_threads(tmp_path, monkeypatch):
+    # Sous-tâche 5b : jusqu'à 6 téléchargements Nexus en parallèle, jamais
+    # plus, tout en agrégeant correctement le rapport final pour tous les
+    # mods malgré la concurrence.
+    links_file = tmp_path / "nexus_links_to_add.md"
+    dest_dir = tmp_path / "a_traiter"
+    mod_ids = list(range(1, 16))  # plus de mods que de threads disponibles
+    _write_links_file(links_file, mod_ids)
+
+    mods = {
+        mod_id: NexusMod(mod_id=mod_id, name=f"Mod{mod_id}", version="1.0", summary="")
+        for mod_id in mod_ids
+    }
+    files = {mod_id: [(mod_id * 100, f"Mod{mod_id}.zip")] for mod_id in mod_ids}
+    client = _FakeNexusClientDownloads(mods, files)
+
+    tracker = _ConcurrencyTracker()
+
+    def fake_download_file(url, destination_dir, *, fallback_stem=None, on_progress=None):
+        with tracker:
+            time.sleep(0.02)
+            path = Path(destination_dir) / f"{url.rsplit('/', 1)[-1]}.zip"
+            path.write_bytes(b"contenu")
+            return path
+
+    monkeypatch.setattr(mod_pipeline, "download_file", fake_download_file)
+
+    report = download_mods_from_links_file(client, links_file, dest_dir)
+
+    assert sorted(report["downloaded"]) == mod_ids
+    assert report["skipped"] == []
+    assert report["failed"] == []
+    assert tracker.peak > 1, "aucun parallélisme observé (pic de concurrence <= 1)"
+    assert tracker.peak <= 6
+
+
+def test_download_mods_from_links_file_select_files_reste_sequentiel(tmp_path, monkeypatch):
+    # Sous-tâche 5b : même avec plusieurs mods à variantes multiples en
+    # attente en même temps, select_files (le wizard modal) ne doit jamais
+    # être appelé deux fois en même temps depuis deux threads différents.
+    # On le vérifie avec un verrou non réentrant qu'un second appel
+    # concurrent échouerait à acquérir immédiatement (`acquire(blocking=False)`).
+    links_file = tmp_path / "nexus_links_to_add.md"
+    dest_dir = tmp_path / "a_traiter"
+    mod_ids = [1, 2, 3, 4, 5]
+    _write_links_file(links_file, mod_ids)
+
+    mods = {
+        mod_id: NexusMod(mod_id=mod_id, name=f"Mod{mod_id}", version="1.0", summary="")
+        for mod_id in mod_ids
+    }
+    # Chaque mod a 2 variantes candidates : select_files sera appelé pour
+    # chacun.
+    files = {
+        mod_id: [(mod_id * 100, f"Mod{mod_id}-A.zip"), (mod_id * 100 + 1, f"Mod{mod_id}-B.zip")]
+        for mod_id in mod_ids
+    }
+    client = _FakeNexusClientDownloads(mods, files)
+
+    select_lock = threading.Lock()
+    select_calls: list[int] = []
+
+    def fake_select_files(mod_id, mod_name, candidates):
+        acquired = select_lock.acquire(blocking=False)
+        assert acquired, "select_files appelé en concurrence par deux threads"
+        try:
+            select_calls.append(mod_id)
+            # Garde le verrou un court instant pour laisser une chance à un
+            # appel concurrent (s'il y en avait un) de se manifester.
+            time.sleep(0.01)
+            return [candidates[0][0]]
+        finally:
+            select_lock.release()
+
+    def fake_download_file(url, destination_dir, *, fallback_stem=None, on_progress=None):
+        time.sleep(0.02)
+        path = Path(destination_dir) / f"{url.rsplit('/', 1)[-1]}.zip"
+        path.write_bytes(b"contenu")
+        return path
+
+    monkeypatch.setattr(mod_pipeline, "download_file", fake_download_file)
+
+    report = download_mods_from_links_file(client, links_file, dest_dir, select_files=fake_select_files)
+
+    assert sorted(select_calls) == mod_ids
+    assert sorted(report["downloaded"]) == mod_ids
+    assert report["failed"] == []
     assert (tmp_path / "notes.txt").is_file()
     assert (tmp_path / "notes (1).txt").is_file()

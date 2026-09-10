@@ -89,6 +89,7 @@ from bg3_mod_tui.providers.modio import ModIOAPIError, ModIOClient
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusClient
 from bg3_mod_tui.tools_manager import ToolsError, download_and_extract_tool, find_executables, parse_tools_table
 from bg3_mod_tui.widgets.console_log import ConsoleLog
+from bg3_mod_tui.widgets.download_console import DownloadProgressConsole
 
 
 TOOL_ICON = "🛠"
@@ -813,6 +814,10 @@ class ActionsScreen(Screen):
         border: round $accent;
         height: 1fr;
     }
+    #downloads-progress {
+        border: round $accent;
+        height: 1fr;
+    }
     """
 
     BINDINGS = [("q", "quit_app", "Quitter")]
@@ -1030,6 +1035,8 @@ class ActionsScreen(Screen):
             with TabbedContent(id="logs-tabs"):
                 with TabPane("Tâches", id="actions-log-tab"):
                     yield ConsoleLog(id="actions-log", wrap=True, highlight=True, markup=True)
+                with TabPane("Téléchargements", id="downloads-log-tab"):
+                    yield DownloadProgressConsole(id="downloads-progress")
                 with TabPane("Outils", id="tools-log-tab"):
                     yield ConsoleLog(id="tools-log", wrap=True, highlight=True, markup=True)
                 with TabPane("Web", id="web-console-log-tab"):
@@ -1040,6 +1047,7 @@ class ActionsScreen(Screen):
     # texte avec l'indicateur "●" quand un onglet inactif reçoit un message).
     _LOG_TAB_LABELS = {
         "actions-log-tab": "Tâches",
+        "downloads-log-tab": "Téléchargements",
         "tools-log-tab": "Outils",
         "web-console-log-tab": "Web",
     }
@@ -1104,6 +1112,24 @@ class ActionsScreen(Screen):
         done.wait()
         return result
 
+    def _on_download_progress(
+        self, slot_id: str, label: str, downloaded: int | None, total: int | None
+    ) -> None:
+        """Callback `on_download_progress` (voir `mod_pipeline.DownloadProgressFn`)
+        passé à `download_mods_from_links_file`/`download_subscribed_modio_mods` :
+        appelé DIRECTEMENT depuis un thread de téléchargement du pool (Nexus
+        ou mod.io, potentiellement plusieurs à la fois) — bascule sur le
+        thread UI avant de toucher au widget, comme le reste des callbacks
+        de progression de cet écran (ex: `_log`)."""
+        self.app.call_from_thread(
+            self.query_one("#downloads-progress", DownloadProgressConsole).update_progress,
+            slot_id,
+            label,
+            downloaded,
+            total,
+        )
+        self.app.call_from_thread(self._mark_log_tab_active, "downloads-log-tab")
+
     def _select_nested_archives(self, archive_name: str, candidates: list[Path]) -> list[Path]:
         """Appelé depuis le thread d'extraction (voir `run_extract`) :
         bascule sur le thread principal pour afficher
@@ -1148,6 +1174,10 @@ class ActionsScreen(Screen):
     def run_download_mods(self) -> None:
         def log(msg): return self.app.call_from_thread(self._log, msg)
 
+        self.app.call_from_thread(
+            self.query_one("#downloads-progress", DownloadProgressConsole).clear
+        )
+
         self._cleanup_duplicate_archives(log)
 
         log("=== Téléchargement des mods listés dans nexus_links_to_add.md (Nexus) ===")
@@ -1162,6 +1192,7 @@ class ActionsScreen(Screen):
                 profiles_dir=self._config.profiles_dir,
                 profile_name=self._config.active_profile,
                 select_files=self._select_nexus_files,
+                on_download_progress=self._on_download_progress,
                 log=log,
             )
             log(
@@ -1187,6 +1218,7 @@ class ActionsScreen(Screen):
                 self._config.archives_dir,
                 archives_installed_dir=self._config.archives_installed_dir,
                 archives_pending_dir=self._config.archives_pending_dir,
+                on_download_progress=self._on_download_progress,
                 log=log,
             )
             log(
