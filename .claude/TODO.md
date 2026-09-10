@@ -4,7 +4,6 @@
   - Matching par nom de fichier/mod
   - Matching par hash du .pak
   - Si aucun match automatique, demander à l'utilisateur d'indiquer la source (lien Nexus/Mod.io)
-- Le texte des doublons supprimes doit etre codifier pour etre plus lisible
 - Priorisation Nexus / Mod.io (règle unique) :
   - Si Mod.io propose une version plus récente que celle de Nexus, on privilégie Mod.io, avec (un)subscribe auto si besoin
   - Gérer les erreurs d'écriture lors d'une mise à jour via Mod.io (fréquentes en jeu) ; si l'écriture réussit sans passer par un dl d'archive, on change l'origine du mod vers modio
@@ -14,9 +13,12 @@
   - Nexus : pendant qu'un DL tourne, préparer les wizards suivants (max ~6 threads de DL)
   - Console dédiée avec barres de progression par thread de DL, sous la console principale
 - Outil standalone de vérification/validation des .pak — équivalent léger et rapide de la partie "check des .pak" de divinity.exe (pas la génération de modsettings.lsx ni le lancement du jeu)
+  - Peut etre laisser tomber le DLL et faire un port de ce fonctionnement en python ?
+  - https://github.com/LaughingLeader/lslib https://github.com/Norbyte/lslib comme inspiration
   - L'outil actuel, pour de la lecture uniquement, timeout beqaucoup
 - Rename des merge de branche precedents pour suivre la convention de notation (nom de la branche en message de commit)
 - Par profils, on compte le nombre d'utilisation de chaques boutons, outils... et autres joyeusetes de notre appli, et on ajoute trois boutons de quick action en haut pour les trois actions les plus utilisees par le profil
+- Fusion des boutons Mise a jour des outils + Compil Compat Framework + ModFixerFork
 
 # Chantier annexe — page de build de classes (à faire avant V2/V3/V4)
 
@@ -53,3 +55,4 @@
 - Vue par onglets (Tâches/Outils/Web) pour les consoles, à la place de l'empilement vertical — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/a5baf81)
 - Import de profil : vérification des fichiers manquants + garde-fou de version (avertissement, pas de blocage) — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/26463ad)
 - Mods avec ZIP imbriqués : wizard de sélection pour choisir lesquels garder/extraire — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/e819a64)
+- Le texte des doublons supprimés est désormais codifié (fmt_row, statuts colorés) pour être plus lisible — [merge](https://git.clementleboeuf.ovh/elwinghit/BG3Tools/commit/21dda9a)
