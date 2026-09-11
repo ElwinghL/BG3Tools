@@ -1,5 +1,9 @@
 # BG3Tools — Todo List
 
+## TODO - Categorie human user
+
+Les points de cette categories sont a trier, reformuler et classer par les agents competents. Cette categorie ne doit pas etre supprimee, elle peut rester vide, accompagne de ce petit texte d'explication.
+
 ## P0 — Critique / Fondation
 
 - ~~**BUG** : clic sur "Extraire vers Mods/" (et la plupart des boutons "Tâches" déjà dans le top 3 d'usage) faisait planter tout le TUI sans message d'erreur lisible~~ — fait : cause racine identifiée dans `ActionsScreen._refresh_quick_actions` — `Widget.remove()` est asynchrone chez Textual, donc le remontage d'un bouton "quick action" avec le même id pouvait arriver avant que l'ancien soit réellement retiré du DOM, levant `DuplicateIds` (touchait quasi tous les boutons déjà présents dans le top 3 d'usage, pas seulement "Extraire"). Corrigé (`await bar.query(Button).remove()` avant remontage) et durci en profondeur pour éviter toute récidive silencieuse : les ~20 workers `@work` de l'écran sont passés en `exit_on_error=False`, `on_worker_state_changed` capte désormais toute erreur de worker restante (affichée dans la console de la tâche concernée au lieu de planter tout le TUI), et un nouveau module `bg3_mod_tui/crash_log.py` trace chaque erreur/plantage avec un timestamp dans `crash.log` à la racine du projet
@@ -22,6 +26,7 @@
 - **4a.** Règle : si Mod.io version > Nexus version → privilégier Mod.io — bloqué : aucune correspondance fiable Nexus↔mod.io dans le code (ArchiveEntry ne modélise que Nexus), et aucun endpoint (un)subscribe mod.io vérifié — un mapping par nom serait une heuristique dangereuse pour déclencher une action automatique
 - **4b.** (un)subscribe auto sur Mod.io lors du switch de source — bloqué pour la même raison que 4a ; en attendant, un vrai bug latent a été corrigé : `extract_archives_to_mods` plantait toute la boucle si un seul .pak était verrouillé (jeu en cours) — désormais isolé par fichier, loggé, `report["failed"]`, archive retentée au passage suivant
 - ~~**4c.** Process de vérification de version entre archives locales et Nexus~~ — fait : bouton "Vérifier les mises à jour Nexus...", rapport `nexus_updates.md` (lecture seule, nécessite NEXUS_API_KEY)
+- **4d.** Le téléchargement de mods ignore `nexus_updates.md` : `check_nexus_updates`/le bouton "Vérifier les mises à jour Nexus..." ne fait que produire un rapport (`report["outdated"]` écrit dans le `.md`), mais rien dans le flux de téléchargement (`screens/actions.py`, wizards Nexus) ne relit ce rapport pour proposer/prioriser la mise à jour des mods identifiés comme obsolètes — les deux fonctionnalités sont complètement déconnectées aujourd'hui. À câbler : au minimum, proposer un re-téléchargement en un clic pour chaque entrée de `outdated` depuis l'écran où le rapport est consulté
 
 ### 5. Téléchargements parallèles
 
@@ -143,6 +148,15 @@ sacrifié pour y arriver, tant pis.
 - **11c.** Auto-complétion des commandes disponibles
 
 ## P4 — Futur
+
+### 20. NMCM (Native Mod Configuration Menu) et interface MCM
+
+- **20a.** Ajouter [NMCM](https://github.com/Luiznunes12/bg3-nmcm) (aussi sur [mod.io](https://mod.io/g/baldursgate3/m/native-mod-configuration-menu)) comme dépendance suivie (mod majeur, trois sources identiques disponibles) — même logique que les outils suivis dans `Tools/TOOLS.md`, pour toujours avoir la version la plus avancée plutôt qu'une copie figée
+- **20b.** Spéculatif : portage/patch des mods déjà compatibles MCM pour leur donner une interface NMCM — dépend de 20a, pas de mod concret identifié à ce jour
+
+### 21. Isoler le temps de lecture Rust pur (sans PyO3/Python) dans le comparatif
+
+- **21a.** `scripts/compare_pak_reader.py` mesure aujourd'hui Rust uniquement via le binding PyO3 (`pak_reader_rs`, Python → Rust) — jamais un appel Rust natif direct. Ajouter un chemin de mesure isolé (binaire/exemple Rust autonome, pas de Python dans la boucle) permettrait de départager le coût réel de lecture `.pak` du coût de binding — déjà noté comme "manque connu" dans les README de `bg3rustpaklib`/`bg3pythonpaklib` (section Comparisons), formalisé ici comme tâche de suivi
 
 ### 12. Release standalone
 
