@@ -53,6 +53,7 @@ from bg3_mod_tui.native_mods import (
     deploy_native_mods_from_manifest,
     load_manifest as load_native_mods_manifest,
 )
+from bg3_mod_tui.nexus_variant_selection import infer_ut_eotb_preselection
 from bg3_mod_tui.pak_metadata import archive_pak_identities, build_deployed_uuid_index
 from bg3_mod_tui.pak_validator import validate_paks
 from bg3_mod_tui.pak_origin import (
@@ -284,12 +285,18 @@ class ToolPickerScreen(ModalScreen[Path | None]):
 class NexusFileSelectionScreen(ModalScreen[list[int]]):
     """Demande, pour un mod Nexus proposant plusieurs fichiers (parfois de
     simples variantes alternatives dont une seule doit être installée),
-    lesquels garder : flèches pour naviguer, espace pour cocher/décocher
-    (tous cochés par défaut), Entrée ou bouton pour valider. Les fichiers
-    décochés rejoignent la blacklist du profil actif — voir
-    `mod_pipeline.download_mods_from_links_file` — et ne seront plus
-    proposés tant qu'ils ne seront pas resélectionnés (ex: depuis
-    l'inventaire)."""
+    lesquels garder : flèches pour naviguer, espace pour cocher/décocher,
+    Entrée ou bouton pour valider. Les fichiers décochés rejoignent la
+    blacklist du profil actif — voir `mod_pipeline.download_mods_from_links_file`
+    — et ne seront plus proposés tant qu'ils ne seront pas resélectionnés
+    (ex: depuis l'inventaire).
+
+    Présélection : tout coché par défaut, SAUF si
+    `nexus_variant_selection.infer_ut_eotb_preselection` reconnaît un
+    groupe de variantes Simple/UT (Unique Tav)/EOTB (Eye of the Beholder)
+    — auquel cas seule la variante la plus compatible avec ces deux mods
+    (installés chez Elwingh) est précochée, pour éviter d'installer par
+    erreur plusieurs variantes incompatibles à la fois (voir ce module)."""
 
     BINDINGS = [Binding("enter", "confirm", "Valider", priority=True)]
 
@@ -327,14 +334,29 @@ class NexusFileSelectionScreen(ModalScreen[list[int]]):
         self._mod_url = f"{NEXUS_MOD_URL.format(id=mod_id)}?tab=files"
 
     def compose(self) -> ComposeResult:
+        preselected = infer_ut_eotb_preselection(self._candidates)
         with Vertical(id="file-selection-box"):
             yield Label(f"Plusieurs fichiers pour « {self._mod_name} » (#{self._mod_id})", classes="title")
             yield Label(
                 "Espace : cocher/décocher ceux à garder. Entrée : valider — "
                 "les fichiers décochés ne seront plus proposés."
             )
+            if preselected is not None:
+                yield Label(
+                    "[#D8C091]Présélection automatique UT + EOTB (Unique Tav et Eye of "
+                    "the Beholder détectés comme installés) — vérifie avant de "
+                    "valider.[/#D8C091]",
+                    markup=True,
+                )
             yield SelectionList[int](
-                *[(file_name, file_id, True) for file_id, file_name in self._candidates],
+                *[
+                    (
+                        file_name,
+                        file_id,
+                        True if preselected is None else file_id in preselected,
+                    )
+                    for file_id, file_name in self._candidates
+                ],
                 id="file-selection-list",
             )
             with Horizontal(id="file-selection-buttons"):
