@@ -89,6 +89,7 @@ from bg3_mod_tui.mod_pipeline import (
     download_mods_from_links_file,
     download_subscribed_modio_mods,
     extract_archives_to_mods,
+    redownload_nexus_mod,
 )
 from bg3_mod_tui.providers.modio import ModIOAPIError, ModIOClient
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusClient
@@ -545,6 +546,131 @@ class NexusBlacklistScreen(ModalScreen[list[tuple[int, int]] | None]):
         # navigation aux flèches sur la liste tant qu'on ne re-clique pas
         # dessus — on lui rend systématiquement le focus derrière.
         self.query_one("#blacklist-list", SelectionList).focus()
+
+
+class NexusOutdatedModsScreen(ModalScreen[list[int] | None]):
+    """Sous-tâche 4d du TODO ("Câbler `check_nexus_updates` au
+    téléchargement") : affiche les mods repérés comme obsolètes par
+    `mod_pipeline.check_nexus_updates` (`report["outdated"]`, voir
+    `ActionsScreen._write_nexus_updates_report`) juste après la
+    vérification, pour proposer un re-téléchargement en un clic — sans
+    quoi le rapport (`nexus_updates.md`) resterait un simple fichier à lire
+    à part, sans lien avec le téléchargement.
+
+    Même pattern que `NexusBlacklistScreen` : une `SelectionList` (rien
+    coché par défaut) plutôt qu'un bouton par ligne — cocher les mods à
+    mettre à jour puis valider en un clic reste "un clic" pour déclencher
+    le re-téléchargement, tout en réutilisant un widget déjà en place dans
+    cet écran plutôt que d'inventer un nouveau système de liste à boutons
+    individuels."""
+
+    BINDINGS = [
+        Binding("enter", "confirm", "Valider", priority=True),
+        Binding("o", "open_url", "Ouvrir Nexus"),
+    ]
+
+    CSS = _SELECTION_LIST_CSS + """
+    NexusOutdatedModsScreen {
+        align: center middle;
+    }
+    #outdated-box {
+        width: 80%;
+        max-width: 100;
+        height: 80%;
+        border: round $accent;
+        padding: 1 2;
+        background: $surface;
+    }
+    #outdated-list {
+        height: 1fr;
+        margin-top: 1;
+    }
+    #outdated-url {
+        margin-top: 1;
+        color: $text-muted;
+    }
+    #outdated-buttons {
+        height: auto;
+        margin-top: 1;
+    }
+    #outdated-buttons Button {
+        margin-right: 1;
+    }
+    """
+
+    def __init__(self, outdated: list[dict]) -> None:
+        super().__init__()
+        self._outdated = outdated
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="outdated-box"):
+            yield Label("Mods Nexus obsolètes localement", classes="title")
+            yield Label(
+                "Espace : cocher les mods à mettre à jour. Entrée : "
+                "re-télécharger les mods cochés (mêmes garanties que "
+                "« Télécharger les mods » — wizard de variantes, "
+                "blacklist). 'o' ou le bouton : ouvrir la page Nexus du "
+                "mod survolé."
+            )
+            options = [
+                (
+                    f"{entry['mod_name_guess'] or entry['archive']} — "
+                    f"local {entry['local_version'] or '?'} -> Nexus {entry['remote_version']}",
+                    entry["nexus_mod_id"],
+                    False,
+                )
+                for entry in sorted(
+                    self._outdated, key=lambda e: e["mod_name_guess"] or e["archive"]
+                )
+            ]
+            yield SelectionList[int](*options, id="outdated-list")
+            yield Label("", id="outdated-url")
+            with Horizontal(id="outdated-buttons"):
+                if has_graphical_display():
+                    yield Button("Ouvrir la page Nexus", id="outdated-open-url")
+                yield Button("Re-télécharger la sélection", id="outdated-confirm", variant="primary")
+                yield Button("Fermer", id="outdated-cancel")
+
+    def on_mount(self) -> None:
+        selection_list = self.query_one("#outdated-list", SelectionList)
+        selection_list.focus()
+        self._update_url_label()
+
+    def _highlighted_mod_id(self) -> int | None:
+        highlighted = self.query_one("#outdated-list", SelectionList).highlighted_option
+        if highlighted is None:
+            return None
+        return highlighted.value
+
+    def _update_url_label(self) -> None:
+        mod_id = self._highlighted_mod_id()
+        url = f"{NEXUS_MOD_URL.format(id=mod_id)}?tab=files" if mod_id is not None else ""
+        self.query_one("#outdated-url", Label).update(url)
+
+    @on(SelectionList.SelectionHighlighted, "#outdated-list")
+    def handle_highlighted(self) -> None:
+        self._update_url_label()
+
+    def action_confirm(self) -> None:
+        self.dismiss(self.query_one("#outdated-list", SelectionList).selected)
+
+    def action_open_url(self) -> None:
+        mod_id = self._highlighted_mod_id()
+        if mod_id is not None:
+            webbrowser.open(f"{NEXUS_MOD_URL.format(id=mod_id)}?tab=files")
+
+    @on(Button.Pressed, "#outdated-confirm")
+    def handle_confirm(self) -> None:
+        self.action_confirm()
+
+    @on(Button.Pressed, "#outdated-cancel")
+    def handle_cancel(self) -> None:
+        self.dismiss(None)
+
+    @on(Button.Pressed, "#outdated-open-url")
+    def handle_open_url(self) -> None:
+        self.action_open_url()
+        self.query_one("#outdated-list", SelectionList).focus()
 
 
 class ProfileNamePromptScreen(ModalScreen[str | None]):
@@ -2532,6 +2658,79 @@ class ActionsScreen(Screen):
 
         report = check_nexus_updates(client, known, log=log)
         self._write_nexus_updates_report(report, log=log)
+
+        # Sous-tâche 4d du TODO ("Câbler `check_nexus_updates` au
+        # téléchargement") : dès que le rapport signale des mods obsolètes,
+        # proposer immédiatement leur re-téléchargement en un clic plutôt
+        # que de laisser `nexus_updates.md` comme une simple liste à
+        # consulter à part, sans lien avec le téléchargement. Le wizard
+        # (`NexusOutdatedModsScreen`, un `push_screen` Textual) doit
+        # tourner sur le thread principal — `run_nexus_updates` tourne sur
+        # un thread de worker (voir `@work(thread=True)` ci-dessus).
+        if report["outdated"]:
+            self.app.call_from_thread(self._prompt_redownload_outdated, report["outdated"])
+
+    def _prompt_redownload_outdated(self, outdated: list[dict]) -> None:
+        """Affiche `NexusOutdatedModsScreen` (liste des mods obsolètes,
+        voir `run_nexus_updates`) et, si l'utilisateur en coche puis
+        valide, lance leur re-téléchargement via `run_redownload_nexus_outdated`
+        — même mécanisme de verrouillage de ressources
+        (`resource_tags={"archives"}`) que "Télécharger les mods", pour ne
+        pas écrire dans `archives_dir` en même temps qu'un téléchargement/
+        nettoyage déjà en cours."""
+
+        def on_result(chosen: list[int] | None) -> None:
+            if not chosen:
+                return
+            self._start_task(
+                title=f"Re-télécharger {len(chosen)} mod(s) Nexus obsolète(s)",
+                resource_tags=frozenset({"archives"}),
+                launch=lambda log: self.run_redownload_nexus_outdated(chosen, log),
+            )
+
+        self.app.push_screen(NexusOutdatedModsScreen(outdated), on_result)
+
+    @work(exclusive=True, thread=True, group="run_redownload_nexus_outdated", exit_on_error=False)
+    def run_redownload_nexus_outdated(self, mod_ids: list[int], log: Callable[[str], None]) -> None:
+        """Re-télécharge, un par un, les mods choisis dans
+        `NexusOutdatedModsScreen` — voir `mod_pipeline.redownload_nexus_mod`
+        (même chemin que `run_download_mods`, `skip_existing=False` pour
+        ne pas sauter un mod déjà présent en version périmée)."""
+        log(f"=== Re-téléchargement de {len(mod_ids)} mod(s) Nexus obsolète(s) ===")
+        try:
+            client = NexusClient(os.environ.get("NEXUS_API_KEY", ""))
+        except NexusAPIError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return
+
+        downloaded = 0
+        failed = 0
+        for mod_id in mod_ids:
+            try:
+                report = redownload_nexus_mod(
+                    client,
+                    mod_id,
+                    self._config.archives_dir,
+                    archives_installed_dir=self._config.archives_installed_dir,
+                    archives_pending_dir=self._config.archives_pending_dir,
+                    profiles_dir=self._config.profiles_dir,
+                    profile_name=self._config.active_profile,
+                    select_files=self._select_nexus_files,
+                    on_download_progress=self._on_download_progress,
+                    log=log,
+                )
+            except NexusAPIError as exc:
+                log(f"[#C46F6F]Erreur ({mod_id}) : {exc}[/#C46F6F]")
+                failed += 1
+                continue
+            except Exception as exc:
+                log(f"[#C46F6F]Erreur inattendue ({mod_id}) : {exc}[/#C46F6F]")
+                failed += 1
+                continue
+            downloaded += len(report["downloaded"])
+            failed += len(report["failed"])
+
+        log(f"Terminé : {downloaded} mod(s) re-téléchargé(s), {failed} échec(s).")
 
     def _write_nexus_updates_report(
         self, report: dict[str, list], *, log: Callable[[str], None]

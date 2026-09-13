@@ -175,9 +175,74 @@ def download_mods_from_links_file(
     mod_ids = parse_mod_links_file(links_file)
     log(f"{len(mod_ids)} mod(s) listé(s) dans {links_file.name}.")
 
+    report = download_nexus_mods_by_id(
+        client,
+        mod_ids,
+        dest_dir,
+        archives_installed_dir=archives_installed_dir,
+        archives_pending_dir=archives_pending_dir,
+        profiles_dir=profiles_dir,
+        profile_name=profile_name,
+        select_files=select_files,
+        on_download_progress=on_download_progress,
+        log=log,
+        skip_existing=True,
+    )
+
+    done_ids = set(report["downloaded"]) | set(report["skipped"])
+    if done_ids:
+        remove_mod_links(links_file, done_ids)
+        log(f"{len(done_ids)} lien(s) retiré(s) de {links_file.name}.")
+
+    return report
+
+
+def download_nexus_mods_by_id(
+    client: NexusClient,
+    mod_ids: list[int],
+    dest_dir: Path,
+    *,
+    archives_installed_dir: Path | None = None,
+    archives_pending_dir: Path | None = None,
+    profiles_dir: Path | None = None,
+    profile_name: str = "",
+    select_files: SelectFilesFn | None = None,
+    on_download_progress: DownloadProgressFn | None = None,
+    log: LogFn = lambda _msg: None,
+    skip_existing: bool = True,
+) -> dict[str, list]:
+    """Cœur partagé de `download_mods_from_links_file` (téléchargement par
+    lot depuis `nexus_links_to_add.md`) et `redownload_nexus_mod`
+    (re-téléchargement ciblé d'UN mod déjà connu localement, ex: pour
+    appliquer une mise à jour repérée par `check_nexus_updates` — voir
+    `ActionsScreen.run_redownload_nexus_outdated`) : télécharge, pour
+    chaque id de `mod_ids`, ses fichiers éligibles ('MAIN'/'UPDATE'/
+    'OPTIONAL', une variante distincte par nom de fichier) vers `dest_dir`.
+    Nécessite un compte Nexus Premium pour le téléchargement direct via
+    l'API. Voir la docstring (désormais historique) de
+    `download_mods_from_links_file` pour le détail de la parallélisation
+    (`_NEXUS_MAX_DOWNLOAD_THREADS`), du wizard `select_files` (séquentiel)
+    et du pipeline préparation/téléchargement (sous-tâches 5b/5d) — ce
+    comportement est inchangé, seule l'origine de `mod_ids` change (fichier
+    de liens vs appel direct).
+
+    `skip_existing` (True par défaut, comportement historique) saute un mod
+    déjà présent dans `dest_dir`/`archives_installed_dir`/
+    `archives_pending_dir` (`known_mod_ids`) — adapté à un lot fraîchement
+    ajouté à `links_file`, où un mod déjà présent n'a rien de nouveau à
+    récupérer. Un re-téléchargement volontaire de mise à jour (mod déjà
+    présent, mais dans une version périmée) doit passer `skip_existing=
+    False` pour ne pas être sauté comme "déjà présent" par erreur.
+
+    Retourne {"downloaded": [...], "skipped": [...], "failed": [(id, err)]}.
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
-    already_present_ids = known_mod_ids(
-        dest_dir, *(d for d in (archives_installed_dir, archives_pending_dir) if d is not None)
+    already_present_ids = (
+        known_mod_ids(
+            dest_dir, *(d for d in (archives_installed_dir, archives_pending_dir) if d is not None)
+        )
+        if skip_existing
+        else set()
     )
 
     blacklist = load_blacklisted_files(profiles_dir, profile_name) if profiles_dir is not None else {}
@@ -289,19 +354,59 @@ def download_mods_from_links_file(
                 report["failed"].append((mod_id, str(exc)))
         # Sortir du bloc `with` attend la fin de tous les jobs soumis
         # (`ThreadPoolExecutor.__exit__` appelle `shutdown(wait=True)`) —
-        # nécessaire : le reste de la fonction (sauvegarde de la blacklist,
-        # retrait des liens traités) suppose `report` définitivement
-        # complet.
+        # nécessaire : le reste de la fonction (sauvegarde de la blacklist)
+        # suppose `report` définitivement complet.
 
     if blacklist_dirty and profiles_dir is not None:
         save_blacklisted_files(profiles_dir, profile_name, blacklist)
 
-    done_ids = set(report["downloaded"]) | set(report["skipped"])
-    if done_ids:
-        remove_mod_links(links_file, done_ids)
-        log(f"{len(done_ids)} lien(s) retiré(s) de {links_file.name}.")
-
     return report
+
+
+def redownload_nexus_mod(
+    client: NexusClient,
+    mod_id: int,
+    dest_dir: Path,
+    *,
+    archives_installed_dir: Path | None = None,
+    archives_pending_dir: Path | None = None,
+    profiles_dir: Path | None = None,
+    profile_name: str = "",
+    select_files: SelectFilesFn | None = None,
+    on_download_progress: DownloadProgressFn | None = None,
+    log: LogFn = lambda _msg: None,
+) -> dict[str, list]:
+    """Re-télécharge un seul mod Nexus déjà connu localement — action "en un
+    clic" branchée sur `check_nexus_updates` (voir TODO section 4d) : pour
+    une entrée de `report["outdated"]` (mod dont la version locale est
+    dépassée par rapport à Nexus), permet de récupérer directement la
+    nouvelle version sans repasser par `nexus_links_to_add.md` ni relister
+    manuellement le mod.
+
+    Simple appel à `download_nexus_mods_by_id` avec `skip_existing=False`
+    (sinon le mod, déjà présent localement dans sa version périmée, serait
+    sauté comme "déjà présent" au lieu d'être re-téléchargé) : mêmes
+    garanties que le téléchargement par lot (parallélisation via
+    `_NEXUS_MAX_DOWNLOAD_THREADS`, wizard `select_files` si plusieurs
+    variantes, blacklist des variantes rejetées, progression). Ne modifie
+    PAS `nexus_links_to_add.md` (ce mod n'y est pas forcément listé, et
+    n'a pas vocation à l'être juste pour une mise à jour ponctuelle).
+
+    Retourne {"downloaded": [...], "skipped": [...], "failed": [(id, err)]}
+    (au plus un élément dans chaque liste, pour ce seul `mod_id`)."""
+    return download_nexus_mods_by_id(
+        client,
+        [mod_id],
+        dest_dir,
+        archives_installed_dir=archives_installed_dir,
+        archives_pending_dir=archives_pending_dir,
+        profiles_dir=profiles_dir,
+        profile_name=profile_name,
+        select_files=select_files,
+        on_download_progress=on_download_progress,
+        log=log,
+        skip_existing=False,
+    )
 
 
 def check_nexus_updates(
