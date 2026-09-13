@@ -24,3 +24,6 @@
 	path = Tools/bg3pythonpaklib
 	url = https://github.com/ElwinghL/bg3pythonpaklib.git
 	branch = main
+[submodule "Tools/bg3-nmcm"]
+	path = Tools/bg3-nmcm
+	url = https://github.com/Luiznunes12/bg3-nmcm.git
