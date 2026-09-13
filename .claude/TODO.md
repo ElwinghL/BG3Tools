@@ -4,10 +4,11 @@
 
 Les points de cette categories sont a trier, reformuler et classer par les agents competents. Cette categorie ne doit pas etre supprimee, elle peut rester vide, accompagne de ce petit texte d'explication.
 
-- Suppressio ndes boutons superflus deja couvert par d'autres boutons (Mise a jour des outils, compilation du framework de compatibilite...)
-  - On garde le bouton qui fait toutes ces actions en simultane
-  - On peut aussi ajouter des elements qui effectuent les actions de ce genre a ce bouton
-- Regarder comment Le Mod Manager check la presence ou non du script extender pour presenter une correction plus precise qui prenne en compte notre hardlink
+Rien de non trié à ce jour — les 3 points ajoutés le 2026-09-13 ont été
+classés : suppression des boutons superflus déjà faite (voir section 9,
+sous-tâche 9b) ; modifications locales BG3SE pour Linux fusionnée avec la
+section 11 (11a reformulé, patch fork `ElwinghL/bg3se`) ; détection du
+Script Extender par le Mod Manager déplacée en section 24 ci-dessous.
 
 ## P0 — Critique / Fondation
 
@@ -45,6 +46,11 @@ mais les causes racines ne sont pas corrigées :
 
 - ~~**2a.** Remplacer l'appel unique `_write_orphans_report` par un flush à chaque étape de vérification~~ — fait : nouvelle méthode `_flush_orphans_progress` réécrivant `archives_orphelines.md` à chaque archive traitée dans la boucle Divine.exe (une interruption en cours de route laisse un rapport partiel exploitable au lieu de rien) ; `_write_orphans_report` reste appelée une dernière fois en fin de boucle pour le regroupement final poli (orphelines/non vérifiables)
 - ~~**2b.** Format : un commit/étape = une ligne écrite dans `archives_orphelines.md` (UUID archive, statut, action)~~ — fait : chaque ligne de progression (`_orphan_report_row`) porte le nom d'archive, taille, origine, date, et un statut clair (« orpheline confirmée », « faux positif écarté », « non vérifiable ») — adapté par rapport à l'UUID d'archive mentionné à l'origine (une archive peut contenir plusieurs .pak/UUID, le nom de fichier identifie sans ambiguïté la ligne)
+
+### 24. Détection du Script Extender par le BG3 Mod Manager (hardlink)
+
+- Regarder comment BG3 Mod Manager vérifie la présence du Script Extender pour proposer une correction plus précise qui prenne en compte notre déploiement par hardlink (voir `bg3_mod_tui/game_deploy.py`) plutôt qu'une simple vérification de fichier qui pourrait ignorer/mal interpréter un hardlink
+  - _Rationale_ : ajouté par Elwingh le 2026-09-13, amélioration de la détection/diagnostic, pas encore priorisé plus finement
 
 ## P1 — Haute priorité
 
