@@ -409,6 +409,111 @@ def redownload_nexus_mod(
     )
 
 
+def _check_single_file_mod(
+    client: NexusClient,
+    mod_id: int,
+    entry: ArchiveEntry,
+    *,
+    report: dict[str, list],
+    log: LogFn,
+) -> None:
+    """Cas simple de `check_nexus_updates` : un seul fichier local connu
+    pour `mod_id`, `NexusMod.version` (page mod) le représente correctement."""
+    label = entry.mod_name_guess or entry.file
+    try:
+        info = client.mod_info(mod_id)
+    except NexusAPIError as exc:
+        log(fmt_row(label, STATUS_ECHEC, detail=str(exc)))
+        report["failed"].append((mod_id, str(exc)))
+        return
+
+    if is_newer(info.version, entry.version):
+        log(
+            fmt_row(
+                label,
+                STATUS_EXAMEN,
+                version=info.version,
+                detail=f"local : {entry.version or '?'}",
+            )
+        )
+        report["outdated"].append(
+            {
+                "archive": entry.file,
+                "nexus_mod_id": mod_id,
+                "nexus_url": entry.nexus_url,
+                "mod_name_guess": entry.mod_name_guess,
+                "local_version": entry.version,
+                "remote_version": info.version,
+            }
+        )
+    else:
+        report["up_to_date"].append(mod_id)
+
+
+def _check_multi_file_mod(
+    client: NexusClient,
+    mod_id: int,
+    entries: list[ArchiveEntry],
+    *,
+    report: dict[str, list],
+    log: LogFn,
+) -> None:
+    """Cas multi-fichiers de `check_nexus_updates` (voir sa docstring) :
+    `mod_id` regroupe plusieurs archives locales SANS RAPPORT entre elles —
+    compare chaque archive à SA variante Nexus (matchée par nom via
+    `latest_file_variants`), jamais à `NexusMod.version` (page mod, qui ne
+    représenterait qu'une seule d'entre elles arbitrairement)."""
+    try:
+        variants = client.latest_file_variants(mod_id)
+    except NexusAPIError as exc:
+        for entry in entries:
+            label = entry.mod_name_guess or entry.file
+            log(fmt_row(label, STATUS_ECHEC, detail=str(exc)))
+            report["failed"].append((mod_id, str(exc)))
+        return
+
+    by_name = {v.name.strip().lower(): v for v in variants if v.name}
+
+    for entry in entries:
+        label = entry.mod_name_guess or entry.file
+        key = (entry.mod_name_guess or "").strip().lower()
+        variant = by_name.get(key) if key else None
+        if variant is None:
+            log(
+                fmt_row(
+                    label,
+                    STATUS_ECHEC,
+                    detail="variante Nexus introuvable par nom (fichier renommé/retiré ?)",
+                )
+            )
+            report["failed"].append(
+                (mod_id, f"variante '{entry.mod_name_guess or entry.file}' introuvable sur Nexus")
+            )
+            continue
+
+        if is_newer(variant.version, entry.version):
+            log(
+                fmt_row(
+                    label,
+                    STATUS_EXAMEN,
+                    version=variant.version,
+                    detail=f"local : {entry.version or '?'}",
+                )
+            )
+            report["outdated"].append(
+                {
+                    "archive": entry.file,
+                    "nexus_mod_id": mod_id,
+                    "nexus_url": entry.nexus_url,
+                    "mod_name_guess": entry.mod_name_guess,
+                    "local_version": entry.version,
+                    "remote_version": variant.version,
+                }
+            )
+        else:
+            report["up_to_date"].append(mod_id)
+
+
 def check_nexus_updates(
     client: NexusClient,
     archives: list[ArchiveEntry],
@@ -436,6 +541,23 @@ def check_nexus_updates(
     aucune des conventions de téléchargement connues n'a pas d'ID et ne peut
     pas être vérifiée par cette fonction).
 
+    Une page Nexus peut regrouper plusieurs fichiers SANS RAPPORT entre eux
+    sous le même `nexus_mod_id` (ex: une race par fichier 'OPTIONAL', ou un
+    pack "1 - Karlach normal" et un "9 - MEGA pack" totalement distincts) —
+    `NexusMod.version` (`mod_info`) ne reflète alors que la page mod
+    (généralement un seul fichier "principal"), pas ces variantes. Comparer
+    le numéro de version le plus haut parmi des fichiers sans rapport à
+    cette version de page produisait un faux "obsolète" affichant le nom
+    d'une archive qui n'a rien à voir avec la version comparée (bug
+    remonté par Elwingh). Pour un `mod_id` à plusieurs archives locales, on
+    bascule donc sur `latest_file_variants` (version PAR variante) et on
+    fait correspondre chaque archive locale à SA variante Nexus par nom
+    (`ArchiveEntry.mod_name_guess`, extrait du nom de fichier — c'est le
+    même `name` que celui affiché/utilisé par Nexus pour cette variante).
+    Une variante locale sans correspondance nommée côté Nexus (fichier
+    renommé/retiré) est journalisée comme non vérifiable plutôt que
+    comparée à une version qui n'est pas la sienne.
+
     Retourne {"outdated": [{"archive", "nexus_mod_id", "nexus_url",
     "mod_name_guess", "local_version", "remote_version"}, ...],
     "up_to_date": [nexus_mod_id, ...], "failed": [(nexus_mod_id, err), ...]}."""
@@ -448,36 +570,24 @@ def check_nexus_updates(
     log(f"{len(by_mod_id)} mod(s) Nexus connu(s) localement à vérifier...")
 
     for mod_id, entries in by_mod_id.items():
-        best_local = max(entries, key=lambda a: parse_version(a.version))
-        label = best_local.mod_name_guess or best_local.file
-        try:
-            info = client.mod_info(mod_id)
-        except NexusAPIError as exc:
-            log(fmt_row(label, STATUS_ECHEC, detail=str(exc)))
-            report["failed"].append((mod_id, str(exc)))
-            continue
+        # Sous-groupe par nom de variante (`mod_name_guess`) AVANT de choisir
+        # single vs. multi-fichiers : deux exemplaires locaux du même fichier
+        # (ex: un vieux dans `_installees`, un plus récent dans `disponible/`)
+        # partagent le même nom et ne doivent PAS déclencher le chemin
+        # multi-variantes — seul un `mod_id` avec plusieurs noms DISTINCTS
+        # regroupe des fichiers sans rapport entre eux (voir docstring).
+        by_name: dict[str, list[ArchiveEntry]] = {}
+        for entry in entries:
+            by_name.setdefault((entry.mod_name_guess or "").strip().lower(), []).append(entry)
 
-        if is_newer(info.version, best_local.version):
-            log(
-                fmt_row(
-                    label,
-                    STATUS_EXAMEN,
-                    version=info.version,
-                    detail=f"local : {best_local.version or '?'}",
-                )
-            )
-            report["outdated"].append(
-                {
-                    "archive": best_local.file,
-                    "nexus_mod_id": mod_id,
-                    "nexus_url": best_local.nexus_url,
-                    "mod_name_guess": best_local.mod_name_guess,
-                    "local_version": best_local.version,
-                    "remote_version": info.version,
-                }
-            )
+        best_per_name = [
+            max(group, key=lambda a: parse_version(a.version)) for group in by_name.values()
+        ]
+
+        if len(best_per_name) == 1:
+            _check_single_file_mod(client, mod_id, best_per_name[0], report=report, log=log)
         else:
-            report["up_to_date"].append(mod_id)
+            _check_multi_file_mod(client, mod_id, best_per_name, report=report, log=log)
 
     log(
         f"{len(report['outdated'])} mod(s) obsolète(s) sur {len(by_mod_id)} "

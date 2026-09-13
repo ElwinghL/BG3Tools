@@ -61,6 +61,21 @@ class NexusMod:
     summary: str
 
 
+@dataclass
+class NexusFileVariant:
+    """Une variante de fichier distincte d'un mod Nexus (voir
+    `NexusClient.latest_file_variants`) — `name` est le nom de variante tel
+    qu'affiché sur Nexus (ex: "1 - Karlach normal NSFW"), à distinguer de
+    `file_name` (nom du fichier zip/7z réellement téléchargé). `version`
+    est la version PROPRE à cette variante, pas celle de `NexusMod.version`
+    qui ne reflète que la page mod (généralement le fichier "principal")."""
+
+    file_id: int
+    file_name: str
+    name: str
+    version: str
+
+
 class NexusClient:
     def __init__(self, api_key: str) -> None:
         if not api_key:
@@ -101,10 +116,13 @@ class NexusClient:
             summary=data.get("summary", ""),
         )
 
-    def latest_files(self, mod_id: int) -> list[tuple[int, str]]:
+    def latest_file_variants(self, mod_id: int) -> list[NexusFileVariant]:
         """Retourne, pour chaque variante distincte d'un mod (son `name`
         Nexus — ex: différentes couleurs/options proposées en fichiers
-        'OPTIONAL'), le fichier le plus récent (file_id, file_name).
+        'OPTIONAL', ou des fichiers sans rapport entre eux partageant la
+        même page mod — voir `mod_pipeline.check_nexus_updates`), le
+        fichier le plus récent, `version` INCLUSE (propre à cette variante,
+        contrairement à `NexusMod.version` qui ne reflète que la page mod).
 
         Une même variante peut avoir plusieurs uploads dans le temps (une
         'UPDATE' remplaçant une 'MAIN' du même nom) : on ne garde que le
@@ -135,9 +153,20 @@ class NexusClient:
                 by_variant[key] = f
 
         return [
-            (f["file_id"], f.get("file_name", f"mod_{mod_id}.zip"))
+            NexusFileVariant(
+                file_id=f["file_id"],
+                file_name=f.get("file_name", f"mod_{mod_id}.zip"),
+                name=f.get("name") or f.get("file_name", ""),
+                version=f.get("version", ""),
+            )
             for f in by_variant.values()
         ]
+
+    def latest_files(self, mod_id: int) -> list[tuple[int, str]]:
+        """Repli historique de `latest_file_variants` (mêmes filtres/dédup),
+        sans la version — gardé pour les appelants qui n'ont besoin que de
+        `(file_id, file_name)` (téléchargement)."""
+        return [(v.file_id, v.file_name) for v in self.latest_file_variants(mod_id)]
 
     def download_link(self, mod_id: int, file_id: int) -> str:
         """Nécessite un compte Nexus Premium ; sinon lève NexusAPIError."""
