@@ -1,10 +1,18 @@
-"""Tests du mécanisme d'onglets dynamiques pour les tâches "Tâches"
-concurrentes (`bg3_mod_tui.screens.actions`, sous-tâche 7b du TODO "Vue
-par onglets") : `_resource_conflict` est la seule partie de ce mécanisme
-qui soit une fonction pure, testable sans app Textual — elle décide si une
-nouvelle tâche peut être lancée en parallèle des tâches déjà actives, en
-comparant leurs étiquettes de ressources (voir `ActionsScreen._start_task`
-et le dictionnaire `_ActiveTask`).
+"""Tests du mécanisme d'onglets dynamiques pour les tâches "Tâches" et
+"Outils" concurrentes (`bg3_mod_tui.screens.actions`, sous-tâches 7b et 7d
+du TODO "Vue par onglets") : `_resource_conflict` est la partie principale
+de ce mécanisme qui soit une fonction pure, testable sans app Textual —
+elle décide si une nouvelle tâche peut être lancée en parallèle des tâches
+déjà actives, en comparant leurs étiquettes de ressources (voir
+`ActionsScreen._start_task` et le dictionnaire `_ActiveTask`).
+
+`ActionsScreen._main_console_for_pool` (sous-tâche 7d : généralisation du
+mécanisme, initialement écrit pour la seule console "Tâches", à la console
+"Outils" aussi) est elle aussi testée directement : bien que méthode
+d'instance, elle ne fait qu'associer un nom de pool ("tasks"/"tools") à un
+couple (onglet statique, méthode d'écriture) sans toucher au DOM Textual —
+instancier `ActionsScreen` suffit, sans avoir besoin de la monter dans une
+app.
 
 Le reste du mécanisme (`_acquire_task_console`, `_start_task`,
 `on_worker_state_changed`) est fortement couplé à l'UI Textual : il
@@ -13,8 +21,8 @@ au cycle de vie des `Worker` (thread=True, `call_from_thread`), ce qui
 nécessite une app Textual en cours d'exécution (event loop, DOM monté) —
 pas raisonnablement extractible en fonction pure, donc pas testé ici. Un
 test de bout en bout (lancer deux actions, vérifier qu'un second onglet
-apparaît) relèverait plutôt d'un test Pilot Textual, hors du scope de
-cette sous-tâche.
+apparaît, sur la console Tâches comme sur la console Outils) relèverait
+plutôt d'un test Pilot Textual, hors du scope de cette sous-tâche.
 
 Ce fichier teste aussi `_run_task_sequence` (TODO "Fusion bouton MAJ
 outils + Compat Framework + ModFixerFork", sous-tâche 9a) : la fonction
@@ -26,7 +34,12 @@ pratique (`_download_tools_task` et consorts) restent, elles, couplées à
 
 from __future__ import annotations
 
-from bg3_mod_tui.screens.actions import _resource_conflict, _run_task_sequence
+from bg3_mod_tui.config import ModToolsConfig
+from bg3_mod_tui.screens.actions import (
+    ActionsScreen,
+    _resource_conflict,
+    _run_task_sequence,
+)
 
 
 def test_no_conflict_when_no_active_task() -> None:
@@ -115,3 +128,43 @@ def test_run_task_sequence_stops_at_first_failure() -> None:
 def test_run_task_sequence_empty_steps_succeeds_trivially() -> None:
     logs: list[str] = []
     assert _run_task_sequence([], logs.append) is True
+
+
+def _make_actions_screen() -> ActionsScreen:
+    """Instancie `ActionsScreen` sans la monter dans une app Textual —
+    suffisant pour tester `_main_console_for_pool`, qui ne fait que
+    renvoyer un couple (onglet statique, méthode d'écriture liée) sans
+    toucher au DOM."""
+    return ActionsScreen(ModToolsConfig())
+
+
+def test_main_console_for_pool_tasks_maps_to_actions_log_tab() -> None:
+    screen = _make_actions_screen()
+    tab_id, write = screen._main_console_for_pool("tasks")
+    assert tab_id == "actions-log-tab"
+    assert write == screen._log
+
+
+def test_main_console_for_pool_tools_maps_to_tools_log_tab() -> None:
+    """Sous-tâche 7d : le pool "tools" route vers l'onglet/la console
+    "Outils" (`#tools-log`), distinct du pool "tasks" — c'est cette
+    correspondance qui fait que "MAJ des outils"/"Compiler Compat.
+    Framework"/"Forker Mod Fixer"/"Tout mettre à jour"/"Lancer un
+    outil..."/"Ouvrir protontricks"/"Optimiser le préfixe" (toutes lancées
+    avec `pool="tools"`) n'atterrissent plus dans l'onglet "Tâches" comme
+    avant cette généralisation."""
+    screen = _make_actions_screen()
+    tab_id, write = screen._main_console_for_pool("tools")
+    assert tab_id == "tools-log-tab"
+    assert write == screen._tool_log
+
+
+def test_main_console_for_pool_unknown_defaults_to_tasks() -> None:
+    """`_main_console_for_pool` ne lève pas d'erreur sur un pool inconnu —
+    contrairement à l'implémentation initiale envisagée pour cette
+    sous-tâche — elle retombe sur le pool "tasks" par défaut (voir son
+    `if pool == "tools": ... ; return "actions-log-tab", self._log`)."""
+    screen = _make_actions_screen()
+    tab_id, write = screen._main_console_for_pool("web")
+    assert tab_id == "actions-log-tab"
+    assert write == screen._log
