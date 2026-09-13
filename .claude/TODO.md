@@ -131,23 +131,51 @@ sacrifié pour y arriver, tant pis.
   `ElwinghL/lslib`, branche `fix/PakBatchExtractSupport` (pas encore mergé sur
   `main` du fork — en attente d'accord explicite, cf. règle CLAUDE.md sur les
   merges).
-- **19b.** Build complet du fork non vérifié localement — bloqué par deux
-  dépendances Windows-only :
-  - `LSLibNative` (`.vcxproj`, C++ natif utilisé par le lecteur GR2/Granny) —
-    nécessite MSVC, indisponible sous Linux.
-  - Le parser Osiris (Story/Goal) — nécessite GPLex 1.2.2 + GPPG 1.5.2 (générateurs
-    lexer/parser, exécutables Windows, liens de téléchargement dans le README du
-    fork), absents du dépôt.
-  - Pistes envisagées (détaillées dans le README du fork, section "About this
-    fork") : lancer GPLex/GPPG via Wine (simples outils console, probable que ça
-    marche tel quel) ; une VM Windows (ou runner CI Windows) dédiée pour compiler
-    les releases ; ou retirer purement et simplement Story/Granny/VirtualTextures
-    du fork puisque hors objectif (option "tant pis" assumée).
-  - Tenté : SDK .NET 8 installé via un conteneur `distrobox` dédié
-    (`bg3tools-dotnet`, Fedora) pour contourner l'immutabilité de Bazzite — a permis
-    de builder Divine.csproj jusqu'à buter sur LSLibNative, puis en cascade sur
-    Story/Granny/VirtualTextures en tentant de les exclure du build (trop de
-    fichiers interdépendants pour une exclusion ciblée simple).
+- ~~**19b.** Build complet du fork non vérifié localement~~ — **fait, en gardant
+  uniquement le périmètre .pak** (option "tant pis" assumée pour
+  Story/Granny/VirtualTextures/savegames) :
+  - Diagnostic confirmé : `LSLibNative` (`.vcxproj` C++, lecteur GR2/Granny)
+    nécessite MSVC ; le parser Osiris (Story/Goal) nécessite GPLex 1.2.2 +
+    GPPG 1.5.2 (exécutables Windows, absents du dépôt) pour générer
+    `Goal.lex.cs`/`Goal.yy.cs`/`StoryHeader.lex.cs`/`StoryHeader.yy.cs` — aucun des
+    deux n'a d'équivalent Linux.
+  - Correctif préparé sur une branche locale **non poussée** du fork,
+    `fix/LinuxBuildPakOnlyScope` (basée sur `main` du fork au commit `551cff1`,
+    qui inclut déjà 19a) : retire `LSLibNative` du solution/`.csproj`, exclut
+    `Granny/**`, `VirtualTextures/**`, `LS/Story/**`, `LS/Save/**` de la
+    compilation de `LSLib.csproj` (`<Compile Remove>`, pas de suppression de
+    fichiers sur disque — réversible), retire le `PreBuildEvent` GPLex/GPPG, et
+    trimme `LSTools.sln` + les 3 fichiers CLI de Divine (`CommandLineArguments.cs`,
+    `CommandLineActions.cs`, `CommandLineDataProcessor.cs`) pour ne garder que les
+    actions `create-package;list-package;extract-single-file;extract-package;
+    extract-packages;convert-resource;convert-resources;convert-loca` (retrait de
+    `convert-model`, `convert-models`, `build-vt`). `CommandLineGR2Processor.cs`
+    exclu du build de `Divine.csproj` plutôt que supprimé, pour rester réversible.
+  - Une vraie dépendance native est restée dans le périmètre .pak lui-même :
+    `PackageReader.cs` appelait `Native.LZ4FrameCompressor.Decompress()`
+    (`LSLibNative/lz4wrapper.cpp`) pour décompresser les paquets "solid" (tous les
+    fichiers compressés en un seul flux LZ4 frame). Remplacé par le décodeur LZ4
+    frame managé déjà référencé ailleurs dans le projet
+    (`K4os.Compression.LZ4.Streams`, `LZ4Stream.Decode`), même pattern que
+    `Compression.cs`. `ModResources.cs` utilisait aussi l'enum `TargetGame`
+    (définie dans `LS/Story/Compiler/CompilationContext.cs`, donc exclue) —
+    remplacée par l'enum équivalent déjà présent `LSLib.LS.Enums.Game`.
+  - **Build vérifié** : `dotnet build Divine/Divine.csproj -c Release` réussit
+    sans erreur (1 seul warning `CS1998` préexistant, sans rapport) sous .NET 8
+    dans le conteneur `distrobox bg3tools-dotnet` (Fedora). `dotnet
+    Divine/bin/Release/net8.0/Divine.dll` s'exécute et affiche l'usage attendu
+    (surface d'actions réduite au pak/resource/loca, confirmant le trim).
+    Reproductible via `scripts/lslib_fork_linux_build/build_lslib_fork_linux.sh`
+    (clone + applique `scripts/lslib_fork_linux_build/0001-linux-build-pak-only-scope.patch`
+    + build ; script testé de bout en bout).
+  - **Non poussé** vers `ElwinghL/lslib` (aucun remote partagé touché) : le patch
+    vit uniquement dans BG3Tools (`scripts/lslib_fork_linux_build/`) en attendant
+    relecture. Pour le transformer en vraie branche du fork après review, voir les
+    instructions en tête de `build_lslib_fork_linux.sh`.
+  - Limitation connue : pas de `.pak` réel disponible sur cette machine pour un
+    test d'extraction/écriture de bout en bout (seul un smoke-test `--help`/usage
+    a été fait) — à vérifier par le prochain relecteur sur un profil BG3 réel,
+    avant 19c.
 - **19c.** Une fois un build fonctionnel obtenu : basculer `Tools/ExportTools`
   (sous-module git, actuellement `Norbyte/lslib`) vers `ElwinghL/lslib`, mettre à
   jour `Tools/TOOLS.md`, re-épingler le commit, et relancer

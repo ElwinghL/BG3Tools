@@ -1,0 +1,951 @@
+From 9809c0238e4f97a9d1bc07eddada99d01e4512b0 Mon Sep 17 00:00:00 2001
+From: elwingh <clement_1996@hotmail.com>
+Date: Sun, 13 Sep 2026 14:28:30 +0200
+Subject: [PATCH] fix: trim solution to Divine + pak/resource I/O so it builds
+ on Linux/.NET 8
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Narrows the fork to its stated scope (read/write/edit .pak — see README
+"About this fork"): removes LSLibNative (native GR2/Granny reader,
+MSVC-only), the Osiris Story/Goal parser (needs Windows-only GPLex/GPPG),
+VirtualTextures tileset building, and LS/Save savegame helpers from the
+build, along with the LSTools.sln entries and Divine CLI actions
+(convert-model[s], build-vt) that depended on them.
+
+Also replaces the one genuine native dependency inside the kept pak-read
+path — LSLibNative's LZ4 frame decompressor, used for "solid" compressed
+archives in PackageReader.cs — with the already-referenced managed
+K4os.Compression.LZ4.Streams decoder, and swaps ModResources.cs's Story-only
+TargetGame enum for the equivalent LSLib.LS.Enums.Game.
+
+`dotnet build Divine/Divine.csproj -c Release` now succeeds end to end
+under .NET 8 on Linux (verified in the bg3tools-dotnet distrobox
+container), with only create/list/extract-package(s), convert-resource(s)
+and convert-loca left as valid --action values.
+
+Not merged to main: needs review before landing, and 19c (switching
+BG3Tools' Tools/ExportTools submodule to this fork) is a separate,
+not-yet-done step.
+---
+ Divine/CLI/CommandLineActions.cs       |  81 ++----
+ Divine/CLI/CommandLineArguments.cs     | 109 ++------
+ Divine/CLI/CommandLineDataProcessor.cs |  39 +--
+ Divine/Divine.csproj                   |  12 +
+ LSLib/LS/Mods/ModResources.cs          |  12 +-
+ LSLib/LS/PackageReader.cs              |  20 +-
+ LSLib/LSLib.csproj                     |  53 +++-
+ LSTools.sln                            | 346 +++++--------------------
+ 8 files changed, 193 insertions(+), 479 deletions(-)
+
+diff --git a/Divine/CLI/CommandLineActions.cs b/Divine/CLI/CommandLineActions.cs
+index a978c43..401df31 100644
+--- a/Divine/CLI/CommandLineActions.cs
++++ b/Divine/CLI/CommandLineActions.cs
+@@ -1,5 +1,4 @@
+ ﻿using System;
+-using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using System.Text.RegularExpressions;
+@@ -13,9 +12,6 @@ internal class CommandLineActions
+     public static string SourcePath;
+     public static string DestinationPath;
+     public static string PackagedFilePath;
+-    public static string ConformPath;
+-    public static string VTConfigPath;
+-    public static string VTRootPath;
+ 
+     public static Game Game;
+     public static LogLevel LogLevel;
+@@ -24,9 +20,11 @@ internal class CommandLineActions
+     public static PackageVersion PackageVersion;
+     public static int PackagePriority;
+     public static bool LegacyGuids;
+-    public static bool FastBuild;
+-    public static bool VTValidate;
+-    public static Dictionary<string, bool> GR2Options;
++
++    // BG3Tools fork (fix/LSLibForkBuildLinux): ConformPath, VTConfigPath, VTRootPath,
++    // FastBuild, VTValidate and GR2Options removed — they only backed the now-removed
++    // convert-model[s]/build-vt actions (GR2 mesh conversion, virtual-texture tileset
++    // building), out of scope for this .pak-only fork. See CommandLineArguments.cs.
+ 
+     // TODO: OSI support
+ 
+@@ -38,10 +36,16 @@ internal class CommandLineActions
+ 
+     private static void SetUpAndValidate(CommandLineArguments args)
+     {
++        // BG3Tools fork (fix/LSLibForkBuildLinux): upstream's "convert-models" was the
++        // GR2 mesh batch action (disambiguated from the resource batch action via the
++        // graphicsActions array below); it, "convert-model" and "build-vt" no longer
++        // exist as valid --action values (see CommandLineArguments.cs), so the
++        // graphicsActions array and the GR2Options/ConformPath/VTConfigPath/VTRootPath
++        // setup below were removed. Only "convert-resources" (LSB/LSF/LSJ/LSX batch
++        // conversion) remains a batch action here.
+         string[] batchActions =
+         {
+             "extract-packages",
+-            "convert-models",
+             "convert-resources"
+         };
+ 
+@@ -54,12 +58,6 @@ internal class CommandLineActions
+             "extract-packages"
+         };
+ 
+-        string[] graphicsActions =
+-        {
+-            "convert-model",
+-            "convert-models"
+-        };
+-
+         LogLevel = CommandLineArguments.GetLogLevelByString(args.LogLevel);
+         CommandLineLogger.LogDebug($"Using log level: {LogLevel}");
+ 
+@@ -67,8 +65,6 @@ internal class CommandLineActions
+         CommandLineLogger.LogDebug($"Using game: {Game}");
+ 
+         LegacyGuids = args.LegacyGuids;
+-        FastBuild = args.FastBuild;
+-        VTValidate = args.VTValidate;
+ 
+         if (batchActions.Any(args.Action.Contains))
+         {
+@@ -103,39 +99,8 @@ internal class CommandLineActions
+             CommandLineLogger.LogDebug($"Using package version: {PackageVersion}");
+         }
+ 
+-        if (args.Action == "build-vt")
+-        {
+-            VTConfigPath = TryToValidatePath(args.Source);
+-            VTRootPath = TryToValidatePath(args.VTRoot);
+-        }
+-
+-        if (graphicsActions.Any(args.Action.Contains))
+-        {
+-            GR2Options = CommandLineArguments.GetGR2Options(args.Options);
+-
+-            if(LogLevel == LogLevel.DEBUG || LogLevel == LogLevel.ALL)
+-            {
+-                CommandLineLogger.LogDebug("Using graphics options:");
+-
+-                foreach (KeyValuePair<string, bool> x in GR2Options)
+-                {
+-                    CommandLineLogger.LogDebug($"   {x.Key} = {x.Value}");
+-                }
+-
+-            }
+-
+-            if (args.ConformPath != null && args.ConformPath != "")
+-            {
+-                ConformPath = TryToValidatePath(args.ConformPath);
+-                if (!Path.Exists(ConformPath))
+-                {
+-                    CommandLineLogger.LogFatal($"Skeleton source GR2 does not exist: {args.ConformPath}", 1);
+-                }
+-            }
+-        }
+-
+         SourcePath = TryToValidatePath(args.Source);
+-        if (args.Action != "list-package" && args.Action != "build-vt")
++        if (args.Action != "list-package")
+         {
+             DestinationPath = TryToValidatePath(args.Destination);
+         }
+@@ -201,12 +166,7 @@ internal class CommandLineActions
+                 break;
+             }
+ 
+-            case "convert-model":
+-            {
+-                CommandLineGR2Processor.UpdateExporterSettings();
+-                CommandLineGR2Processor.Convert();
+-                break;
+-            }
++            // "convert-model" (GR2 mesh conversion) removed — see CommandLineArguments.cs.
+ 
+             case "convert-resource":
+             {
+@@ -226,11 +186,8 @@ internal class CommandLineActions
+                 break;
+             }
+ 
+-            case "convert-models":
+-            {
+-                CommandLineGR2Processor.BatchConvert();
+-                break;
+-            }
++            // "convert-models" (GR2 batch mesh conversion) and "build-vt" (virtual
++            // texture tileset building) removed — see CommandLineArguments.cs.
+ 
+             case "convert-resources":
+             {
+@@ -238,12 +195,6 @@ internal class CommandLineActions
+                 break;
+             }
+ 
+-            case "build-vt":
+-            {
+-                CommandLineDataProcessor.BuildVirtualTextureSet();
+-                break;
+-            }
+-
+             default:
+             {
+                 throw new ArgumentException($"Unhandled action: {args.Action}");
+diff --git a/Divine/CLI/CommandLineArguments.cs b/Divine/CLI/CommandLineArguments.cs
+index b73e14b..497fc3e 100644
+--- a/Divine/CLI/CommandLineArguments.cs
++++ b/Divine/CLI/CommandLineArguments.cs
+@@ -1,9 +1,6 @@
+ ﻿using System;
+ using System.Collections.Generic;
+-using System.IO;
+-using System.Linq;
+ using CommandLineParser.Arguments;
+-using LSLib.Granny.Model;
+ using LSLib.LS;
+ using LSLib.LS.Enums;
+ 
+@@ -59,10 +56,14 @@ public class CommandLineArguments
+     public string PackagedPath;
+ 
+     // @formatter:off
++    // BG3Tools fork (fix/LSLibForkBuildLinux): dropped "dae;glb;gltf;gr2" (3D
++    // model formats, convert-model[s] only) and "lsv" (savegames) from the
++    // allowed values below — both are out of scope for a .pak-only fork and
++    // their backing code (Granny/GR2, LS/Save) is excluded from LSLib.csproj.
+     [EnumeratedValueArgument(typeof(string), 'i', "input-format",
+         Description = "Set input format for batch operations",
+         DefaultValue = null,
+-        AllowedValues = "dae;glb;gltf;gr2;lsv;pak;lsj;lsx;lsb;lsf",
++        AllowedValues = "pak;lsj;lsx;lsb;lsf",
+         ValueOptional = false,
+         Optional = true
+     )]
+@@ -72,17 +73,20 @@ public class CommandLineArguments
+     [EnumeratedValueArgument(typeof(string), 'o', "output-format",
+         Description = "Set output format for batch operations",
+         DefaultValue = null,
+-        AllowedValues = "dae;glb;gltf;gr2;lsv;pak;lsj;lsx;lsb;lsf",
++        AllowedValues = "pak;lsj;lsx;lsb;lsf",
+         ValueOptional = false,
+         Optional = true
+     )]
+     public string OutputFormat;
+ 
+-    // @formatter:off
++    // BG3Tools fork (fix/LSLibForkBuildLinux): dropped "convert-model",
++    // "convert-models" (GR2 mesh/animation conversion — needs the native,
++    // MSVC-only LSLibNative) and "build-vt" (virtual texture tileset
++    // building — unrelated to .pak handling) from the allowed actions.
+     [EnumeratedValueArgument(typeof(string), 'a', "action",
+         Description = "Set action to execute",
+         DefaultValue = "extract-package",
+-        AllowedValues = "create-package;list-package;extract-single-file;extract-package;extract-packages;convert-model;convert-models;convert-resource;convert-resources;convert-loca;build-vt",
++        AllowedValues = "create-package;list-package;extract-single-file;extract-package;extract-packages;convert-resource;convert-resources;convert-loca",
+         ValueOptional = false,
+         Optional = false
+     )]
+@@ -98,16 +102,6 @@ public class CommandLineArguments
+     )]
+     public string PakCompressionMethod;
+ 
+-    // @formatter:off
+-    [EnumeratedValueArgument(typeof(string), 'e', "gr2-options",
+-        Description = "Set extra options for GR2/DAE conversion",
+-        AllowMultiple = true,
+-        AllowedValues = "export-normals;export-tangents;export-uvs;export-colors;deduplicate-vertices;deduplicate-uvs;recalculate-normals;recalculate-tangents;recalculate-iwt;flip-uvs;ignore-uv-nan;disable-qtangents;y-up-skeletons;force-legacy-version;compact-tris;build-dummy-skeleton;apply-basis-transforms;mirror-skeletons;x-flip-meshes;conform;conform-copy",
+-        ValueOptional = false,
+-        Optional = true
+-    )]
+-    public string[] Options;
+-
+ 		// @formatter:off
+ 		[ValueArgument(typeof(string), 'x', "expression",
+         Description = "Set glob expression for extract and list actions",
+@@ -117,14 +111,11 @@ public class CommandLineArguments
+     )]
+     public string Expression;
+ 
+-    // @formatter:off
+-    [ValueArgument(typeof(string), "conform-path",
+-        Description = "Set conform to original path",
+-        DefaultValue = null,
+-        ValueOptional = false,
+-        Optional = true
+-    )]
+-    public string ConformPath;
++    // BG3Tools fork (fix/LSLibForkBuildLinux): "gr2-options" (-e), "conform-path",
++    // "fast-build", "vt-validate" and "vt-root" arguments removed below — they only
++    // configured the now-removed convert-model[s]/build-vt actions (GR2 mesh
++    // conversion and virtual-texture tileset building), out of scope for this
++    // .pak-only fork. See CommandLineActions.cs and CommandLineDataProcessor.cs.
+ 
+     // @formatter:off
+     [ValueArgument(typeof(int), "package-priority",
+@@ -142,20 +133,6 @@ public class CommandLineArguments
+     )]
+     public bool LegacyGuids;
+ 
+-    // @formatter:off
+-    [SwitchArgument("fast-build", false,
+-        Description = "Faster VT build, but lower compression ratio",
+-        Optional = true
+-    )]
+-    public bool FastBuild;
+-
+-    // @formatter:off
+-    [SwitchArgument("vt-validate", false,
+-        Description = "Validate generated VT files",
+-        Optional = true
+-    )]
+-    public bool VTValidate;
+-
+     // @formatter:off
+     [SwitchArgument("use-package-name", false,
+         Description = "Use package name for destination folder",
+@@ -170,15 +147,6 @@ public class CommandLineArguments
+     )]
+     public bool UseRegex;
+ 
+-    // @formatter:off
+-    [ValueArgument(typeof(string), "vt-root",
+-        Description = "Tileset build mod root path",
+-        DefaultValue = null,
+-        ValueOptional = false,
+-        Optional = true
+-    )]
+-    public string VTRoot;
+-
+     // @formatter:on
+     public static LogLevel GetLogLevelByString(string logLevel)
+     {
+@@ -348,45 +316,8 @@ public class CommandLineArguments
+         return compressionOptions;
+     }
+ 
+-    public static Dictionary<string, bool> GetGR2Options(string[] options)
+-    {
+-        var results = new Dictionary<string, bool>
+-        {
+-            { "deduplicate-vertices", true },
+-            { "flip-uvs", true },
+-            { "ignore-uv-nan", true },
+-            { "disable-qtangents", false },
+-            { "y-up-skeletons", true },
+-            { "force-legacy-version", false },
+-            { "compact-tris", true },
+-            { "build-dummy-skeleton", true },
+-            { "apply-basis-transforms", true },
+-            { "mirror-skeletons", false },
+-            { "x-flip-meshes", false },
+-            { "conform", false },
+-            { "conform-copy", false },
+-            
+-            // Deprecated options, no longer in use
+-            { "export-normals", true },
+-            { "export-tangents", true },
+-            { "export-uvs", true },
+-            { "export-colors", true },
+-            { "recalculate-normals", false },
+-            { "recalculate-tangents", false },
+-            { "recalculate-iwt", false },
+-            { "deduplicate-uvs", true }
+-        };
+-
+-        if (options == null)
+-        {
+-            return results;
+-        }
+-
+-        foreach (string option in options.Where(option => results.Keys.Contains(option)))
+-        {
+-            results[option] = true;
+-        }
+-
+-        return results;
+-    }
++    // GetGR2Options() removed (BG3Tools fork, fix/LSLibForkBuildLinux): only used to
++    // configure the removed convert-model[s] action's GR2 mesh conversion. See the
++    // removed "gr2-options" argument above and CommandLineGR2Processor.cs (excluded
++    // from Divine.csproj).
+ }
+diff --git a/Divine/CLI/CommandLineDataProcessor.cs b/Divine/CLI/CommandLineDataProcessor.cs
+index f6442a0..565767e 100644
+--- a/Divine/CLI/CommandLineDataProcessor.cs
++++ b/Divine/CLI/CommandLineDataProcessor.cs
+@@ -1,9 +1,6 @@
+ ﻿using LSLib.LS;
+ using LSLib.LS.Enums;
+-using LSLib.VirtualTextures;
+ using System;
+-using System.IO;
+-using System.Linq;
+ 
+ namespace Divine.CLI;
+ 
+@@ -46,39 +43,9 @@ internal class CommandLineDataProcessor
+         }
+     }
+ 
+-    public static void BuildVirtualTextureSet()
+-    {
+-        try
+-        {
+-            var descriptor = new TileSetDescriptor();
+-            descriptor.RootPath = CommandLineActions.VTRootPath;
+-            descriptor.Config.FastBuild = CommandLineActions.FastBuild;
+-            descriptor.Config.Validate = CommandLineActions.VTValidate;
+-            descriptor.Load(CommandLineActions.VTConfigPath);
+-
+-            var builder = new TileSetBuilder(descriptor.Config);
+-            foreach (var texture in descriptor.Textures)
+-            {
+-                var layerPaths = texture.Layers.Select(name => name != null ? Path.Combine(descriptor.SourceTexturePath, name) : null).ToList();
+-                builder.AddTexture(texture.Name, layerPaths);
+-            }
+-
+-            builder.Build(descriptor.VirtualTexturePath);
+-        }
+-        catch (InvalidDataException e)
+-        {
+-            CommandLineLogger.LogFatal($"Failed to build tileset: {e.Message}", 2);
+-        }
+-        catch (FileNotFoundException e)
+-        {
+-            CommandLineLogger.LogFatal($"Failed to build tileset: {e.Message}", 2);
+-        }
+-        catch (Exception e)
+-        {
+-            CommandLineLogger.LogFatal($"Failed to build tileset: {e.Message}", 2);
+-            CommandLineLogger.LogTrace($"{e.StackTrace}");
+-        }
+-    }
++    // BuildVirtualTextureSet() removed (BG3Tools fork, fix/LSLibForkBuildLinux): backed
++    // the removed "build-vt" action (virtual texture tileset building), out of scope
++    // for this .pak-only fork; LSLib's VirtualTextures/** is excluded from LSLib.csproj.
+ 
+     public static void ConvertLoca()
+     {
+diff --git a/Divine/Divine.csproj b/Divine/Divine.csproj
+index e4a8d2e..79aeffa 100644
+--- a/Divine/Divine.csproj
++++ b/Divine/Divine.csproj
+@@ -12,6 +12,18 @@
+   <ItemGroup>
+     <ProjectReference Include="..\LSLib\LSLib.csproj" />
+   </ItemGroup>
++  <ItemGroup>
++    <!--
++      BG3Tools fork scope reduction (fix/LSLibForkBuildLinux): CommandLineGR2Processor
++      wires up the convert-model/convert-models CLI actions (GR2 mesh/animation
++      conversion), which depend on LSLib's Granny/GR2 code — excluded from LSLib.csproj
++      because it needs the native, MSVC-only LSLibNative library. Those two actions were
++      also removed from CommandLineArguments/CommandLineActions (see those files), so
++      this file is now dead code; excluded here rather than deleted so a future
++      maintainer can restore GR2 support by reverting both without hunting for the file.
++    -->
++    <Compile Remove="CLI\CommandLineGR2Processor.cs" />
++  </ItemGroup>
+   <ItemGroup>
+     <PackageReference Include="CommandLineArgumentsParser" Version="3.0.23" />
+     <PackageReference Include="System.Data.DataSetExtensions" Version="4.5.0" />
+diff --git a/LSLib/LS/Mods/ModResources.cs b/LSLib/LS/Mods/ModResources.cs
+index 5979541..3c79c91 100644
+--- a/LSLib/LS/Mods/ModResources.cs
++++ b/LSLib/LS/Mods/ModResources.cs
+@@ -1,4 +1,9 @@
+-﻿using LSLib.LS.Story.Compiler;
++﻿// BG3Tools fork (fix/LSLibForkBuildLinux): `using LSLib.LS.Story.Compiler;` replaced by
++// `using LSLib.LS.Enums;` below — this file only used that namespace for the
++// `TargetGame` enum (DOS2/DOS2DE/BG3), and LS/Story/** is excluded from the build (see
++// LSLib.csproj). Switched to the equivalent, already-present `LSLib.LS.Enums.Game`
++// enum instead (DivinityOriginalSin2/BaldursGate3 etc.) — see the Game field/param below.
++using LSLib.LS.Enums;
+ using System.Text.RegularExpressions;
+ 
+ namespace LSLib.LS;
+@@ -52,7 +57,8 @@ public partial class ModPathVisitor
+     public bool CollectGlobals = false;
+     public bool CollectLevels = false;
+     public bool CollectGuidResources = false;
+-    public TargetGame Game = TargetGame.DOS2;
++    // Fully qualified to avoid ambiguity between the "Game" field and the "Game" enum type.
++    public Game Game = LSLib.LS.Enums.Game.DivinityOriginalSin2;
+     public VFS FS;
+ 
+     public ModPathVisitor(ModResources resources, VFS fs)
+@@ -264,7 +270,7 @@ public class GameDataContext
+     public VFS FS;
+     public ModResources Resources;
+ 
+-    public GameDataContext(string path, TargetGame game = TargetGame.BG3, bool excludeAssets = true, bool loadUnpackedFiles = true)
++    public GameDataContext(string path, Game game = LSLib.LS.Enums.Game.BaldursGate3, bool excludeAssets = true, bool loadUnpackedFiles = true)
+     {
+         FS = new VFS();
+         FS.AttachGameDirectory(path, excludeAssets, loadUnpackedFiles);
+diff --git a/LSLib/LS/PackageReader.cs b/LSLib/LS/PackageReader.cs
+index 0fa3f67..0d72e97 100644
+--- a/LSLib/LS/PackageReader.cs
++++ b/LSLib/LS/PackageReader.cs
+@@ -1,4 +1,5 @@
+-﻿using LSLib.LS.Enums;
++﻿using K4os.Compression.LZ4.Streams;
++using LSLib.LS.Enums;
+ using System.IO.MemoryMappedFiles;
+ 
+ namespace LSLib.LS;
+@@ -210,7 +211,22 @@ public class PackageReader
+         byte[] frame = new byte[lastOffset - Pak.Metadata.DataOffset];
+         view.ReadArray(Pak.Metadata.DataOffset, frame, 0, (int)(lastOffset - Pak.Metadata.DataOffset));
+ 
+-        byte[] decompressed = Native.LZ4FrameCompressor.Decompress(frame);
++        // BG3Tools fork (fix/LSLibForkBuildLinux): upstream used the native, MSVC-only
++        // LSLibNative.Native.LZ4FrameCompressor.Decompress() (LSLibNative/lz4wrapper.cpp,
++        // a thin C++/CLI wrapper around lz4frame.h) here. Replaced with the managed LZ4
++        // frame decoder from the K4os.Compression.LZ4.Streams package (already a
++        // dependency, and already used the same way for chunked LZ4 in Compression.cs)
++        // so solid-archive .pak reading doesn't need LSLibNative.
++        byte[] decompressed;
++        using (var compressedStream = new MemoryStream(frame))
++        using (var decompressedStream2 = new MemoryStream())
++        {
++            using (var decompressor = LZ4Stream.Decode(compressedStream))
++            {
++                decompressor.CopyTo(decompressedStream2);
++            }
++            decompressed = decompressedStream2.ToArray();
++        }
+         var decompressedStream = new MemoryStream(decompressed);
+ 
+         // Update offsets to point to the decompressed chunk
+diff --git a/LSLib/LSLib.csproj b/LSLib/LSLib.csproj
+index 4a6604e..78fd52e 100644
+--- a/LSLib/LSLib.csproj
++++ b/LSLib/LSLib.csproj
+@@ -22,8 +22,47 @@
+     <PlatformTarget>x86</PlatformTarget>
+     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
+   </PropertyGroup>
++  <!--
++    BG3Tools fork scope reduction (fix/LSLibForkBuildLinux): this fork only
++    needs to read/write/edit .pak archives (and the LSB/LSF/LSJ/LSX resources
++    they contain) — see README "About this fork". Everything below trims the
++    project to what Divine's pak/resource/loca commands actually use, so the
++    whole solution can build on Linux/.NET 8 without MSVC or the Windows-only
++    GPLex/GPPG toolchain.
++  -->
+   <ItemGroup>
+-    <ProjectReference Include="..\LSLibNative\LSLibNative.vcxproj" />
++    <!--
++      LSLibNative is the native C++ GR2/Granny reader (LSLibNative.vcxproj).
++      It requires MSVC and is only consumed by LSLib's Granny/GR2 mesh code
++      below, which is also excluded — so the reference itself is dropped.
++    -->
++  </ItemGroup>
++  <ItemGroup>
++    <!--
++      Excluded from compilation (out of scope for a .pak-only build):
++        - Granny/**            GR2 mesh/animation import-export. Needs the
++                                native LSLibNative library (MSVC-only), and
++                                nothing in the pak read/write/resource-convert
++                                path depends on it.
++        - VirtualTextures/**    BG3 virtual texture (.gts/.gtp) tileset
++                                 building, unrelated to .pak handling.
++        - LS/Story/**           Osiris story/goal database compiler+parser.
++                                 Needs Windows-only GPLex 1.2.2 / GPPG 1.5.2
++                                 to generate Goal.lex.cs/Goal.yy.cs/
++                                 StoryHeader.lex.cs/StoryHeader.yy.cs at build
++                                 time (see the removed PreBuildEvent below);
++                                 those generators have no Linux build.
++        - LS/Save/**            Savegame (.lsv) helpers, a distinct container
++                                 format from mod .pak archives and outside the
++                                 "read/write/edit .pak" goal.
++      Kept: LS/Resources (LSB/LSF/LSJ/LSX conversion), LS/Stats, LS/Mods,
++      LS/Enums, and the top-level LS/*.cs (VFS, PackageReader/Writer,
++      Compression, Localization, ...) that implement .pak I/O itself.
++    -->
++    <Compile Remove="Granny\**\*.cs" />
++    <Compile Remove="VirtualTextures\**\*.cs" />
++    <Compile Remove="LS\Story\**\*.cs" />
++    <Compile Remove="LS\Save\**\*.cs" />
+   </ItemGroup>
+   <ItemGroup>
+     <PackageReference Include="BCnEncoder.Net" Version="2.3.0" />
+@@ -40,13 +79,11 @@
+   </ItemGroup>
+   <PropertyGroup />
+   <PropertyGroup>
+-    <PreBuildEvent>"$(SolutionDir)\external\gppg\binaries\GpLex" /out:"$(MSBuildProjectDirectory)\LS\Story\GoalParser\Goal.lex.cs" "$(MSBuildProjectDirectory)\LS\Story\GoalParser\Goal.lex"
+-"$(SolutionDir)\external\gppg\binaries\Gppg" /out:"$(MSBuildProjectDirectory)\LS\Story\GoalParser\Goal.yy.cs" "$(MSBuildProjectDirectory)\LS\Story\GoalParser\Goal.yy"
+-
+-"$(SolutionDir)\external\gppg\binaries\GpLex" /out:"$(MSBuildProjectDirectory)\LS\Story\HeaderParser\StoryHeader.lex.cs" "$(MSBuildProjectDirectory)\LS\Story\HeaderParser\StoryHeader.lex"
+-"$(SolutionDir)\external\gppg\binaries\Gppg" /out:"$(MSBuildProjectDirectory)\LS\Story\HeaderParser\StoryHeader.yy.cs" "$(MSBuildProjectDirectory)\LS\Story\HeaderParser\StoryHeader.yy"
+-
+-</PreBuildEvent>
++    <!--
++      Upstream's PreBuildEvent ran GpLex/Gppg (Windows-only) here to generate
++      the Osiris Story/Goal parser sources. Removed along with LS/Story/**
++      above — see the Compile Remove comment for why.
++    -->
+     <AssemblyTitle>LSLib</AssemblyTitle>
+     <Product>LSLib</Product>
+     <Copyright>Copyright © Norbyte 2012-2023</Copyright>
+diff --git a/LSTools.sln b/LSTools.sln
+index ed26929..c58a339 100644
+--- a/LSTools.sln
++++ b/LSTools.sln
+@@ -1,276 +1,70 @@
+-Microsoft Visual Studio Solution File, Format Version 12.00
+-# Visual Studio Version 17
+-VisualStudioVersion = 17.8.34309.116
+-MinimumVisualStudioVersion = 10.0.40219.1
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LSLib", "LSLib\LSLib.csproj", "{46372C50-4288-4B8E-AF21-C934560600E0}"
+-EndProject
+-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LSLibNative", "LSLibNative\LSLibNative.vcxproj", "{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}"
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ConverterApp", "ConverterApp\ConverterApp.csproj", "{FAD67294-6223-47E0-8838-E4E7FBC53ED2}"
+-	ProjectSection(ProjectDependencies) = postProject
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1} = {D8B26B12-E45C-47EA-88F7-56628EB2CCD1}
+-	EndProjectSection
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Divine", "Divine\Divine.csproj", "{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}"
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RconClient", "RconClient\RconClient.csproj", "{EF82C289-53D6-41C8-B5C3-72B37655C7F3}"
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "StoryCompiler", "StoryCompiler\StoryCompiler.csproj", "{32F08B9A-F50B-4C2E-AB56-533FED066DDE}"
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DebuggerFrontend", "DebuggerFrontend\DebuggerFrontend.csproj", "{31E71543-CBCF-43BB-AF77-D210D548118E}"
+-	ProjectSection(ProjectDependencies) = postProject
+-		{46372C50-4288-4B8E-AF21-C934560600E0} = {46372C50-4288-4B8E-AF21-C934560600E0}
+-	EndProjectSection
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "StoryDecompiler", "StoryDecompiler\StoryDecompiler.csproj", "{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}"
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "StatParser", "StatParser\StatParser.csproj", "{94D900D1-EC77-4170-8942-56E3736E44DE}"
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VTexTool", "VTexTool\VTexTool.csproj", "{67E646C2-3C3C-4327-A0B4-40C1DB32579F}"
+-	ProjectSection(ProjectDependencies) = postProject
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1} = {D8B26B12-E45C-47EA-88F7-56628EB2CCD1}
+-	EndProjectSection
+-EndProject
+-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{6DF990BA-71FD-4DAE-9BAD-53B4B9097C13}"
+-	ProjectSection(SolutionItems) = preProject
+-		.editorconfig = .editorconfig
+-	EndProjectSection
+-EndProject
+-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PhysicsTool", "PhysicsTool\PhysicsTool.vcxproj", "{043514DF-5822-41A0-A5CE-CBC349B1398B}"
+-EndProject
+-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LSLibStats", "LSLibStats\LSLibStats.csproj", "{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}"
+-EndProject
+-Global
+-	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+-		Debug|Any CPU = Debug|Any CPU
+-		Debug|x64 = Debug|x64
+-		Debug|x86 = Debug|x86
+-		Release|Any CPU = Release|Any CPU
+-		Release|x64 = Release|x64
+-		Release|x86 = Release|x86
+-		RelWithDebInfo|Any CPU = RelWithDebInfo|Any CPU
+-		RelWithDebInfo|x64 = RelWithDebInfo|x64
+-		RelWithDebInfo|x86 = RelWithDebInfo|x86
+-	EndGlobalSection
+-	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|x64.Build.0 = Debug|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|x86.Build.0 = Debug|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|x64.ActiveCfg = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|x64.Build.0 = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|x86.ActiveCfg = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|x86.Build.0 = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Debug|Any CPU.ActiveCfg = Debug|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Debug|Any CPU.Build.0 = Debug|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Debug|x64.ActiveCfg = Debug|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Debug|x86.ActiveCfg = Debug|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Debug|x86.Build.0 = Debug|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Release|Any CPU.ActiveCfg = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Release|Any CPU.Build.0 = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Release|x64.ActiveCfg = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Release|x86.ActiveCfg = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.Release|x86.Build.0 = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.RelWithDebInfo|Any CPU.ActiveCfg = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.RelWithDebInfo|Any CPU.Build.0 = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.RelWithDebInfo|x64.ActiveCfg = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.RelWithDebInfo|x86.ActiveCfg = Release|x64
+-		{D8B26B12-E45C-47EA-88F7-56628EB2CCD1}.RelWithDebInfo|x86.Build.0 = Release|x64
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Debug|x64.Build.0 = Debug|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Debug|x86.Build.0 = Debug|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Release|x64.ActiveCfg = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Release|x64.Build.0 = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Release|x86.ActiveCfg = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.Release|x86.Build.0 = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{FAD67294-6223-47E0-8838-E4E7FBC53ED2}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|x64.Build.0 = Debug|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|x86.Build.0 = Debug|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|x64.ActiveCfg = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|x64.Build.0 = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|x86.ActiveCfg = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|x86.Build.0 = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Debug|x64.Build.0 = Debug|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Debug|x86.Build.0 = Debug|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Release|x64.ActiveCfg = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Release|x64.Build.0 = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Release|x86.ActiveCfg = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.Release|x86.Build.0 = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{EF82C289-53D6-41C8-B5C3-72B37655C7F3}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Debug|x64.Build.0 = Debug|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Debug|x86.Build.0 = Debug|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Release|x64.ActiveCfg = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Release|x64.Build.0 = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Release|x86.ActiveCfg = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.Release|x86.Build.0 = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{32F08B9A-F50B-4C2E-AB56-533FED066DDE}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Debug|x64.Build.0 = Debug|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Debug|x86.Build.0 = Debug|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Release|x64.ActiveCfg = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Release|x64.Build.0 = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Release|x86.ActiveCfg = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.Release|x86.Build.0 = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{31E71543-CBCF-43BB-AF77-D210D548118E}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Debug|x64.Build.0 = Debug|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Debug|x86.Build.0 = Debug|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Release|x64.ActiveCfg = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Release|x64.Build.0 = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Release|x86.ActiveCfg = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.Release|x86.Build.0 = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{E4B4F95E-F027-44D7-AB93-B96EF2E661B6}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Debug|x64.Build.0 = Debug|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Debug|x86.Build.0 = Debug|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Release|x64.ActiveCfg = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Release|x64.Build.0 = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Release|x86.ActiveCfg = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.Release|x86.Build.0 = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{94D900D1-EC77-4170-8942-56E3736E44DE}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Debug|x64.Build.0 = Debug|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Debug|x86.Build.0 = Debug|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Release|x64.ActiveCfg = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Release|x64.Build.0 = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Release|x86.ActiveCfg = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.Release|x86.Build.0 = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{67E646C2-3C3C-4327-A0B4-40C1DB32579F}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Debug|Any CPU.ActiveCfg = Debug|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Debug|Any CPU.Build.0 = Debug|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Debug|x64.ActiveCfg = Debug|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Debug|x64.Build.0 = Debug|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Debug|x86.ActiveCfg = Debug|Win32
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Debug|x86.Build.0 = Debug|Win32
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Release|Any CPU.ActiveCfg = Release|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Release|Any CPU.Build.0 = Release|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Release|x64.ActiveCfg = Release|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Release|x64.Build.0 = Release|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Release|x86.ActiveCfg = Release|Win32
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.Release|x86.Build.0 = Release|Win32
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.RelWithDebInfo|Any CPU.ActiveCfg = Release|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.RelWithDebInfo|Any CPU.Build.0 = Release|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.RelWithDebInfo|x64.ActiveCfg = Release|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.RelWithDebInfo|x64.Build.0 = Release|x64
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.RelWithDebInfo|x86.ActiveCfg = Release|Win32
+-		{043514DF-5822-41A0-A5CE-CBC349B1398B}.RelWithDebInfo|x86.Build.0 = Release|Win32
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Debug|Any CPU.Build.0 = Debug|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Debug|x64.ActiveCfg = Debug|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Debug|x64.Build.0 = Debug|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Debug|x86.ActiveCfg = Debug|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Debug|x86.Build.0 = Debug|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Release|Any CPU.ActiveCfg = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Release|Any CPU.Build.0 = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Release|x64.ActiveCfg = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Release|x64.Build.0 = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Release|x86.ActiveCfg = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.Release|x86.Build.0 = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
+-		{A721CE1D-F76D-476B-86E7-C8B2D85D7E73}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
+-	EndGlobalSection
+-	GlobalSection(SolutionProperties) = preSolution
+-		HideSolutionNode = FALSE
+-	EndGlobalSection
+-	GlobalSection(ExtensibilityGlobals) = postSolution
+-		SolutionGuid = {2CCBBA64-DB08-4DC9-B08A-2F13F0733AAC}
+-	EndGlobalSection
+-EndGlobal
++Microsoft Visual Studio Solution File, Format Version 12.00
++# Visual Studio Version 17
++VisualStudioVersion = 17.8.34309.116
++MinimumVisualStudioVersion = 10.0.40219.1
++Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LSLib", "LSLib\LSLib.csproj", "{46372C50-4288-4B8E-AF21-C934560600E0}"
++EndProject
++Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Divine", "Divine\Divine.csproj", "{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}"
++EndProject
++Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{6DF990BA-71FD-4DAE-9BAD-53B4B9097C13}"
++	ProjectSection(SolutionItems) = preProject
++		.editorconfig = .editorconfig
++	EndProjectSection
++EndProject
++Global
++	GlobalSection(SolutionConfigurationPlatforms) = preSolution
++		Debug|Any CPU = Debug|Any CPU
++		Debug|x64 = Debug|x64
++		Debug|x86 = Debug|x86
++		Release|Any CPU = Release|Any CPU
++		Release|x64 = Release|x64
++		Release|x86 = Release|x86
++		RelWithDebInfo|Any CPU = RelWithDebInfo|Any CPU
++		RelWithDebInfo|x64 = RelWithDebInfo|x64
++		RelWithDebInfo|x86 = RelWithDebInfo|x86
++	EndGlobalSection
++	GlobalSection(ProjectConfigurationPlatforms) = postSolution
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|Any CPU.Build.0 = Debug|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|x64.ActiveCfg = Debug|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|x64.Build.0 = Debug|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|x86.ActiveCfg = Debug|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Debug|x86.Build.0 = Debug|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|Any CPU.ActiveCfg = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|Any CPU.Build.0 = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|x64.ActiveCfg = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|x64.Build.0 = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|x86.ActiveCfg = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.Release|x86.Build.0 = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
++		{46372C50-4288-4B8E-AF21-C934560600E0}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|Any CPU.Build.0 = Debug|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|x64.ActiveCfg = Debug|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|x64.Build.0 = Debug|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|x86.ActiveCfg = Debug|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Debug|x86.Build.0 = Debug|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|Any CPU.ActiveCfg = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|Any CPU.Build.0 = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|x64.ActiveCfg = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|x64.Build.0 = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|x86.ActiveCfg = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.Release|x86.Build.0 = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|Any CPU.ActiveCfg = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|Any CPU.Build.0 = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|x64.ActiveCfg = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|x64.Build.0 = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|x86.ActiveCfg = Release|Any CPU
++		{CBFEE38F-5F12-4D6F-B4FB-267FB68A6BEA}.RelWithDebInfo|x86.Build.0 = Release|Any CPU
++	EndGlobalSection
++	GlobalSection(SolutionProperties) = preSolution
++		HideSolutionNode = FALSE
++	EndGlobalSection
++	GlobalSection(ExtensibilityGlobals) = postSolution
++		SolutionGuid = {2CCBBA64-DB08-4DC9-B08A-2F13F0733AAC}
++	EndGlobalSection
++EndGlobal
+-- 
+2.55.0
+
