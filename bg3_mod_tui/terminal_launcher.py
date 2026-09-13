@@ -404,6 +404,26 @@ def _try_windows_terminal(command: list[str], env: dict[str, str]) -> bool:
     return False
 
 
+def open_in_terminal(command: list[str]) -> bool:
+    """Ouvre un terminal externe (même détection multi-émulateur que
+    `relaunch_in_dedicated_terminal` : Konsole/kitty/alacritty/xterm/...
+    sous Linux, Windows Terminal/PowerShell sous Windows) et y exécute
+    `command`, sans le profil/police/thème dédiés ni la relance du TUI
+    (utilisé par un outil ponctuel, ex. le suivi des logs Script Extender —
+    voir `script_extender_console.py` — pas par le TUI lui-même).
+
+    Retourne True si un terminal a effectivement pu être ouvert, False
+    sinon (aucun émulateur trouvé, ou pas d'affichage disponible sous
+    Linux) — l'appelant doit alors se rabattre sur un autre moyen d'informer
+    l'utilisateur (ex. un message dans le TUI), jamais bloquer ni planter."""
+    env = os.environ.copy()
+    if is_windows():
+        return _try_windows_terminal(command, env)
+    if not _has_display():
+        return False
+    return _try_linux_terminal(command, env)
+
+
 def relaunch_in_dedicated_terminal() -> bool:
     """Tente d'ouvrir un terminal dédié (police MesloLGS NF quand
     l'émulateur le permet) et d'y relancer le TUI. Retourne True si un
