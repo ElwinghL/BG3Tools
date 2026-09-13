@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-"""Compare trois lecteurs de .pak BG3 (LSPK) — Python natif (`pak_reader`),
-Rust natif (`pak_reader_rs`, crate `bg3rustpaklib` + PyO3) et Divine.exe —
-chacun exécuté séparément avec son propre rapport JSON, puis un diff final
-qui les croise (identité UUID/Name, liste des fichiers, tailles, hash
-SHA-256 du contenu décompressé).
+"""Compare quatre lecteurs de .pak BG3 (LSPK) — Python natif (`pak_reader`),
+Rust via binding PyO3 (`pak_reader_rs`, crate `bg3rustpaklib` + PyO3),
+Rust natif isolé (binaire `native_timing`, mêmes opérations mais sans
+Python/PyO3 dans la boucle) et Divine.exe — chacun exécuté séparément avec
+son propre rapport JSON, puis un diff final qui les croise (identité
+UUID/Name, liste des fichiers, tailles, hash SHA-256 du contenu
+décompressé).
+
+Le chemin `rust-native` existe spécifiquement pour isoler le coût du
+binding FFI/PyO3 : `rust` (PyO3) mesure Python → PyO3 → `bg3rustpaklib`,
+`rust-native` mesure `bg3rustpaklib` directement en Rust pur. La différence
+entre les deux quantifie l'overhead FFI/binding (voir
+`Tools/bg3rustpaklib/README.md#comparisons`). Comme ce chemin ne remonte
+pas la table des fichiers ni les hash de contenu (timing seulement), il
+n'est pas croisé structurellement dans `diff` — seule sa comparaison de
+timing avec `rust` y est affichée.
 
 Deux étapes :
 
-1. `run --tool {python,rust,divine}` : scanne des .pak, produit
+1. `run --tool {python,rust,rust-native,divine}` : scanne des .pak, produit
    `reports/<tool>_report.json` (chronométrage inclus). Un run par outil,
    indépendant des autres — on peut relancer un seul outil sans repasser
    sur les autres.
@@ -18,11 +29,15 @@ Deux étapes :
 Usage :
     python scripts/compare_pak_reader.py run --tool python
     python scripts/compare_pak_reader.py run --tool rust
+    python scripts/compare_pak_reader.py run --tool rust-native
     python scripts/compare_pak_reader.py run --tool divine --divine-exe Tools/ExportTools/Tools/Divine.exe
     python scripts/compare_pak_reader.py diff
 
-Le lecteur Rust doit être compilé au préalable :
+Le lecteur Rust (binding PyO3) doit être compilé au préalable :
     uv run maturin develop --manifest-path rust/pak_reader_rs/Cargo.toml
+
+Le binaire Rust natif (`rust-native`) doit être compilé au préalable :
+    cargo build --example native_timing --release --manifest-path Tools/bg3rustpaklib/Cargo.toml
 """
 
 from __future__ import annotations
@@ -31,6 +46,7 @@ import argparse
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -48,6 +64,8 @@ from bg3_mod_tui.pak_metadata import PakMetadataError, _path_arg, _run_divine, p
 from bg3_mod_tui.platform_utils import is_windows
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
+_BG3RUSTPAKLIB_DIR = Path(__file__).resolve().parent.parent / "Tools" / "bg3rustpaklib"
+_NATIVE_TIMING_BIN = _BG3RUSTPAKLIB_DIR / "target" / "release" / "examples" / "native_timing"
 _COMPRESSION_NAMES = {0: "aucune", 1: "zlib", 2: "lz4", 3: "zstd"}
 
 
@@ -231,6 +249,78 @@ def _run_rust(
             except Exception as exc:  # noqa: BLE001 - une entrée en erreur ne doit pas interrompre le run
                 record.content_errors[name] = f"{type(exc).__name__}: {exc}"
         record.content_seconds = time.monotonic() - start
+        if on_progress is not None:
+            on_progress(record)
+    return records
+
+
+# --------------------------------------------------------------------------
+# Voie Rust natif isolé (pas de Python/PyO3 dans la boucle)
+# --------------------------------------------------------------------------
+
+def _run_rust_native(
+    pak_paths: list[Path],
+    sample_cap: int,
+    *,
+    records: dict[str, PakRecord] | None = None,
+    on_progress: Callable[[PakRecord], None] | None = None,
+) -> dict[str, PakRecord]:
+    """Invoque le binaire autonome `native_timing` (crate `bg3rustpaklib`,
+    voir `Tools/bg3rustpaklib/examples/native_timing.rs`) en sous-processus,
+    un lancement par `.pak`, et parse sa sortie JSON (une ligne). Ce chemin
+    ne remonte ni la table des fichiers ni les hash de contenu (le binaire
+    ne les imprime pas — seulement le timing) : `record.entries` et
+    `record.content_hashes` restent vides, donc ce rapport n'est pas croisé
+    structurellement par `cmd_diff` (seule sa comparaison de temps avec
+    `rust` y apparaît). But précis : isoler le coût de la lecture/
+    décompression Rust pure de celui du binding FFI/PyO3 mesuré par
+    `_run_rust`."""
+    if not _NATIVE_TIMING_BIN.is_file():
+        raise SystemExit(
+            f"Binaire '{_NATIVE_TIMING_BIN.name}' introuvable ({_NATIVE_TIMING_BIN}) — compile-le d'abord :\n"
+            "  cargo build --example native_timing --release "
+            "--manifest-path Tools/bg3rustpaklib/Cargo.toml"
+        )
+
+    if records is None:
+        records = {}
+    for pak_path in pak_paths:
+        record = PakRecord(file=pak_path.name)
+        records[pak_path.name] = record
+        try:
+            proc = subprocess.run(
+                [str(_NATIVE_TIMING_BIN), "--sample", str(sample_cap), str(pak_path)],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+        except OSError as exc:
+            record.error = f"{type(exc).__name__}: {exc}"
+            if on_progress is not None:
+                on_progress(record)
+            continue
+
+        stdout = proc.stdout.strip()
+        line = stdout.splitlines()[-1] if stdout else ""
+        if not line:
+            record.error = f"pas de sortie JSON (code {proc.returncode}) : {proc.stderr.strip()[:500]}"
+            if on_progress is not None:
+                on_progress(record)
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            record.error = f"JSON invalide depuis native_timing : {exc}"
+            if on_progress is not None:
+                on_progress(record)
+            continue
+
+        if payload.get("error"):
+            record.error = str(payload["error"])
+        else:
+            record.index_or_extract_seconds = float(payload.get("index_seconds", 0.0))
+            record.content_seconds = float(payload.get("content_seconds", 0.0))
         if on_progress is not None:
             on_progress(record)
     return records
@@ -478,6 +568,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         _run_python(pak_paths, args.sample, records=records, on_progress=flush)
     elif args.tool == "rust":
         _run_rust(pak_paths, args.sample, records=records, on_progress=flush)
+    elif args.tool == "rust-native":
+        _run_rust_native(pak_paths, args.sample, records=records, on_progress=flush)
     else:
         divine_exe = args.divine_exe or find_divine_exe(config.tools_dir)
         if divine_exe is None or not divine_exe.is_file():
@@ -537,13 +629,60 @@ def _load_report(path: Path) -> dict[str, Any] | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _show_rust_native_overhead(present: dict[str, Any]) -> None:
+    """Section indépendante du croisement structurel ci-dessous : compare,
+    fichier par fichier, le timing `rust` (Python → PyO3 → bg3rustpaklib) à
+    celui de `rust-native` (bg3rustpaklib appelé directement en Rust, sans
+    Python/PyO3) pour quantifier le coût du binding FFI/PyO3 lui-même —
+    le "manque connu" documenté dans
+    `Tools/bg3rustpaklib/README.md#comparisons`. `rust-native` n'a pas
+    d'`entries`/`content_hashes` exploitables, donc il est volontairement
+    tenu à l'écart du croisement identité/fichiers/hash de `cmd_diff`."""
+    rust_native = _load_report(REPORTS_DIR / "rust-native_report.json")
+    rust = present.get("rust") or _load_report(REPORTS_DIR / "rust_report.json")
+    if rust_native is None or rust is None:
+        return
+
+    common = sorted(set(rust["paks"]) & set(rust_native["paks"]))
+    print("\nOverhead FFI/binding (rust = PyO3, rust-native = Rust pur) :")
+    if not common:
+        print("    aucun .pak commun entre rust_report.json et rust-native_report.json")
+        return
+
+    total_index_pyo3 = total_index_native = 0.0
+    total_content_pyo3 = total_content_native = 0.0
+    for pak in common:
+        pyo3_rec = rust["paks"][pak]
+        native_rec = rust_native["paks"][pak]
+        if pyo3_rec.get("error") or native_rec.get("error"):
+            continue
+        total_index_pyo3 += pyo3_rec["index_or_extract_seconds"]
+        total_index_native += native_rec["index_or_extract_seconds"]
+        total_content_pyo3 += pyo3_rec["content_seconds"]
+        total_content_native += native_rec["content_seconds"]
+        print(
+            f"    {pak}: index {native_rec['index_or_extract_seconds']:.4f}s natif vs "
+            f"{pyo3_rec['index_or_extract_seconds']:.4f}s PyO3 "
+            f"(overhead {pyo3_rec['index_or_extract_seconds'] - native_rec['index_or_extract_seconds']:+.4f}s), "
+            f"contenu {native_rec['content_seconds']:.4f}s natif vs "
+            f"{pyo3_rec['content_seconds']:.4f}s PyO3 "
+            f"(overhead {pyo3_rec['content_seconds'] - native_rec['content_seconds']:+.4f}s)"
+        )
+    print(
+        f"    TOTAL : index natif {total_index_native:.4f}s / PyO3 {total_index_pyo3:.4f}s "
+        f"(overhead {total_index_pyo3 - total_index_native:+.4f}s) — "
+        f"contenu natif {total_content_native:.4f}s / PyO3 {total_content_pyo3:.4f}s "
+        f"(overhead {total_content_pyo3 - total_content_native:+.4f}s)"
+    )
+
+
 def cmd_diff(args: argparse.Namespace) -> int:
     tools = ["python", "rust", "divine"]
     reports = {t: _load_report(REPORTS_DIR / f"{t}_report.json") for t in tools}
     present = {t: r for t, r in reports.items() if r is not None}
     if len(present) < 2:
         print(f"Au moins 2 rapports nécessaires pour comparer (trouvés : {list(present)}).")
-        print(f"Lance d'abord : python {sys.argv[0]} run --tool <python|rust|divine>")
+        print(f"Lance d'abord : python {sys.argv[0]} run --tool <python|rust|rust-native|divine>")
         return 2
 
     print(f"Rapports chargés : {', '.join(present)}\n")
@@ -608,6 +747,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
     total_problems = len(identity_mismatches) + len(entry_mismatches) + len(size_mismatches) + len(content_mismatches)
     print(f"\n{'AUCUNE DIVERGENCE' if total_problems == 0 else f'{total_problems} DIVERGENCE(S)'}")
+
+    _show_rust_native_overhead(present)
+
     return 1 if total_problems else 0
 
 
@@ -616,7 +758,7 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     run_parser = sub.add_parser("run", help="Exécute un seul outil sur un lot de .pak et écrit son rapport")
-    run_parser.add_argument("--tool", choices=["python", "rust", "divine"], required=True)
+    run_parser.add_argument("--tool", choices=["python", "rust", "rust-native", "divine"], required=True)
     run_parser.add_argument("paks", nargs="*", type=Path, help="Fichiers .pak précis (sinon --dir/config)")
     run_parser.add_argument("--dir", type=Path, help="Dossier à scanner (*.pak)")
     run_parser.add_argument("--sample", type=int, default=60, help="Fichiers de contenu hashés par .pak (défaut 60)")
