@@ -2240,7 +2240,7 @@ class ActionsScreen(Screen):
         deployed_uuids = build_deployed_uuid_index(
             pak_paths,
             divine_exe=divine_exe,
-            reference_path=self._config.project_root,
+            reference_path=self._config.appdata_path,
             log=log,
         )
 
@@ -2263,7 +2263,7 @@ class ActionsScreen(Screen):
             identities = archive_pak_identities(
                 archive_path,
                 divine_exe=divine_exe,
-                reference_path=self._config.project_root,
+                reference_path=self._config.appdata_path,
                 log=log,
             )
             if not identities:
@@ -2476,7 +2476,7 @@ class ActionsScreen(Screen):
                     archives_installed_dir=self._config.archives_installed_dir,
                     archives_pending_dir=self._config.archives_pending_dir,
                     divine_exe=divine_exe,
-                    reference_path=self._config.project_root,
+                    reference_path=self._config.appdata_path,
                     log=log,
                 )
                 if match:
@@ -2617,7 +2617,7 @@ class ActionsScreen(Screen):
         mods = build_module_metadata_index(
             pak_paths,
             divine_exe=divine_exe,
-            reference_path=self._config.project_root,
+            reference_path=self._config.appdata_path,
             log=log,
         )
         missing = find_missing_dependencies(mods)
