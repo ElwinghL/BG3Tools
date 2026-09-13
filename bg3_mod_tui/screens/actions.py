@@ -989,11 +989,13 @@ class ActionsScreen(Screen):
        (principale/Tâches, Outils, Web) doivent rester VISIBLES simultanément
        — plus question de les cacher derrière un seul TabbedContent à 4
        onglets qu'il fallait cliquer pour changer (régression de 7a/7c, qui
-       n'avait gardé que des onglets). Principale en rouge en haut à gauche
-       (avec ses propres onglets dynamiques pour les tâches en parallèle,
-       sous-tâche 7b), Web en bleu en haut à droite (pas d'onglets, sous-tâche
-       7d), Outils en vert sur toute la largeur en bas (avec ses propres
-       onglets dynamiques, sous-tâche 7d). */
+       n'avait gardé que des onglets). Principale en haut à gauche (avec ses
+       propres onglets dynamiques pour les tâches en parallèle, sous-tâche
+       7b), Web en haut à droite (pas d'onglets, sous-tâche 7d), Outils sur
+       toute la largeur en bas (avec ses propres onglets dynamiques,
+       sous-tâche 7d) — bordures laissées aux couleurs $panel/$accent
+       d'origine (pas de code couleur rouge/vert/bleu par console, qui
+       n'était qu'un repère visuel temporaire pour valider la disposition). */
     #logs-column {
         margin-left: 2;
         width: 1fr;
@@ -1004,22 +1006,22 @@ class ActionsScreen(Screen):
     }
     #tasks-tabs {
         width: 3fr;
-        border: round red;
     }
     #tasks-tabs TabPane {
         padding: 0;
     }
     #tools-tabs {
         height: 1fr;
-        border: round green;
     }
     #tools-tabs TabPane {
         padding: 0;
     }
     #actions-log {
+        border: round $panel;
         height: 1fr;
     }
     #tools-log {
+        border: round $accent;
         height: 1fr;
     }
     #actions-body {
@@ -1068,7 +1070,7 @@ class ActionsScreen(Screen):
     }
     #web-console-log {
         width: 1fr;
-        border: round blue;
+        border: round $accent;
         height: 1fr;
     }
     #downloads-progress {
