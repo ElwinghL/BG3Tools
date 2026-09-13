@@ -56,6 +56,43 @@ mais les causes racines ne sont pas corrigées :
   - Conclusion : le risque décrit dans l'item d'origine (outil externe qui refuserait/mal interpréterait un hardlink) ne se matérialise pas avec BG3 Mod Manager tel qu'il existe aujourd'hui. Aucune modification de `bg3_mod_tui/game_deploy.py` ou `bg3_mod_tui/platform_utils.py` n'est nécessaire.
   - _Rationale_ : ajouté par Elwingh le 2026-09-13, investigué le 2026-09-13 — conclusion "pas de bug réel", conservé ici pour traçabilité au cas où une future version de BG3 Mod Manager changerait sa méthode de détection.
 
+### 25. Bug UI sur l'onglet Téléchargements, à investiguer
+
+- ~~Investiguer un bug latent éventuel sur l'onglet "Téléchargements" (`DownloadProgressConsole`)~~
+  — investigué le 2026-09-13, **aucun bug reproductible identifié à ce jour**. Aucune
+  observation précise n'a été fournie (pas de repro connue, pas d'entrée `crash.log`) : audit
+  de lecture critique de `bg3_mod_tui/widgets/download_console.py` en entier, de son unique
+  utilisation dans `bg3_mod_tui/screens/actions.py` (`_on_download_progress`,
+  `run_download_mods`), et des deux producteurs de progression dans `mod_pipeline.py`
+  (`download_nexus_mods_by_id`/`_download_job`, `download_subscribed_modio_mods`/
+  `_download_one`) :
+  - `tests/test_no_private_textual_api_shadowing.py` (garde-fou générique introduit pour 23b)
+    tourne toujours au vert et couvre bien ce fichier — pas de nouvelle collision d'API privée
+    Textual du même genre
+  - mutations du widget (`update_progress`/`clear`) toujours faites via `App.call_from_thread`
+    depuis les threads du pool de téléchargement (jusqu'à 8 mod.io / 6 Nexus en parallèle),
+    donc sérialisées sur le thread UI — pas de race sur `self._slots`
+  - génération des `slot_id` vérifiée sans collision possible : `f"nexus-{mod_id}-{file_id}"`
+    (un par fichier retenu) et `f"modio-{mod_id}"` (un fichier par mod côté mod.io) ; les deux
+    lots (Nexus puis mod.io) s'exécutent en séquence dans `run_download_mods`, jamais en
+    parallèle l'un de l'autre, donc pas de collision inter-source non plus
+  - nettoyage des lignes de progression vérifié systématique : les deux producteurs appellent
+    `on_download_progress(slot_id, label, None, None)` dans un bloc `finally` (succès, échec
+    API ou exception inattendue), donc pas de barre qui reste affichée indéfiniment après la
+    fin réelle d'un téléchargement
+  - suite de tests complète (203 tests) verte, aucune régression
+  - **une piste de vigilance non confirmée** (pas un bug prouvé, donc pas corrigée
+    spéculativement — préférence du projet) : `_on_download_progress` et `run_download_mods`
+    appellent `self.query_one("#downloads-progress", DownloadProgressConsole)` directement
+    sur le thread de téléchargement appelant (avant de passer la méthode elle-même à
+    `call_from_thread`) — une traversée du DOM Textual hors du thread UI, techniquement en
+    dehors du contrat "tout accès aux widgets depuis le thread principal". Aujourd'hui sans
+    conséquence connue : `#downloads-progress` vit dans `ActionsScreen`, l'écran racine unique
+    et durable de l'appli, jamais démonté/remonté pendant qu'un téléchargement tourne — rien
+    à raciner contre. À surveiller si l'architecture change un jour (onglet démonté/reconstruit
+    dynamiquement pendant un téléchargement en cours), auquel cas `query_one` pourrait lever
+    `NoMatches` sur le thread de téléchargement et faire échouer à tort un mod en cours
+
 ## P1 — Haute priorité
 
 ### 4. Priorisation Nexus / Mod.io
