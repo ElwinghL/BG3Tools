@@ -43,7 +43,7 @@ mais les causes racines ne sont pas corrigées :
 - **4a.** Règle : si Mod.io version > Nexus version → privilégier Mod.io — bloqué : aucune correspondance fiable Nexus↔mod.io dans le code (ArchiveEntry ne modélise que Nexus), et aucun endpoint (un)subscribe mod.io vérifié — un mapping par nom serait une heuristique dangereuse pour déclencher une action automatique
 - **4b.** (un)subscribe auto sur Mod.io lors du switch de source — bloqué pour la même raison que 4a ; en attendant, un vrai bug latent a été corrigé : `extract_archives_to_mods` plantait toute la boucle si un seul .pak était verrouillé (jeu en cours) — désormais isolé par fichier, loggé, `report["failed"]`, archive retentée au passage suivant
 - ~~**4c.** Process de vérification de version entre archives locales et Nexus~~ — fait : bouton "Vérifier les mises à jour Nexus...", rapport `nexus_updates.md` (lecture seule, nécessite NEXUS_API_KEY)
-- **4d.** Le téléchargement de mods ignore `nexus_updates.md` : `check_nexus_updates`/le bouton "Vérifier les mises à jour Nexus..." ne fait que produire un rapport (`report["outdated"]` écrit dans le `.md`), mais rien dans le flux de téléchargement (`screens/actions.py`, wizards Nexus) ne relit ce rapport pour proposer/prioriser la mise à jour des mods identifiés comme obsolètes — les deux fonctionnalités sont complètement déconnectées aujourd'hui. À câbler : au minimum, proposer un re-téléchargement en un clic pour chaque entrée de `outdated` depuis l'écran où le rapport est consulté
+- ~~**4d.** Le téléchargement de mods ignore `nexus_updates.md` : rien ne relit `report["outdated"]` pour proposer/prioriser la mise à jour des mods obsolètes~~ — fait : nouvel écran modal `NexusOutdatedModsScreen` (calqué sur `NexusBlacklistScreen`), s'ouvre automatiquement après "Vérifier les mises à jour Nexus..." si `outdated` n'est pas vide ; `download_mods_from_links_file` factorisé en `download_nexus_mods_by_id` (réutilisable), et `redownload_nexus_mod` contourne le filtre "mod déjà présent localement" qui bloquait sinon tout re-téléchargement ciblé
 
 ### 5. Téléchargements parallèles
 
@@ -67,7 +67,7 @@ mais les causes racines ne sont pas corrigées :
 
 ### 15. Bug UI : clic sur un bouton sélectionne le texte
 
-- **15a.** Les clics sur les boutons sélectionnent le texte du bouton (comportement navigateur/texte par défaut, gênant) — à corriger
+- ~~**15a.** Les clics sur les boutons sélectionnent le texte du bouton (comportement navigateur/texte par défaut, gênant)~~ — fait : cause racine bug amont Textual (`Button.ALLOW_SELECT = False` non respecté au clic entre Textual 2.0.0 et 3.0.0, corrigé en amont par Textualize/textual#5627) ; plancher relevé à `textual>=3.0` dans `pyproject.toml`
 
 ## P2 — Moyen terme
 
