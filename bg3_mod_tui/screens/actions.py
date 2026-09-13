@@ -49,8 +49,6 @@ from bg3_mod_tui.log_format import fmt_http_log_line
 from bg3_mod_tui.linking import LinkingError, setup_links
 from bg3_mod_tui.mod_dependencies import count_dependency_declarations, find_missing_dependencies
 from bg3_mod_tui.mod_fixer_fork import ModFixerForkError, build_fork as build_mod_fixer_fork
-from bg3_mod_tui.script_extender_console import build_tail_command, find_osiris_log_dir
-from bg3_mod_tui.terminal_launcher import open_in_terminal
 from bg3_mod_tui.native_mods import (
     NativeModsManifestError,
     deploy_native_mods_from_manifest,
@@ -1232,18 +1230,6 @@ class ActionsScreen(Screen):
                             "vanilla BG3 (niveau 1 à 12)."
                         ),
                     )
-                    yield Button(
-                        "Console Script Extender...",
-                        id="action-se-console",
-                        tooltip=(
-                            "Ouvre un terminal externe dédié qui suit en direct les logs "
-                            "de BG3 Script Extender (évite la console native, laggy sous "
-                            "Proton) — lecture seule, rien n'est écrit vers le jeu. "
-                            "Nécessite EnableLogging=true dans ScriptExtenderSettings.json "
-                            "(voir déploiement du Script Extender) et attend que le jeu "
-                            "tourne s'il n'est pas encore lancé."
-                        ),
-                    )
                     if not is_windows():
                         yield Button(
                             "Ouvrir protontricks",
@@ -2138,45 +2124,6 @@ class ActionsScreen(Screen):
             self._tool_log(f"Build de classes généré et ouvert : {url}")
         except OSError as exc:
             self._tool_log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
-
-    @on(Button.Pressed, "#action-se-console")
-    def handle_script_extender_console(self) -> None:
-        # Sous-tâche 11a du TODO : lecture seule, ouvre un terminal externe
-        # dédié (voir `terminal_launcher.open_in_terminal`) qui tail -F les
-        # logs BG3SE — jamais un widget intégré au TUI ni d'écriture de
-        # commande vers le jeu (11b/11c hors scope).
-        self._start_task(
-            title="Console Script Extender",
-            resource_tags=frozenset(),
-            launch=self.run_script_extender_console,
-            pool="tools",
-        )
-
-    @work(exclusive=False, thread=True, exit_on_error=False)
-    def run_script_extender_console(self, log: Callable[[str], None]) -> None:
-        log_dir = find_osiris_log_dir(self._config.appdata_path)
-        if log_dir is None:
-            log(
-                "[#C46F6F]Impossible de localiser le dossier de logs BG3SE : "
-                "préfixe Proton introuvable à partir de "
-                f"{self._config.appdata_path}.[/#C46F6F]"
-            )
-            return
-
-        command = build_tail_command(log_dir)
-        if open_in_terminal(command):
-            log(
-                "Terminal externe ouvert : suit en direct "
-                f"{log_dir} (nécessite EnableLogging=true dans "
-                "ScriptExtenderSettings.json et le jeu lancé — la console "
-                "attend elle-même l'apparition des logs sinon)."
-            )
-        else:
-            log(
-                "[#D8C091]Aucun terminal externe disponible (pas d'affichage "
-                "ou émulateur introuvable). Dossier de logs BG3SE attendu : "
-                f"{log_dir}[/#D8C091]"
-            )
 
     @on(Button.Pressed, "#action-protontricks")
     def handle_protontricks(self) -> None:
