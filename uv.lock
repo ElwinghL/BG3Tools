@@ -39,7 +39,7 @@ requires-dist = [
     { name = "lz4", specifier = ">=4.3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "textual", specifier = ">=0.58" },
+    { name = "textual", specifier = ">=3.0" },
     { name = "tomlkit", specifier = ">=0.12" },
     { name = "zstandard", specifier = ">=0.22" },
 ]

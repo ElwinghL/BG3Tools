@@ -14,3 +14,22 @@ pyo3 = { version = "0.29", features = ["extension-module"] }
 roxmltree = "0.20"
 regex = "1"
 flate2 = { version = "1.0", default-features = false, features = ["zlib-ng"] }
+
+# TODO 17a : `maturin develop` sans `--release` compile ce crate en profil
+# `dev` (pas d'optimisations, debug assertions actives), ce qui faussait la
+# comparaison de perf avec Python et Divine.exe (voir
+# Tools/bg3rustpaklib/README.md#comparisons). Le profil `release` ci-dessous
+# active les optimisations standard pour un build équitable.
+#
+# NOTE : `panic = "abort"` a été délibérément OMIS malgré la proposition
+# initiale du TODO. PyO3 s'appuie sur `catch_unwind` (unwinding) à la
+# frontière FFI pour convertir un panic Rust en exception Python propre.
+# Avec `panic = "abort"`, un panic dans ce crate ou une dépendance (ex: sur
+# un .pak malformé) tuerait le process Python hôte au lieu de lever une
+# exception — inacceptable pour un binding PyO3 utilisé depuis un outil
+# interactif (bg3-mod-tui). Le unwinding (comportement par défaut) est donc
+# conservé.
+[profile.release]
+opt-level = 3
+lto = "fat"        # Link-Time Optimization globale
+codegen-units = 1  # Maximise les optimisations du compilateur au détriment du temps de build
