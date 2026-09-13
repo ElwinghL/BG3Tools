@@ -14,19 +14,7 @@ Les points de cette categories sont a trier, reformuler et classer par les agent
 `crash_log.py` a fait son travail (aucun des deux ne plante plus tout le TUI),
 mais les causes racines ne sont pas corrigées :
 
-- **23a.** `native_mods.py::_hardlink_into` (ligne 89, `os.link(source, target)`
-  sans repli) — **6 des 8 plantages du log**, tous `OSError: [Errno 18] Invalid
-  cross-device link` en déployant un mod natif (`Native Camera Tweaks`,
-  `Baldur's Priority`) depuis `BG3_Managed/NativeMods/<archive>/` vers
-  `BG3_Managed/Installation BG3/bin/NativeMods/` — deux points de montage
-  différents. **Exactement le même bug de fond** que celui déjà corrigé dans
-  `linking.py._replace_with_hardlink` (voir note ci-dessus et commit "Repli
-  symlink pour les hardlinks inter-filesystems") : le helper générique existe
-  déjà (`platform_utils.link_or_symlink`, gère `errno.EXDEV` en retombant sur
-  un symlink) mais `_hardlink_into` ne l'utilise pas, il appelle `os.link`
-  directement. Correctif attendu : remplacer l'appel par
-  `link_or_symlink(source, target)` (après gestion de l'existence/inode déjà
-  en place dans la fonction, inchangée)
+- ~~**23a.** `native_mods.py::_hardlink_into` appelait `os.link(source, target)` sans repli~~ — fait : remplacé par `platform_utils.link_or_symlink` (même helper déjà utilisé par `linking.py._replace_with_hardlink` pour ce même bug de fond). Causait **6 des 8 plantages du log** (`OSError: [Errno 18] Invalid cross-device link` en déployant un mod natif — `Native Camera Tweaks`, `Baldur's Priority` — depuis `BG3_Managed/NativeMods/<archive>/` vers `BG3_Managed/Installation BG3/bin/NativeMods/`, deux points de montage différents). Import `os` retiré de `native_mods.py` (devenu inutile)
 - **23b.** `AttributeError: 'NoneType' object has no attribute 'render_strips'`
   — 2 occurrences, entièrement dans les internals Textual (`_compositor.py` /
   `widget.py` / `visual.py`, déclenché par `_on_timer_update` →

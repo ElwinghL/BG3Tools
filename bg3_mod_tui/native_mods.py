@@ -27,12 +27,12 @@ directement limite l'écriture aux seuls dossiers déjà exposés par
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
 
 from bg3_mod_tui.archives import ArchiveError, extract_archive
+from bg3_mod_tui.platform_utils import link_or_symlink
 
 LogFn = Callable[[str], None]
 
@@ -86,8 +86,15 @@ def _hardlink_into(dest_dir: Path, source: Path, *, log: LogFn) -> None:
             log(f"  '{target.name}' déjà relié vers '{source}', rien à faire.")
             return
         target.unlink()
-    os.link(source, target)
-    log(f"  '{target.name}' relié (hardlink) vers {dest_dir}.")
+    # `link_or_symlink` (au lieu d'un `os.link` direct) : le stockage géré
+    # (`managed_native_dir`) et l'installation du jeu peuvent être sur des
+    # points de montage différents, où un hardlink est physiquement
+    # impossible (`OSError EXDEV` — le bug reproduit dans crash.log pour
+    # "Native Camera Tweaks"/"Baldur's Priority"). Repli transparent sur un
+    # symlink dans ce cas ; `target.stat()` ci-dessus suit déjà les liens,
+    # donc la détection "déjà relié" reste correcte même après ce repli.
+    link_or_symlink(source, target)
+    log(f"  '{target.name}' relié vers {dest_dir}.")
 
 
 def deploy_native_mod_archive(
