@@ -86,12 +86,24 @@ class DownloadProgressConsole(VerticalScroll):
             # pourcentage ni de barre fiables, juste la taille téléchargée
             # jusqu'ici.
             self._slots[slot_id] = f"⬇ {label}  {_human_size(downloaded)}"
-        self._render()
+        self._refresh_content()
 
     def clear(self) -> None:
         self._slots.clear()
-        self._render()
+        self._refresh_content()
 
-    def _render(self) -> None:
+    def _refresh_content(self) -> None:
+        """Réécrit le contenu du `Static` interne à partir de `self._slots`.
+
+        Nommée `_refresh_content` et non `_render` : `Widget._render(self)
+        -> Visual` est une méthode interne de Textual (utilisée par le
+        compositeur pour obtenir le `Visual` à peindre). La redéfinir ici
+        avec une signature incompatible (retourne `None` au lieu d'un
+        `Visual`) faisait planter tout rendu de ce widget avec
+        `AttributeError: 'NoneType' object has no attribute
+        'render_strips'` dès qu'il devenait effectivement visible — ce qui
+        n'arrive qu'au premier affichage de son `TabPane` "Téléchargements"
+        (les autres onglets ne le déclenchent jamais), d'où un plantage
+        systématique au clic sur cet onglet et nulle part ailleurs."""
         content = self.query_one("#_download_progress_content", Static)
         content.update("\n".join(self._slots.values()) if self._slots else _EMPTY_MESSAGE)
