@@ -29,6 +29,7 @@ from textual.widgets import (
 from textual.worker import Worker, WorkerState
 
 from bg3_mod_tui.class_builder import DEFAULT_HTML_FILENAME, write_html
+from bg3_mod_tui.compat_audit import CompatAuditResult, audit_installed_mods, write_compat_audit_markdown
 from bg3_mod_tui.compat_framework import (
     CompatibilityFrameworkError,
     build_pak as build_compat_framework_pak,
@@ -1296,6 +1297,20 @@ class ActionsScreen(Screen):
                             "modules de base du jeu (Gustav, Shared...). Ne détecte PAS les "
                             "incompatibilités (pas d'information structurée pour ça dans "
                             "meta.lsx, contrairement aux dépendances)."
+                        ),
+                    )
+                    yield Button(
+                        "Auditer le Compatibility Framework...",
+                        id="action-compat-audit",
+                        tooltip=(
+                            "Audit STATIQUE (pas besoin du jeu lancé) de chaque .pak "
+                            "déployé utilisant le BG3 Compatibility Framework : config "
+                            "et dépendances (Script Extender, meta.lsx), syntaxe des "
+                            "GUIDs (UUID v4, pas de GUID factice), nommage exact des "
+                            "mots-clés d'action et des fonctions d'API — rapport dans "
+                            "compat_framework_audit.md sous le profil actif. Ne "
+                            "remplace pas un test en jeu (logs Script Extender au "
+                            "chargement), voir compat_audit.py pour les limites."
                         ),
                     )
                     yield Button(
@@ -2670,6 +2685,61 @@ class ActionsScreen(Screen):
             log(f"[#C46F6F]{len(missing)} mod(s) avec dépendance(s) manquante(s)[/#C46F6F] sur {total_checked} -> {report_path}")
         else:
             log(f"{total_checked} mod(s) vérifié(s), aucune dépendance manquante -> {report_path}")
+
+    @on(Button.Pressed, "#action-compat-audit")
+    def handle_compat_audit(self) -> None:
+        # Lecture seule (lecture native des .pak déployés), écrit son
+        # propre rapport (compat_framework_audit.md) — même raisonnement
+        # que "Valider les .pak déployés"/"Vérifier les dépendances".
+        self._start_task(
+            title="Auditer le Compatibility Framework...",
+            resource_tags=frozenset(),
+            launch=self.run_compat_audit,
+        )
+
+    @work(exclusive=True, thread=True, group="run_compat_audit", exit_on_error=False)
+    def run_compat_audit(self, log: Callable[[str], None]) -> None:
+        """Sous-tâches 18a-18c du TODO "Audit de compatibilité et de
+        syntaxe des mods" : câble `compat_audit.audit_installed_mods` sur
+        tous les .pak actuellement déployés dans Mods/ — audit STATIQUE
+        (pas besoin du jeu lancé, contrairement à 18d qui reste manuel).
+        Lecture native uniquement (pas de repli Divine.exe, voir
+        `compat_audit.py`) : un .pak dans un format non géré nativement est
+        signalé en erreur plutôt que sauté silencieusement."""
+        log("=== Audit du Compatibility Framework (statique, 18a-18c) ===")
+        pak_paths = sorted(self._config.managed_mods_link.glob("*.pak"))
+        if not pak_paths:
+            log("Aucun .pak actuellement déployé dans Mods/.")
+            return
+
+        log(f"Audit de {len(pak_paths)} .pak déployé(s)...")
+        results = audit_installed_mods(pak_paths)
+        self._write_compat_audit_report(results, log=log)
+
+    def _write_compat_audit_report(
+        self, results: list[CompatAuditResult], *, log: Callable[[str], None]
+    ) -> None:
+        report_dir = profile_data_dir(self._config.profiles_dir, self._config.active_profile)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "compat_framework_audit.md"
+        report_path.write_text(write_compat_audit_markdown(results), encoding="utf-8")
+
+        applicable = [r for r in results if r.applicable]
+        with_errors = [r for r in applicable if r.errors]
+        with_warnings_only = [r for r in applicable if r.warnings and not r.errors]
+        if with_errors:
+            log(
+                f"[#C46F6F]{len(with_errors)} mod(s) avec erreur(s)[/#C46F6F], "
+                f"{len(with_warnings_only)} avec avertissement(s) seulement, sur "
+                f"{len(applicable)} concerné(s) par le Compatibility Framework -> {report_path}"
+            )
+        elif with_warnings_only:
+            log(
+                f"[#D8C091]{len(with_warnings_only)} mod(s) avec avertissement(s)[/#D8C091] "
+                f"sur {len(applicable)} concerné(s) -> {report_path}"
+            )
+        else:
+            log(f"{len(applicable)} mod(s) concerné(s) par le Compatibility Framework, aucun problème détecté -> {report_path}")
 
     @on(Button.Pressed, "#action-nexus-updates")
     def handle_nexus_updates(self) -> None:
