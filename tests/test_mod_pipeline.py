@@ -26,7 +26,7 @@ from bg3_mod_tui.mod_pipeline import (
     redownload_nexus_mod,
 )
 from bg3_mod_tui.providers.modio import ModIOMod
-from bg3_mod_tui.providers.nexus import NexusAPIError, NexusMod
+from bg3_mod_tui.providers.nexus import NexusAPIError, NexusFileVariant, NexusMod
 
 
 def _make_zip(path: Path, *entries: tuple[str, bytes]) -> None:
@@ -425,6 +425,94 @@ def test_check_nexus_updates_compare_a_la_meilleure_copie_locale():
     assert calls == [42]
     assert report["outdated"] == []
     assert report["up_to_date"] == [42]
+
+
+class _FakeMultiVariantNexusClient(_FakeNexusClient):
+    """Simule une page Nexus regroupant plusieurs fichiers SANS RAPPORT
+    entre eux sous le même `mod_id` (voir `mod_pipeline._check_multi_file_mod`) —
+    `mod_info` reste disponible (pas censé être appelé dans ce cas) mais
+    `latest_file_variants` est la source de vérité utilisée."""
+
+    def __init__(self, variants_by_id: dict[int, list[NexusFileVariant]], **kwargs) -> None:
+        super().__init__({}, **kwargs)
+        self._variants_by_id = variants_by_id
+
+    def latest_file_variants(self, mod_id: int) -> list[NexusFileVariant]:
+        return self._variants_by_id[mod_id]
+
+
+def test_check_nexus_updates_variantes_distinctes_comparees_individuellement():
+    # Reproduit le bug remonté par Elwingh : "1 - Karlach normal" et
+    # "9 - MEGA pack" partagent le même nexus_mod_id mais sont deux fichiers
+    # sans rapport — comparer la version la plus haute des deux au niveau
+    # de la page mod (ancien comportement) produisait un faux "obsolète"
+    # affichant le nom d'une archive sans rapport avec la version comparée.
+    karlach = _archive_entry(
+        file="1 - Karlach normal-13971-1-2-1700000000.zip",
+        version="1.2",
+        mod_name_guess="1 - Karlach normal",
+        nexus_mod_id=13971,
+        nexus_url="https://www.nexusmods.com/baldursgate3/mods/13971",
+    )
+    mega_pack = _archive_entry(
+        file="9 - MEGA pack-13971-1-0-1700000001.zip",
+        version="1.0",
+        mod_name_guess="9 - MEGA pack",
+        nexus_mod_id=13971,
+        nexus_url="https://www.nexusmods.com/baldursgate3/mods/13971",
+    )
+    client = _FakeMultiVariantNexusClient(
+        {
+            13971: [
+                NexusFileVariant(file_id=1, file_name="karlach.zip", name="1 - Karlach normal", version="1.2"),
+                NexusFileVariant(file_id=2, file_name="mega.zip", name="9 - MEGA pack", version="1.5"),
+            ]
+        }
+    )
+
+    report = check_nexus_updates(client, [karlach, mega_pack])
+
+    assert report["failed"] == []
+    assert report["up_to_date"] == [13971]  # Karlach normal, à jour (1.2 == 1.2)
+    assert len(report["outdated"]) == 1
+    entry = report["outdated"][0]
+    assert entry["archive"] == "9 - MEGA pack-13971-1-0-1700000001.zip"
+    assert entry["mod_name_guess"] == "9 - MEGA pack"
+    assert entry["local_version"] == "1.0"
+    assert entry["remote_version"] == "1.5"
+
+
+def test_check_nexus_updates_variante_locale_introuvable_est_signalee_en_echec():
+    # Un fichier renommé/retiré côté Nexus ne doit jamais être comparé à la
+    # version d'une AUTRE variante — signalé non vérifiable plutôt que faux.
+    orphan = _archive_entry(
+        file="Old Variant Name-13971-1-0-1700000000.zip",
+        version="1.0",
+        mod_name_guess="Old Variant Name",
+        nexus_mod_id=13971,
+        nexus_url="https://www.nexusmods.com/baldursgate3/mods/13971",
+    )
+    other = _archive_entry(
+        file="Other Variant-13971-1-0-1700000001.zip",
+        version="1.0",
+        mod_name_guess="Other Variant",
+        nexus_mod_id=13971,
+        nexus_url="https://www.nexusmods.com/baldursgate3/mods/13971",
+    )
+    client = _FakeMultiVariantNexusClient(
+        {
+            13971: [
+                NexusFileVariant(file_id=1, file_name="other.zip", name="Other Variant", version="1.0"),
+            ]
+        }
+    )
+
+    report = check_nexus_updates(client, [orphan, other])
+
+    assert report["outdated"] == []
+    assert report["up_to_date"] == [13971]
+    assert len(report["failed"]) == 1
+    assert report["failed"][0][0] == 13971
 
 
 def test_check_nexus_updates_erreur_api_est_reportee_en_echec():
