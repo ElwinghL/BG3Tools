@@ -102,15 +102,7 @@ mais les causes racines ne sont pas corrigées :
 
 ### 17. Optimisation du build Rust (`rust/pak_reader_rs`) — profil release
 
-- **17a.** Auditer un profil `[profile.release]` optimisé pour `rust/pak_reader_rs` et comparer les performances AVANT/APRÈS sur `scripts/compare_pak_reader.py` — le AVANT est déjà connu : `maturin develop` (sans `--release`) produit un build **debug**, identifié comme cause du ralentissement mesuré sur l'extraction/décompression de contenu par rapport à Python et Divine.exe (voir `Tools/bg3rustpaklib/README.md#comparisons`, "build debug, pas une comparaison équitable")
-
-  ```
-  [profile.release]
-  opt-level = 3
-  lto = "fat"          # Link-Time Optimization globale
-  codegen-units = 1    # Maximise les optimisations du compilateur au détriment du temps de build
-  panic = "abort"      # Supprime la gestion du unwinding si non nécessaire
-  ```
+- ~~**17a.** Auditer un profil `[profile.release]` optimisé pour `rust/pak_reader_rs` et comparer les performances AVANT/APRÈS sur `scripts/compare_pak_reader.py`~~ — fait : `[profile.release]` ajouté (`opt-level = 3`, `lto = "fat"`, `codegen-units = 1`), **sans** `panic = "abort"` (incompatible avec un binding PyO3 — `catch_unwind` a besoin du unwinding pour convertir un panic Rust en exception Python à la frontière FFI ; `abort` tuerait le process Python hôte entier). Gain mesuré sur 47 `.pak` réels/1018 entrées hashées : indexing 0.06s→0.01s, extraction/décompression 10.48s→0.78s (~13x), correctness inchangée. Documenté dans `Tools/bg3rustpaklib/README.md#comparisons`
 
 ### 19. Build complet du fork LSLib (`Tools/ExportTools`, remote ElwinghL/lslib)
 
