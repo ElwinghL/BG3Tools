@@ -54,21 +54,36 @@ def _build_v18_pak(entry_name: str, content: bytes) -> bytes:
     """Construit un .pak LSPK v18 minimal en mémoire, avec une seule
     entrée `entry_name` -> `content` (non compressée), pour tester
     `PakArchive` sans dépendre d'un vrai .pak BG3."""
-    data_offset = 40  # 4 (signature) + 36 (LSPKHeader16)
-    file_list_offset = data_offset + len(content)
+    return _build_v18_pak_multi([(entry_name, content)])
 
-    name_bytes = entry_name.encode("utf-8").ljust(256, b"\0")
-    entry = struct.pack(
-        "<256sIHBBII",
-        name_bytes,
-        data_offset,  # OffsetInFile1
-        0,  # OffsetInFile2
-        0,  # ArchivePart
-        0,  # Flags (méthode de compression = 0 = aucune)
-        len(content),  # SizeOnDisk
-        len(content),  # UncompressedSize
-    )
-    compressed_entries = lz4.block.compress(entry, store_size=False)
+
+def _build_v18_pak_multi(entries: list[tuple[str, bytes]]) -> bytes:
+    """Comme `_build_v18_pak`, mais avec PLUSIEURS entrées (non
+    compressées) — pour tester `find_suffix` quand plusieurs chemins se
+    terminent par le même suffixe (ex: deux `meta.lsx` à des profondeurs
+    différentes, voir `test_pak_archive_find_suffix_prefere_le_chemin_le_plus_court`)."""
+    data_offset = 40  # 4 (signature) + 36 (LSPKHeader16)
+
+    packed_entries = b""
+    concatenated_content = b""
+    offset = data_offset
+    for entry_name, content in entries:
+        name_bytes = entry_name.encode("utf-8").ljust(256, b"\0")
+        packed_entries += struct.pack(
+            "<256sIHBBII",
+            name_bytes,
+            offset,  # OffsetInFile1
+            0,  # OffsetInFile2
+            0,  # ArchivePart
+            0,  # Flags (méthode de compression = 0 = aucune)
+            len(content),  # SizeOnDisk
+            len(content),  # UncompressedSize
+        )
+        concatenated_content += content
+        offset += len(content)
+
+    file_list_offset = data_offset + len(concatenated_content)
+    compressed_entries = lz4.block.compress(packed_entries, store_size=False)
 
     header = struct.pack(
         "<IQIBB16sH",
@@ -80,9 +95,9 @@ def _build_v18_pak(entry_name: str, content: bytes) -> bytes:
         b"\0" * 16,  # Md5
         1,  # NumParts
     )
-    file_list_section = struct.pack("<II", 1, len(compressed_entries)) + compressed_entries
+    file_list_section = struct.pack("<II", len(entries), len(compressed_entries)) + compressed_entries
 
-    return _SIGNATURE_BYTES + header + content + file_list_section
+    return _SIGNATURE_BYTES + header + concatenated_content + file_list_section
 
 
 def test_parse_lspk_header_v18():
@@ -135,6 +150,33 @@ def test_pak_archive_find_et_read(tmp_path):
         assert pak.find_suffix("meta.lsx") is entry
         assert pak.find_suffix("meta.lsf") is None
         assert pak.find("Mods/AutreMod/meta.lsx") is None
+
+
+def test_pak_archive_find_suffix_prefere_le_chemin_le_plus_court(tmp_path):
+    """Régression : un vrai .pak ("KrynnspaceCoreLibrary") embarque à la
+    fois `Mods/<Dossier>/GUI/meta.lsx` (config sans rapport, coïncidence de
+    nom) et `Mods/<Dossier>/meta.lsx` (le vrai descripteur) — le second
+    doit être trouvé même s'il apparaît APRÈS le premier dans la table des
+    fichiers du .pak, sinon le mod perd son UUID/Name (`ModuleInfo`
+    introuvable dans le fichier de config), ce qui le fait apparaître à
+    tort comme "manquant" dans `mod_dependencies` (il est là, juste jamais
+    identifié)."""
+    pak_path = tmp_path / "KrynnspaceCoreLibrary.pak"
+    unrelated_gui_config = b"<save><region id='UI'><node id='root'/></region></save>"
+    pak_path.write_bytes(
+        _build_v18_pak_multi(
+            [
+                ("Mods/KrynnspaceCoreLibrary/GUI/meta.lsx", unrelated_gui_config),
+                ("Mods/KrynnspaceCoreLibrary/meta.lsx", _META_LSX),
+            ]
+        )
+    )
+
+    with PakArchive.open(pak_path) as pak:
+        entry = pak.find_suffix("meta.lsx")
+        assert entry is not None
+        assert entry.name == "Mods/KrynnspaceCoreLibrary/meta.lsx"
+        assert pak.read(entry) == _META_LSX
 
 
 def test_pak_archive_fichier_non_lspk(tmp_path):
