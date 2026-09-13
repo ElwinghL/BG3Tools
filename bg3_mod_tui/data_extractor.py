@@ -10,14 +10,18 @@ d'un `.pak`. Les classes/sous-classes/dons/objets ne sont donc ici que des
 MENTIONS textuelles best-effort (voir `scan_entity_mentions`), pas des
 entités confirmées par GUID.
 
-**16b (réservé, pas implémenté)** : extraction réelle depuis le contenu des
+**16b (implémenté partiellement)** : extraction réelle depuis le contenu des
 `.pak`, en réutilisant `pak_reader.PakArchive` — voir `extract_pak_entities`
-ci-dessous et son commentaire pour les pistes (fichiers internes visés).
+et son commentaire pour le périmètre couvert (dons/objets via
+`Stats/Generated/Data/*.txt`) et volontairement non couvert (classes/sous-
+classes LSX, objets via RootTemplates LSF). Testé sur un .pak SYNTHÉTIQUE
+(pas de vrai .pak BG3 disponible dans cet environnement de dev).
 
 **16c** : la fonction `documentation_index_to_json` pose déjà le format de
-sortie voulu (une liste par type d'entité) ; 16b viendra remplacer/enrichir
-les entrées "mention" par des entités réelles (GUID, nom exact) sans changer
-cette structure globale."""
+sortie voulu (une liste par type d'entité) pour les MENTIONS (16a) ;
+`PakEntity` (16b) n'y est pas encore intégré — reste séparé pour l'instant,
+à fusionner dans une future itération une fois validé contre de vrais
+.pak."""
 
 from __future__ import annotations
 
@@ -28,6 +32,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from bg3_mod_tui.pak_reader import PakArchive
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusClient
 
 ProgressFn = Callable[[str], None]
@@ -227,45 +232,129 @@ def save_documentation_index(data: dict, path: Path) -> None:
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-# --- 16b (réservé, pas implémenté) -----------------------------------
+# --- 16b : extraction depuis le contenu réel des .pak -----------------
 #
-# Étendre l'extraction au contenu réel des .pak, en réutilisant
-# `pak_reader.PakArchive` (déjà utilisé par `pak_metadata.py` pour
-# meta.lsx/meta.lsf) plutôt que Divine.exe, pour rester rapide (pas de
-# sous-processus/extraction sur disque pour chaque .pak).
+# Périmètre couvert, réutilisant `pak_reader.PakArchive` (déjà utilisé par
+# `pak_metadata.py` pour meta.lsx/meta.lsf) plutôt que Divine.exe :
 #
-# Pistes (NON vérifiées contre un vrai .pak BG3 dans cet environnement de
-# dev — même réserve que celle déjà documentée sur `pak_reader`/
-# `pak_metadata` : à confirmer avant de s'y fier) :
-#   - classes/sous-classes : `Public/<Mod>/Progression.lsx` et/ou
-#     `Public/<Mod>/ClassDescriptions.lsx` — LSX (XML), le même parsing
-#     `xml.etree.ElementTree` que `pak_metadata.parse_meta_lsx` s'applique,
-#     mais avec un schéma de nœuds différent de `ModuleInfo` (à documenter
-#     une fois vérifié contre un vrai fichier).
-#   - dons (feats) : `Public/<Mod>/Stats/Generated/Data/Feat.txt` et/ou
-#     `FeatDescriptions.lsx` — le `.txt` est le format "stats" BG3 (pas
-#     XML, blocs `new entry "..."` / `data "..." "..."`), qui nécessite un
-#     parseur dédié, pas encore écrit ici.
-#   - objets : `Public/<Mod>/Stats/Generated/Data/{Weapon,Armor,Object}.txt`
-#     (même format "stats" texte) et/ou `Public/<Mod>/RootTemplates/*.lsf`
-#     pour les gabarits d'objets (LSF binaire, comme `meta.lsf` — voir
-#     `pak_reader.extract_uuid_from_lsf_bytes` pour la limite déjà connue
-#     de l'approche regex sur du LSF).
-#   - localiser ces fichiers dans le .pak via `PakArchive.find_suffix`
-#     (même technique que `pak_metadata` pour meta.lsx/meta.lsf, qui gère
-#     déjà le cas où le dossier de mod exact est inconnu à l'avance).
+#   - dons (feats) et objets (armes/armures/objets) :
+#     `Public/<Mod>/Stats/Generated/Data/{Feat,Weapon,Armor,Object}.txt` —
+#     format "stats" texte de Larian (blocs `new entry "Nom"` / `type
+#     "..."` / `data "Clé" "Valeur"`, documenté publiquement par la
+#     communauté de modding DOS2/BG3, pas de spécification officielle
+#     Larian). Implémenté et testé contre un `.pak` SYNTHÉTIQUE construit
+#     à la main (voir `tests/test_data_extractor.py`) — **NON vérifié
+#     contre un vrai `.pak` BG3** faute d'en avoir un disponible dans cet
+#     environnement de dev (même réserve que celle déjà documentée sur
+#     `pak_reader`/`pak_metadata`).
 #
-# `extract_pak_entities` ci-dessous n'est qu'un point d'entrée réservé,
-# volontairement non implémenté (NotImplementedError) plutôt qu'une
-# extraction approximative qui laisserait croire à un résultat fiable.
+# Périmètre volontairement NON couvert (plutôt que deviner un format non
+# vérifiable) :
+#
+#   - classes/sous-classes (`Public/<Mod>/Progression.lsx` et/ou
+#     `ClassDescriptions.lsx`) : le schéma exact des nœuds (id du node
+#     racine, noms d'attributs pour `ParentGuid`, structure des niveaux
+#     de progression) n'est pas connu avec certitude ici — contrairement
+#     au `meta.lsx` (`ModuleInfo`), aucun exemple réel n'a pu être
+#     confirmé. Deviner ce schéma risquerait de produire un extracteur
+#     silencieusement faux plutôt qu'un extracteur absent mais honnête.
+#   - objets via `Public/<Mod>/RootTemplates/*.lsf` (gabarits, LSF
+#     binaire) : contrairement à `meta.lsf` où l'on ne cherche qu'un UUID
+#     isolé (`pak_reader.extract_uuid_from_lsf_bytes`), associer
+#     correctement un GUID de RootTemplate à un nom d'objet exploitable
+#     nécessiterait de parser la structure réelle des chunks LSF
+#     (Names/Nodes/Attributes/Values), non implémentée dans ce projet.
+#
+# Ces deux pistes restent documentées ici pour un futur 16b-bis, mais ne
+# sont pas couvertes par `extract_pak_entities` — un périmètre réduit mais
+# fiable plutôt qu'une extraction complète mais non fiable.
+
+# Chemins internes ciblés dans le .pak (relatifs, cherchés par suffixe via
+# `PakArchive.find_suffix` — même technique que `pak_metadata` pour
+# meta.lsx/meta.lsf, qui gère déjà le cas où le dossier de mod exact est
+# inconnu à l'avance) et le type d'entité (`ENTITY_KINDS`) qu'ils
+# alimentent.
+_STATS_FILE_KINDS: dict[str, str] = {
+    "stats/generated/data/feat.txt": "don",
+    "stats/generated/data/weapon.txt": "objet",
+    "stats/generated/data/armor.txt": "objet",
+    "stats/generated/data/object.txt": "objet",
+}
+
+_STATS_NEW_ENTRY_RE = re.compile(r'new entry\s+"([^"]*)"')
+_STATS_TYPE_RE = re.compile(r'^\s*type\s+"([^"]*)"', re.MULTILINE)
+_STATS_DATA_RE = re.compile(r'^\s*data\s+"([^"]*)"\s*"([^"]*)"', re.MULTILINE)
 
 
-def extract_pak_entities(pak_path: Path) -> list[EntityMention]:  # noqa: ARG001
-    """RÉSERVÉ pour 16b : extraction d'entités réelles (classes/sous-
-    classes/dons/objets, identifiées par GUID) depuis le contenu du .pak
-    `pak_path`, via `pak_reader.PakArchive` — voir le commentaire "16b"
-    ci-dessus pour les fichiers internes visés. Pas encore implémenté."""
-    raise NotImplementedError(
-        "16b : extraction depuis le contenu réel des .pak pas encore implémentée "
-        "(voir bg3_mod_tui/data_extractor.py, section 16b)."
-    )
+@dataclass
+class StatsEntry:
+    """Une entrée du format "stats" texte de Larian (`new entry "Nom"` ...
+    `type "..."` ... `data "Clé" "Valeur"` ...). `name` est l'identifiant
+    Larian de l'entrée (pas un GUID — ce format n'en utilise pas, contrairement
+    aux RootTemplates LSF)."""
+
+    name: str
+    type: str | None
+    data: dict[str, str]
+
+
+def parse_stats_entries(text: str) -> list[StatsEntry]:
+    """Parse le format "stats" texte de Larian (utilisé par
+    `Stats/Generated/Data/{Feat,Weapon,Armor,Object}.txt` dans un .pak) :
+    une suite de blocs `new entry "Nom"`, chacun suivi de ses lignes
+    `type "..."` et `data "Clé" "Valeur"` jusqu'au bloc suivant (ou la fin
+    du texte). Un bloc sans `type` a `type=None` (rare mais pas une
+    erreur — le format autorise l'omettre si `using` hérite d'une entrée
+    de base, non géré ici). Retourne une liste vide si `text` ne contient
+    aucun `new entry`."""
+    entries: list[StatsEntry] = []
+    matches = list(_STATS_NEW_ENTRY_RE.finditer(text))
+    for index, match in enumerate(matches):
+        name = match.group(1)
+        block_start = match.end()
+        block_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        block = text[block_start:block_end]
+        type_match = _STATS_TYPE_RE.search(block)
+        data = dict(_STATS_DATA_RE.findall(block))
+        entries.append(StatsEntry(name=name, type=type_match.group(1) if type_match else None, data=data))
+    return entries
+
+
+@dataclass
+class PakEntity:
+    """Une entité RÉELLE (16b), confirmée par lecture du contenu du .pak —
+    contrairement à `EntityMention` (16a), qui n'est qu'une mention
+    textuelle best-effort dans une description Nexus."""
+
+    kind: str  # une des clés de `ENTITY_KINDS` ("don" ou "objet" ici — voir
+    # le commentaire ci-dessus pour ce qui n'est PAS couvert par 16b
+    name: str  # identifiant Larian de l'entrée stats (pas un GUID)
+    label: str  # `DisplayName` si présent dans les données stats, sinon `name`
+    source: str  # chemin interne exact dans le .pak (ex: "Public/MonMod/Stats/Generated/Data/Feat.txt")
+
+
+def extract_pak_entities(pak_path: Path) -> list[PakEntity]:
+    """Extraction réelle (16b) des dons/objets déclarés dans le contenu
+    d'un .pak, via `pak_reader.PakArchive` — voir le commentaire "16b"
+    ci-dessus pour le périmètre couvert (`Stats/Generated/Data/*.txt`) et
+    volontairement non couvert (classes/sous-classes LSX, objets via
+    RootTemplates LSF).
+
+    Retourne une liste vide (pas une erreur) si aucun des fichiers stats
+    ciblés n'est présent dans le .pak — un mod purement cosmétique ou sans
+    nouveau don/objet n'a simplement rien à y extraire. Lève
+    `pak_reader.PakReaderError` (`UnsupportedPakVersion`/`CorruptedPak`) si
+    le .pak lui-même n'est pas exploitable nativement — même contrat que
+    le reste de `pak_reader`, à l'appelant de replier sur Divine.exe s'il
+    en a besoin."""
+    entities: list[PakEntity] = []
+    with PakArchive.open(pak_path) as pak:
+        for suffix, kind in _STATS_FILE_KINDS.items():
+            entry = pak.find_suffix(suffix)
+            if entry is None:
+                continue
+            text = pak.read(entry).decode("utf-8", errors="replace")
+            for stat in parse_stats_entries(text):
+                label = stat.data.get("DisplayName") or stat.name
+                entities.append(PakEntity(kind=kind, name=stat.name, label=label, source=entry.name))
+    return entities

@@ -1,7 +1,9 @@
-"""Tests de `bg3_mod_tui.data_extractor` (TODO.md section 16, étape 16a) :
-détection best-effort de mentions de classes/sous-classes/dons/objets dans
-la description Nexus d'un mod, construction de la documentation à partir
-d'un inventaire (`mods_inventory.json`), et sérialisation JSON (16c)."""
+"""Tests de `bg3_mod_tui.data_extractor` (TODO.md section 16) : détection
+best-effort de mentions de classes/sous-classes/dons/objets dans la
+description Nexus d'un mod (16a), construction de la documentation à
+partir d'un inventaire (`mods_inventory.json`), sérialisation JSON (16c),
+et extraction réelle de dons/objets depuis le contenu d'un .pak SYNTHÉTIQUE
+(16b — pas de vrai .pak BG3 disponible dans cet environnement de test)."""
 
 from __future__ import annotations
 
@@ -12,13 +14,17 @@ import pytest
 from bg3_mod_tui.data_extractor import (
     EntityMention,
     ModDocumentation,
+    PakEntity,
+    StatsEntry,
     build_documentation_index,
     documentation_index_to_json,
     extract_pak_entities,
+    parse_stats_entries,
     save_documentation_index,
     scan_entity_mentions,
 )
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusMod
+from tests.test_pak_reader import _build_v18_pak_multi
 
 # --- scan_entity_mentions ------------------------------------------------
 
@@ -247,9 +253,114 @@ def test_save_documentation_index_ecrit_un_json_lisible(tmp_path):
     assert reloaded["mods"][0]["mod_name"] == "Mod X"
 
 
-# --- 16b : réservé, pas implémenté ----------------------------------------
+# --- 16b : parse_stats_entries (format "stats" texte de Larian) -----------
 
 
-def test_extract_pak_entities_leve_not_implemented(tmp_path):
-    with pytest.raises(NotImplementedError):
-        extract_pak_entities(tmp_path / "MonMod.pak")
+def test_parse_stats_entries_texte_vide():
+    assert parse_stats_entries("") == []
+
+
+def test_parse_stats_entries_une_entree_avec_type_et_data():
+    text = """
+new entry "ASI"
+type "Feat"
+using "Feat_Base"
+data "DisplayName" "Amélioration de caractéristique"
+data "Description" "Augmente une caractéristique."
+"""
+    entries = parse_stats_entries(text)
+    assert entries == [
+        StatsEntry(
+            name="ASI",
+            type="Feat",
+            data={
+                "DisplayName": "Amélioration de caractéristique",
+                "Description": "Augmente une caractéristique.",
+            },
+        )
+    ]
+
+
+def test_parse_stats_entries_plusieurs_blocs_consecutifs():
+    text = """
+new entry "Feat_A"
+type "Feat"
+data "DisplayName" "Premier don"
+
+new entry "Feat_B"
+type "Feat"
+data "DisplayName" "Second don"
+"""
+    entries = parse_stats_entries(text)
+    assert [e.name for e in entries] == ["Feat_A", "Feat_B"]
+    assert entries[0].data["DisplayName"] == "Premier don"
+    assert entries[1].data["DisplayName"] == "Second don"
+
+
+def test_parse_stats_entries_sans_type_ni_data():
+    entries = parse_stats_entries('new entry "Vide"\n')
+    assert entries == [StatsEntry(name="Vide", type=None, data={})]
+
+
+# --- 16b : extract_pak_entities (contenu réel du .pak, .pak SYNTHÉTIQUE) --
+
+
+def test_extract_pak_entities_pak_sans_fichier_stats(tmp_path):
+    """Un .pak exploitable mais sans aucun fichier Stats/Generated/Data/*
+    ciblé (ex: mod purement cosmétique) : liste vide, pas une erreur."""
+    pak_path = tmp_path / "MonMod.pak"
+    pak_path.write_bytes(_build_v18_pak_multi([("Mods/MonMod/meta.lsx", b"<save/>")]))
+    assert extract_pak_entities(pak_path) == []
+
+
+def test_extract_pak_entities_extrait_un_don_depuis_feat_txt(tmp_path):
+    feat_txt = b"""
+new entry "ASI"
+type "Feat"
+data "DisplayName" "Amelioration de caracteristique"
+"""
+    pak_path = tmp_path / "MonMod.pak"
+    pak_path.write_bytes(
+        _build_v18_pak_multi([("Public/MonMod/Stats/Generated/Data/Feat.txt", feat_txt)])
+    )
+    entities = extract_pak_entities(pak_path)
+    assert entities == [
+        PakEntity(
+            kind="don",
+            name="ASI",
+            label="Amelioration de caracteristique",
+            source="Public/MonMod/Stats/Generated/Data/Feat.txt",
+        )
+    ]
+
+
+def test_extract_pak_entities_extrait_objets_depuis_weapon_et_armor(tmp_path):
+    weapon_txt = b'new entry "Epee_Runique"\ntype "Weapon"\ndata "DisplayName" "Epee runique"\n'
+    armor_txt = b'new entry "Armure_Runique"\ntype "Armor"\n'
+    pak_path = tmp_path / "MonMod.pak"
+    pak_path.write_bytes(
+        _build_v18_pak_multi(
+            [
+                ("Public/MonMod/Stats/Generated/Data/Weapon.txt", weapon_txt),
+                ("Public/MonMod/Stats/Generated/Data/Armor.txt", armor_txt),
+            ]
+        )
+    )
+    entities = extract_pak_entities(pak_path)
+    assert {e.name for e in entities} == {"Epee_Runique", "Armure_Runique"}
+    assert all(e.kind == "objet" for e in entities)
+    # Pas de DisplayName pour "Armure_Runique" -> repli sur le nom Larian.
+    armure = next(e for e in entities if e.name == "Armure_Runique")
+    assert armure.label == "Armure_Runique"
+    epee = next(e for e in entities if e.name == "Epee_Runique")
+    assert epee.label == "Epee runique"
+
+
+def test_extract_pak_entities_plusieurs_entrees_dans_le_meme_fichier(tmp_path):
+    feat_txt = b'new entry "Feat_A"\ntype "Feat"\n\nnew entry "Feat_B"\ntype "Feat"\n'
+    pak_path = tmp_path / "MonMod.pak"
+    pak_path.write_bytes(
+        _build_v18_pak_multi([("Public/MonMod/Stats/Generated/Data/Feat.txt", feat_txt)])
+    )
+    entities = extract_pak_entities(pak_path)
+    assert {e.name for e in entities} == {"Feat_A", "Feat_B"}
