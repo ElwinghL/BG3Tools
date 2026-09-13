@@ -1,0 +1,579 @@
+<ls:UIWidget x:Name="AbsoluteDefeatNMCMPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:ls="clr-namespace:ls;assembly=Code"
+             xmlns:b="http://schemas.microsoft.com/xaml/behaviors"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             ls:UIWidget.ContextName="GameMenu"
+             d:DesignWidth="3840" d:DesignHeight="2160">
+
+ <!-- NMCM slot 3 page for the Absolute Defeat NMCM Bridge. Assembled from
+      Tools/bg3-nmcm/examples/controls/page-skeleton.xaml plus two toggle rows
+      (examples/controls/toggle), one numeric stepper row (examples/controls/slider, range
+      re-scaled 0-2 to match Absolute Defeat's MCM_blueprint.json debug_level Options.Min/Max)
+      and two button rows (examples/controls/button), one per event_button in the blueprint.
+      ContextName="GameMenu" is what makes every binding below live. -->
+
+    <ls:UIWidget.Template>
+        <ControlTemplate>
+            <ControlTemplate.Resources>
+
+                <ImageSource x:Key="ItemBG">pack://application:,,,/Core;component/Assets/Options/li_bg.png</ImageSource>
+                <ImageSource x:Key="ItemBGHL">pack://application:,,,/Core;component/Assets/Options/li_bg_active.png</ImageSource>
+                <ImageSource x:Key="SideDecorations">pack://application:,,,/Core;component/Assets/Options/decors_header.png</ImageSource>
+
+                <ImageSource x:Key="BoxNormal">pack://application:,,,/Core;component/Assets/Options/checkBox_d.png</ImageSource>
+                <ImageSource x:Key="BoxHighlight">pack://application:,,,/Core;component/Assets/Options/checkBox_h.png</ImageSource>
+                <ImageSource x:Key="CheckIcon">pack://application:,,,/Core;component/Assets/Options/ico_check_h.png</ImageSource>
+
+                <BitmapImage x:Key="DividerImage"          UriSource="pack://application:,,,/Core;component/Assets/Lobby/divider_lobby.png"/>
+                <BitmapImage x:Key="FooterSideDecorImage"  UriSource="pack://application:,,,/Core;component/Assets/DMSettings/footer_sideDecors.png"/>
+                <BitmapImage x:Key="FooterCenterDecorImage" UriSource="pack://application:,,,/Core;component/Assets/DMSettings/footer_centerDecors.png"/>
+
+                <Style x:Key="RowLabel" TargetType="TextBlock">
+                    <Setter Property="VerticalAlignment" Value="Center"/>
+                    <Setter Property="HorizontalAlignment" Value="Left"/>
+                    <Setter Property="Margin" Value="60,0,0,0"/>
+                    <Setter Property="MaxWidth" Value="1100"/>
+                    <Setter Property="TextWrapping" Value="Wrap"/>
+                    <Setter Property="FontWeight" Value="Medium"/>
+                    <Setter Property="FontSize" Value="{StaticResource ScaledDefaultFontSize}"/>
+                    <Setter Property="Foreground" Value="{StaticResource LS_accent75TxtColor}"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True">
+                            <Setter Property="Foreground" Value="{StaticResource LS_tint100}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+
+                <Style x:Key="RowHighlight" TargetType="Image">
+                    <Setter Property="Stretch" Value="Fill"/>
+                    <Setter Property="Height" Value="116"/>
+                    <Setter Property="Source" Value="{StaticResource ItemBG}"/>
+                    <Setter Property="IsHitTestVisible" Value="False"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType={x:Type ListBoxItem}}}" Value="True">
+                            <Setter Property="Source" Value="{StaticResource ItemBGHL}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+
+                <Style x:Key="SectionTitle" TargetType="TextBlock">
+                    <Setter Property="VerticalAlignment" Value="Center"/>
+                    <Setter Property="Margin" Value="16,0"/>
+                    <Setter Property="FontWeight" Value="Bold"/>
+                    <Setter Property="FontSize" Value="{StaticResource ScaledIntermediateFontSize}"/>
+                    <Setter Property="Foreground" Value="{StaticResource LS_tint100}"/>
+                </Style>
+
+                <Style x:Key="PreviewTitle" TargetType="TextBlock">
+                    <Setter Property="TextAlignment" Value="Center"/>
+                    <Setter Property="TextWrapping" Value="Wrap"/>
+                    <Setter Property="FontSize" Value="{StaticResource ScaledLargeFontSize}"/>
+                    <Setter Property="Foreground" Value="{StaticResource LS_tint100}"/>
+                </Style>
+
+                <Style x:Key="PreviewBody" TargetType="TextBlock">
+                    <Setter Property="TextAlignment" Value="Left"/>
+                    <Setter Property="TextWrapping" Value="Wrap"/>
+                    <Setter Property="Margin" Value="0,20"/>
+                    <Setter Property="FontSize" Value="{StaticResource ScaledDefaultFontSize}"/>
+                    <Setter Property="Foreground" Value="{StaticResource LS_accent75TxtColor}"/>
+                </Style>
+
+                <Style x:Key="GalleryItemStyle" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+                    <Setter Property="HorizontalAlignment" Value="Center"/>
+                    <Setter Property="VerticalAlignment" Value="Top"/>
+                    <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled"/>
+                    <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+                    <Setter Property="IsSelected" Value="False"/>
+                    <Setter Property="BorderBrush" Value="Transparent"/>
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Padding" Value="0"/>
+                    <Setter Property="BorderThickness" Value="0"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter Property="IsSelected" Value="True"/>
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                        </Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="BorderBrush" Value="Transparent"/>
+                            <Setter Property="Background" Value="Transparent"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+
+            </ControlTemplate.Resources>
+
+            <Grid x:Name="GridRoot">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="{StaticResource PageHeaderHeight}"/>
+                    <RowDefinition/>
+                    <RowDefinition Height="{StaticResource PageFooterHeight}"/>
+                </Grid.RowDefinitions>
+
+                <!-- The page announces itself on open: GetHostCharacter is undefined during
+                     LevelLoaded/SavegameLoaded, so this is where the goal learns who is looking, and
+                     it also re-applies the debug level mirror (see the goal file). -->
+                <b:Interaction.Triggers>
+                    <b:EventTrigger EventName="Loaded">
+                        <ls:LSPlaySound Sound="UI_HUD_NewGameSettings_Open"/>
+                        <b:InvokeCommandAction Command="{Binding DataContext.TutorialEvent, RelativeSource={RelativeSource AncestorType={x:Type ls:UIWidget}}}"
+                                               CommandParameter="7475728c-6d81-43d6-9897-67db341aa391"/>
+                    </b:EventTrigger>
+                </b:Interaction.Triggers>
+
+                <Image x:Name="MenuBackground" Grid.Row="0" Grid.RowSpan="3" Source="{StaticResource OptionsBackground}"
+                       HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Stretch="UniformToFill"/>
+
+                <ls:LSInputBinding PlayerId="{Binding CurrentPlayer.PlayerId}" BoundEvent="UICancel"
+                                   Command="{Binding CustomEvent}" CommandParameter="CloseWidget"/>
+
+                <Control Grid.Row="0" x:Name="TitleText" Template="{StaticResource PageHeader}"
+                         Tag="{Binding Source='hae2990fag13b7g4064gacb4g9f6c1f14663c', Converter={StaticResource TranslatedStringConverter}}"/>
+
+                <Grid Grid.Row="1" Margin="0,10,0,20">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" MinWidth="900"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*" MinWidth="600"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- No card art shipped: leaving Grid.Column="0" empty is fine, the layout still
+                         centres (see docs/integration.md examples/example-mod README, card art step). -->
+
+                    <ListBox x:Name="GalleryList" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             ItemContainerStyle="{StaticResource GalleryItemStyle}">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Background="Transparent"/>
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.Template>
+                            <ControlTemplate>
+                                <ScrollViewer HorizontalAlignment="Center" Padding="16,0" Height="1500" Width="Auto"
+                                              Template="{StaticResource ScrollViewerTemplate}" Background="Transparent">
+                                    <ScrollViewer.Resources>
+                                        <Style TargetType="{x:Type ScrollBar}" BasedOn="{StaticResource DecorativeGoldScrollBar}"/>
+                                        <GridLength x:Key="Top">0</GridLength>
+                                        <GridLength x:Key="Bottom">0</GridLength>
+                                    </ScrollViewer.Resources>
+                                    <ItemsPresenter/>
+                                </ScrollViewer>
+                            </ControlTemplate>
+                        </ListBox.Template>
+
+                        <ListBoxItem IsHitTestVisible="False" Focusable="False">
+                            <StackPanel Margin="0,40,0,0" Orientation="Horizontal" HorizontalAlignment="Center">
+                                <Image Source="{StaticResource SideDecorations}" Stretch="None" VerticalAlignment="Center"/>
+                                <TextBlock Style="{StaticResource SectionTitle}"
+                                           Text="{Binding Source='hdca482ebg45e3g41e4g8901g4ebb3ec03a07', Converter={StaticResource TranslatedStringConverter}}"/>
+                                <Image Source="{StaticResource SideDecorations}" Stretch="None" VerticalAlignment="Center">
+                                    <Image.RenderTransform>
+                                        <ScaleTransform ScaleX="-1" CenterX="42"/>
+                                    </Image.RenderTransform>
+                                </Image>
+                            </StackPanel>
+                        </ListBoxItem>
+
+                        <!-- Row 1: checkbox, Absolute Defeat setting "include_summons". -->
+                        <ListBoxItem Tag="SUMMONS">
+                            <Grid Width="1800" Margin="0,4,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <b:Interaction.Triggers>
+                                    <b:EventTrigger EventName="MouseEnter">
+                                        <ls:LSPlaySound Sound="UI_HUD_Options_OptionHover"/>
+                                    </b:EventTrigger>
+                                </b:Interaction.Triggers>
+                                <Image Grid.ColumnSpan="2" Style="{StaticResource RowHighlight}"/>
+                                <TextBlock Grid.Column="0" Style="{StaticResource RowLabel}"
+                                           Text="{Binding Source='hdaa8ba03g1af8g4bc0g9212gba3b72e6c166', Converter={StaticResource TranslatedStringConverter}}"/>
+                                <Grid Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="20,0,60,0" Width="80">
+                                    <ls:LSToggleButton x:Name="SummonsToggle" SoundID="UI_HUD_Options_ToggleButton"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <ls:LSToggleButton.Template>
+                                            <ControlTemplate TargetType="ToggleButton">
+                                                <Grid Background="Transparent">
+                                                    <Image x:Name="bx" Stretch="None" Source="{StaticResource BoxNormal}" IsHitTestVisible="False"/>
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="bx" Property="Source" Value="{StaticResource BoxHighlight}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </ls:LSToggleButton.Template>
+                                        <b:Interaction.Triggers>
+                                            <b:EventTrigger EventName="Click">
+                                                <b:InvokeCommandAction Command="{Binding DataContext.TutorialEvent, RelativeSource={RelativeSource AncestorType={x:Type ls:UIWidget}}}"
+                                                                       CommandParameter="0ccdef93-b9d6-43ef-862d-72ec16f1c076"/>
+                                            </b:EventTrigger>
+                                        </b:Interaction.Triggers>
+                                    </ls:LSToggleButton>
+                                    <ItemsControl ItemsSource="{Binding CurrentPlayer.SelectedCharacter.Stats.Passives}"
+                                                  IsHitTestVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><Grid/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Image x:Name="ck" Stretch="None" Source="{StaticResource CheckIcon}" Visibility="Collapsed"/>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding Name.Str}" Value="ADNB_OPT_SUMMONS">
+                                                        <Setter TargetName="ck" Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Grid>
+                            </Grid>
+                        </ListBoxItem>
+
+                        <!-- Row 2: checkbox, Absolute Defeat setting "downed_protection". -->
+                        <ListBoxItem Tag="DOWNED">
+                            <Grid Width="1800" Margin="0,4,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <b:Interaction.Triggers>
+                                    <b:EventTrigger EventName="MouseEnter">
+                                        <ls:LSPlaySound Sound="UI_HUD_Options_OptionHover"/>
+                                    </b:EventTrigger>
+                                </b:Interaction.Triggers>
+                                <Image Grid.ColumnSpan="2" Style="{StaticResource RowHighlight}"/>
+                                <TextBlock Grid.Column="0" Style="{StaticResource RowLabel}"
+                                           Text="{Binding Source='h13af723bg7aadg4e8dgb09cg5c2a0b7b73b8', Converter={StaticResource TranslatedStringConverter}}"/>
+                                <Grid Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="20,0,60,0" Width="80">
+                                    <ls:LSToggleButton x:Name="DownedToggle" SoundID="UI_HUD_Options_ToggleButton"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <ls:LSToggleButton.Template>
+                                            <ControlTemplate TargetType="ToggleButton">
+                                                <Grid Background="Transparent">
+                                                    <Image x:Name="bx" Stretch="None" Source="{StaticResource BoxNormal}" IsHitTestVisible="False"/>
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                        <Setter TargetName="bx" Property="Source" Value="{StaticResource BoxHighlight}"/>
+                                                    </Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </ls:LSToggleButton.Template>
+                                        <b:Interaction.Triggers>
+                                            <b:EventTrigger EventName="Click">
+                                                <b:InvokeCommandAction Command="{Binding DataContext.TutorialEvent, RelativeSource={RelativeSource AncestorType={x:Type ls:UIWidget}}}"
+                                                                       CommandParameter="e6b5e30e-d429-4c4e-843a-c934102e1ae0"/>
+                                            </b:EventTrigger>
+                                        </b:Interaction.Triggers>
+                                    </ls:LSToggleButton>
+                                    <ItemsControl ItemsSource="{Binding CurrentPlayer.SelectedCharacter.Stats.Passives}"
+                                                  IsHitTestVisible="False" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><Grid/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Image x:Name="ck" Stretch="None" Source="{StaticResource CheckIcon}" Visibility="Collapsed"/>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding Name.Str}" Value="ADNB_OPT_DOWNED">
+                                                        <Setter TargetName="ck" Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Grid>
+                            </Grid>
+                        </ListBoxItem>
+
+                        <!-- Row 3: stepper, Absolute Defeat setting "debug_level" (slider_int,
+                             Options.Min=0, Options.Max=2 in MCM_blueprint.json). Reuses the numeric
+                             mirror pattern (examples/controls/slider) with the range re-scaled to 0-2
+                             instead of 0-100: the bar's XAML Maximum is a purely local display
+                             constant (see slider-row.xaml's own warning that Maximum is never the
+                             resource's real ceiling), so re-scaling it costs nothing. -->
+                        <ListBoxItem Tag="DEBUG">
+                            <Grid Width="1800" Margin="0,4,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <b:Interaction.Triggers>
+                                    <b:EventTrigger EventName="MouseEnter">
+                                        <ls:LSPlaySound Sound="UI_HUD_Options_OptionHover"/>
+                                    </b:EventTrigger>
+                                </b:Interaction.Triggers>
+                                <Image Grid.ColumnSpan="2" Style="{StaticResource RowHighlight}"/>
+                                <TextBlock Grid.Column="0" Style="{StaticResource RowLabel}"
+                                           Text="{Binding Source='h3e7e2fcdg5fa4g4231g8f8cgbe49f57f61f7', Converter={StaticResource TranslatedStringConverter}}"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Width="868"
+                                            VerticalAlignment="Center" HorizontalAlignment="Right" Margin="20,0,60,0">
+                                    <Button Template="{StaticResource MinButton}" VerticalAlignment="Center">
+                                        <b:Interaction.Triggers>
+                                            <b:EventTrigger EventName="Click">
+                                                <ls:LSPlaySound Sound="UI_HUD_Options_ToggleButton"/>
+                                                <b:InvokeCommandAction Command="{Binding DataContext.TutorialEvent, RelativeSource={RelativeSource AncestorType={x:Type ls:UIWidget}}}"
+                                                                       CommandParameter="8ef58cd3-b611-446a-aab6-ef90805c365f"/>
+                                            </b:EventTrigger>
+                                        </b:Interaction.Triggers>
+                                    </Button>
+                                    <ItemsControl ItemsSource="{Binding CurrentPlayer.SelectedCharacter.Stats.ActionResources}"
+                                                  IsHitTestVisible="False" VerticalAlignment="Center" Margin="20,0">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><Grid/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid x:Name="barHost" Visibility="Collapsed" Width="640">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="110"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <ls:LSProgressBar Grid.Column="0" Value="{Binding Value, Mode=OneWay}" Maximum="2"
+                                                                      Minimum="0" Background="#E0000000" Height="24" VerticalAlignment="Center">
+                                                        <ls:LSProgressBar.Foreground>
+                                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                                                <GradientStop Color="#FF6E4A16" Offset="0.0"/>
+                                                                <GradientStop Color="#FFD9A441" Offset="0.5"/>
+                                                                <GradientStop Color="#FF6E4A16" Offset="1.0"/>
+                                                            </LinearGradientBrush>
+                                                        </ls:LSProgressBar.Foreground>
+                                                    </ls:LSProgressBar>
+                                                    <TextBlock Grid.Column="1" Text="{Binding Value, StringFormat={}{0:0.#}}"
+                                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                               FontSize="{StaticResource ScaledDefaultFontSize}"
+                                                               Foreground="{StaticResource LS_accent100TxtColor}"/>
+                                                </Grid>
+                                                <DataTemplate.Triggers>
+                                                    <DataTrigger Binding="{Binding TypeId}" Value="ADNB_DebugG">
+                                                        <Setter TargetName="barHost" Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </DataTemplate.Triggers>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <Button Template="{StaticResource PlusButton}" VerticalAlignment="Center">
+                                        <b:Interaction.Triggers>
+                                            <b:EventTrigger EventName="Click">
+                                                <ls:LSPlaySound Sound="UI_HUD_Options_ToggleButton"/>
+                                                <b:InvokeCommandAction Command="{Binding DataContext.TutorialEvent, RelativeSource={RelativeSource AncestorType={x:Type ls:UIWidget}}}"
+                                                                       CommandParameter="daccd6e2-e48f-4a3f-ae33-6c66fc088540"/>
+                                            </b:EventTrigger>
+                                        </b:Interaction.Triggers>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </ListBoxItem>
+
+                        <!-- Row 4: button, Absolute Defeat MCM event_button "btn_surrender". -->
+                        <ListBoxItem Tag="SURRENDER">
+                            <Grid Width="1800" Margin="0,4,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <b:Interaction.Triggers>
+                                    <b:EventTrigger EventName="MouseEnter">
+                                        <ls:LSPlaySound Sound="UI_HUD_Options_OptionHover"/>
+                                    </b:EventTrigger>
+                                </b:Interaction.Triggers>
+                                <Image Grid.ColumnSpan="2" Style="{StaticResource RowHighlight}"/>
+                                <TextBlock Grid.Column="0" Style="{StaticResource RowLabel}"
+                                           Text="{Binding Source='h966dde07gdd28g46a6ga802g331ac62d7c82', Converter={StaticResource TranslatedStringConverter}}"/>
+                                <ls:LSButton Grid.Column="1" Style="{StaticResource BrownButtonStyle}"
+                                             VerticalAlignment="Center" HorizontalAlignment="Right" Margin="20,0,60,0"
+                                             SoundID="UI_HUD_Options_Default"
+                                             Content="{Binding Source='h966dde07gdd28g46a6ga802g331ac62d7c82', Converter={StaticResource TranslatedStringConverter}}">
+                                    <b:Interaction.Triggers>
+                                        <b:EventTrigger EventName="Click">
+                                            <b:InvokeCommandAction Command="{Binding DataContext.TutorialEvent, RelativeSource={RelativeSource AncestorType={x:Type ls:UIWidget}}}"
+                                                                   CommandParameter="e1f39073-e1ca-426b-9c9d-8448710ea2f5"/>
+                                        </b:EventTrigger>
+                                    </b:Interaction.Triggers>
+                                </ls:LSButton>
+                            </Grid>
+                        </ListBoxItem>
+
+                        <!-- Row 5: button, Absolute Defeat MCM event_button "btn_softlockfix". -->
+                        <ListBoxItem Tag="SOFTLOCK">
+                            <Grid Width="1800" Margin="0,4,0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <b:Interaction.Triggers>
+                                    <b:EventTrigger EventName="MouseEnter">
+                                        <ls:LSPlaySound Sound="UI_HUD_Options_OptionHover"/>
+                                    </b:EventTrigger>
+                                </b:Interaction.Triggers>
+                                <Image Grid.ColumnSpan="2" Style="{StaticResource RowHighlight}"/>
+                                <TextBlock Grid.Column="0" Style="{StaticResource RowLabel}"
+                                           Text="{Binding Source='h2898346agcd81g4c3ega043g2d6f869faee5', Converter={StaticResource TranslatedStringConverter}}"/>
+                                <ls:LSButton Grid.Column="1" Style="{StaticResource BrownButtonStyle}"
+                                             VerticalAlignment="Center" HorizontalAlignment="Right" Margin="20,0,60,0"
+                                             SoundID="UI_HUD_Options_Default"
+                                             Content="{Binding Source='h2898346agcd81g4c3ega043g2d6f869faee5', Converter={StaticResource TranslatedStringConverter}}">
+                                    <b:Interaction.Triggers>
+                                        <b:EventTrigger EventName="Click">
+                                            <b:InvokeCommandAction Command="{Binding DataContext.TutorialEvent, RelativeSource={RelativeSource AncestorType={x:Type ls:UIWidget}}}"
+                                                                   CommandParameter="0dabccf2-1f2f-492c-9d8b-9b7fcc9050eb"/>
+                                        </b:EventTrigger>
+                                    </b:Interaction.Triggers>
+                                </ls:LSButton>
+                            </Grid>
+                        </ListBoxItem>
+
+                    </ListBox>
+
+                    <Image Grid.Column="2" Source="{StaticResource DividerImage}" Stretch="None"
+                           VerticalAlignment="Center" HorizontalAlignment="Left"/>
+
+                    <StackPanel x:Name="Preview" Grid.Column="2" Margin="80,40,80,0"
+                                VerticalAlignment="Top" Orientation="Vertical">
+
+                        <StackPanel>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedIndex, ElementName=GalleryList}" Value="-1">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Style="{StaticResource PreviewTitle}"
+                                       Text="{Binding Source='hae2990fag13b7g4064gacb4g9f6c1f14663c', Converter={StaticResource TranslatedStringConverter}}"/>
+                            <TextBlock Style="{StaticResource PreviewBody}"
+                                       Text="{Binding Source='hdf984cdfgb38ag453cg84d0g720a01d481b4', Converter={StaticResource TranslatedStringConverter}}"/>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedItem.Tag, ElementName=GalleryList}" Value="SUMMONS">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Style="{StaticResource PreviewTitle}"
+                                       Text="{Binding Source='hdaa8ba03g1af8g4bc0g9212gba3b72e6c166', Converter={StaticResource TranslatedStringConverter}}"/>
+                            <TextBlock Style="{StaticResource PreviewBody}"
+                                       Text="{Binding Source='h48298ab6g9857g46d8gaf5fg909ba7820f26', Converter={StaticResource TranslatedStringConverter}}"/>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedItem.Tag, ElementName=GalleryList}" Value="DOWNED">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Style="{StaticResource PreviewTitle}"
+                                       Text="{Binding Source='h13af723bg7aadg4e8dgb09cg5c2a0b7b73b8', Converter={StaticResource TranslatedStringConverter}}"/>
+                            <TextBlock Style="{StaticResource PreviewBody}"
+                                       Text="{Binding Source='hb028f36eg1272g4c99gb3ffg9afb9634b9fd', Converter={StaticResource TranslatedStringConverter}}"/>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedItem.Tag, ElementName=GalleryList}" Value="DEBUG">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Style="{StaticResource PreviewTitle}"
+                                       Text="{Binding Source='h3e7e2fcdg5fa4g4231g8f8cgbe49f57f61f7', Converter={StaticResource TranslatedStringConverter}}"/>
+                            <TextBlock Style="{StaticResource PreviewBody}"
+                                       Text="{Binding Source='h0b0d45c3gd89ag44d3g8e57gc4c2b9ddee2d', Converter={StaticResource TranslatedStringConverter}}"/>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedItem.Tag, ElementName=GalleryList}" Value="SURRENDER">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Style="{StaticResource PreviewTitle}"
+                                       Text="{Binding Source='h966dde07gdd28g46a6ga802g331ac62d7c82', Converter={StaticResource TranslatedStringConverter}}"/>
+                            <TextBlock Style="{StaticResource PreviewBody}"
+                                       Text="{Binding Source='hbb860321ge0a5g4699g8ca0gf04fca58ccac', Converter={StaticResource TranslatedStringConverter}}"/>
+                        </StackPanel>
+
+                        <StackPanel>
+                            <StackPanel.Style>
+                                <Style TargetType="StackPanel">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedItem.Tag, ElementName=GalleryList}" Value="SOFTLOCK">
+                                            <Setter Property="Visibility" Value="Visible"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </StackPanel.Style>
+                            <TextBlock Style="{StaticResource PreviewTitle}"
+                                       Text="{Binding Source='h2898346agcd81g4c3ega043g2d6f869faee5', Converter={StaticResource TranslatedStringConverter}}"/>
+                            <TextBlock Style="{StaticResource PreviewBody}"
+                                       Text="{Binding Source='he43b99bdgd8a4g44a7gaafagce3407402fa7', Converter={StaticResource TranslatedStringConverter}}"/>
+                        </StackPanel>
+
+                    </StackPanel>
+                </Grid>
+
+                <!-- Footer. Back and Reset are vanilla handles (arrive pre-translated in all 15
+                     languages), same choice as examples/example-mod. Reset fires this mod's OWN
+                     event (never a shared one) and only touches this bridge's own two checkbox
+                     facts and the debug level fact/mirror; it never clears NMCM_SLOT3_CLAIMED. -->
+                <Grid Grid.Row="2">
+                    <StackPanel VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,40">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Image Source="{StaticResource FooterSideDecorImage}" Stretch="None" VerticalAlignment="Center" Margin="-20,0"/>
+
+                            <ls:LSButton x:Name="BackBtn" HorizontalAlignment="Center" Style="{StaticResource BigBrownButtonStyle}"
+                                         Content="{Binding Source='hfe928c0dgb014g4eb2g8c52g6ed43b026e20', Converter={StaticResource TranslatedStringConverter}}"
+                                         SoundID="UI_HUD_Options_Close"
+                                         Command="{Binding CustomEvent}" CommandParameter="CloseWidget"/>
+
+                            <ls:LSButton x:Name="ResetBtn" HorizontalAlignment="Center" Style="{StaticResource BigBrownButtonStyle}"
+                                         Content="{Binding Source='h25d571f7g0b5fg4c8agb2f9g6b3aab5225ce', Converter={StaticResource TranslatedStringConverter}}"
+                                         SoundID="UI_HUD_Options_Default">
+                                <b:Interaction.Triggers>
+                                    <b:EventTrigger EventName="Click">
+                                        <b:InvokeCommandAction Command="{Binding DataContext.TutorialEvent, RelativeSource={RelativeSource AncestorType={x:Type ls:UIWidget}}}"
+                                                               CommandParameter="90809479-679a-478d-b063-c9e745ae4567"/>
+                                    </b:EventTrigger>
+                                </b:Interaction.Triggers>
+                            </ls:LSButton>
+
+                            <Image Source="{StaticResource FooterSideDecorImage}" Stretch="None" VerticalAlignment="Center" Margin="-20,0" RenderTransformOrigin="0.5 0.5">
+                                <Image.RenderTransform>
+                                    <ScaleTransform ScaleX="-1"/>
+                                </Image.RenderTransform>
+                            </Image>
+                        </StackPanel>
+                        <Image Source="{StaticResource FooterCenterDecorImage}" Stretch="None" HorizontalAlignment="Center" Margin="0,-20,0,0"/>
+                    </StackPanel>
+                </Grid>
+
+            </Grid>
+        </ControlTemplate>
+    </ls:UIWidget.Template>
+</ls:UIWidget>

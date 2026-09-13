@@ -1,0 +1,34 @@
+<ls:StateMachine xmlns:ls="clr-namespace:ls;assembly=Code"
+                 xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ls:StateMachine.States>
+
+        <!-- Claims NMCM slot 3 (see Tools/nmcm_patches/AbsoluteDefeat/README.md for the registry
+             check). Override is TOTAL substitution of the body: the six attributes, the widget and
+             the two events below are exactly what the framework declares for a client slot, restated
+             because anything left out is lost. Only Filename and ModType differ from the framework's
+             own reserve page.
+             CloseAll is deliberately NOT declared here: declaring a StateEvent CONSUMES it, and this
+             one has to reach the hub so the whole branch closes.
+             Filename is a bare name because the page ships inside this same module/pak. -->
+        <ls:State Name = "NMCM_Slot3" Layout = "Common" Owner = "All" DisableStatesBelow = "True" IsModal="True" HideStatesBelow = "True" ModType="Override">
+            <ls:State.Widgets>
+                <ls:StateWidget Filename="AbsoluteDefeat_NMCM.xaml" Layer="Pause" SoundLayer="EscapeMenu"/>
+            </ls:State.Widgets>
+            <ls:State.Events>
+                <ls:StateEvent Name = "CloseWidget">
+                    <ls:StateEvent.Actions>
+                        <ls:RemoveState/>
+                    </ls:StateEvent.Actions>
+                </ls:StateEvent>
+                <ls:StateEvent Name = "OpenMessageBox">
+                    <ls:StateEvent.Actions>
+                        <ls:AddSubstate Name="MessageBox"/>
+                    </ls:StateEvent.Actions>
+                </ls:StateEvent>
+            </ls:State.Events>
+        </ls:State>
+
+    </ls:StateMachine.States>
+</ls:StateMachine>

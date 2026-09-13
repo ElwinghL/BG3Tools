@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<contentList xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<content contentuid="h90ab866dgb68fg4aafga9d6ge14977bcfbfa" version="1">Absolute Defeat (NMCM)</content>
+<content contentuid="hae2990fag13b7g4064gacb4g9f6c1f14663c" version="1">Absolute Defeat</content>
+<content contentuid="hdca482ebg45e3g41e4g8901g4ebb3ec03a07" version="1">General settings</content>
+<content contentuid="hdf984cdfgb38ag453cg84d0g720a01d481b4" version="1">Unofficial NMCM front end for Absolute Defeat's own MCM settings. Changing a row here changes the same stored value Absolute Defeat's MCM page reads, nothing more.</content>
+<content contentuid="hdaa8ba03g1af8g4bc0g9212gba3b72e6c166" version="1">Include Summons</content>
+<content contentuid="h48298ab6g9857g46d8gaf5fg909ba7820f26" version="1">Allow summons to continue fighting when the player characters are downed.</content>
+<content contentuid="h13af723bg7aadg4e8dgb09cg5c2a0b7b73b8" version="1">Downed Player Protection</content>
+<content contentuid="hb028f36eg1272g4c99gb3ffg9afb9634b9fd" version="1">Enemies will be less likely to kill off downed players.</content>
+<content contentuid="h966dde07gdd28g46a6ga802g331ac62d7c82" version="1">Surrender</content>
+<content contentuid="hbb860321ge0a5g4699g8ca0gf04fca58ccac" version="1">Surrender and immediately end the combat encounter.</content>
+<content contentuid="h2898346agcd81g4c3ega043g2d6f869faee5" version="1">Emergency Stop</content>
+<content contentuid="he43b99bdgd8a4g44a7gaafagce3407402fa7" version="1">Immediately end a defeat scenario, use if stuck (might cause unexpected behaviour depending on the scenario).</content>
+<content contentuid="h3e7e2fcdg5fa4g4231g8f8cgbe49f57f61f7" version="1">Debug level</content>
+<content contentuid="h0b0d45c3gd89ag44d3g8e57gc4c2b9ddee2d" version="1">0 = no debug, 1 = minimal, 2 = verbose debug logs.</content>
+<content contentuid="h0491f928gb32bg4afagb9f5g690a93937bc9" version="1">ADNB_OPT_SUMMONS</content>
+<content contentuid="h0773ec99gcbe5g4ed7gbbc1gcd253669dea6" version="1">ADNB_OPT_DOWNED</content>
+<content contentuid="h85251cd4gfd8cg48bcga4d0g5d82c13352fe" version="1">ADNB_DEBUG_CARRIER</content>
+<content contentuid="h0c4a8a67gf9c7g49afg96f6g7066bcd621fe" version="1">An internal marker the mod configuration menu reads. It has no effect on your character.</content>
+<content contentuid="hef48a42ag6653g41d2ga70ag2c9bd7c377d4" version="1">Absolute Defeat NMCM Bridge: Debug level</content>
+<content contentuid="h36be233dg3a82g4c38gaa3eg3a2e90c69d6a" version="1">Numeric storage mirror for the bridge's debug level setting.</content>
+</contentList>

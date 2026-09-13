@@ -69,6 +69,29 @@ else
     echo "Patch déjà appliqué sur ce clone, on passe directement au build."
 fi
 
+# Second patch (19c / patch NMCM AbsoluteDefeat) : Divine.CLI.CommandLineActions.TryToValidatePath
+# plante avec "System.InvalidOperationException: This operation is not supported for a relative
+# URI." sur TOUT chemin absolu Unix passé à -s/-d ("/…"), y compris hors de ce dépôt — reproduit sur
+# un dossier /tmp minimal. Cause : Uri.TryCreate(path, UriKind.RelativeOrAbsolute) ne reconnaît un
+# chemin comme IsFile que pour une syntaxe Windows (lettre de lecteur/UNC) ou un "file://" explicite ;
+# un chemin absolu Unix est parsé comme URI RELATIVE, et uri.IsFile lève alors l'exception. Le patch
+# remplace ce détour par Uri par le seul test Path.IsPathRooted(path), déjà ce que Path.GetFullPath
+# utilise juste après — comportement identique sous Windows, corrigé sous Linux. Même politique que
+# le patch 0001 : appliqué ici uniquement, jamais poussé sur le remote sans accord explicite.
+PATCH_FILE_2="$SCRIPT_DIR/0002-fix-linux-path-validation.patch"
+if ! command git log --oneline | grep -q "BG3Tools Linux patch.*TryToValidatePath\|fix-linux-path-validation"; then
+    if command git apply --check "$PATCH_FILE_2" 2>/dev/null; then
+        echo "Application du patch de correction de validation de chemin (Linux) ..."
+        command git apply "$PATCH_FILE_2"
+        command git add -A
+        command git commit -m "Fix Linux path validation in TryToValidatePath (see BG3Tools scripts/lslib_fork_linux_build/0002-fix-linux-path-validation.patch)"
+    else
+        echo "Patch 0002 déjà appliqué (ou incompatible avec l'état actuel du clone), on continue."
+    fi
+else
+    echo "Patch 0002 déjà appliqué sur ce clone, on passe directement au build."
+fi
+
 echo "=== dotnet build Divine/Divine.csproj -c Release ==="
 if command -v dotnet >/dev/null 2>&1; then
     dotnet build Divine/Divine.csproj -c Release

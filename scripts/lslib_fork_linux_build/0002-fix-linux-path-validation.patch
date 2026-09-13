@@ -1,0 +1,30 @@
+diff --git a/Divine/CLI/CommandLineActions.cs b/Divine/CLI/CommandLineActions.cs
+index 401df31..c63f685 100644
+--- a/Divine/CLI/CommandLineActions.cs
++++ b/Divine/CLI/CommandLineActions.cs
+@@ -211,17 +211,14 @@ internal class CommandLineActions
+             CommandLineLogger.LogFatal($"Cannot parse path from input: {path}", 1);
+         }
+ 
+-        Uri uri = null;
+-        try
+-        {
+-            Uri.TryCreate(path, UriKind.RelativeOrAbsolute, out uri);
+-        }
+-        catch (InvalidOperationException)
+-        {
+-            CommandLineLogger.LogFatal($"Cannot proceed without absolute path [E1]: {path}", 1);
+-        }
+-
+-        if (uri != null && (!Path.IsPathRooted(path) || !uri.IsFile))
++        // BG3Tools Linux patch: the original Uri-based check below assumed Windows path semantics
++        // (Uri.TryCreate(path, RelativeOrAbsolute) only recognizes a Windows drive/UNC path or an
++        // explicit "file://" URI as IsFile; a Unix absolute path like "/tmp/x" is parsed as a
++        // RELATIVE Uri instead, so uri.IsFile then throws InvalidOperationException even for a
++        // perfectly valid absolute path). Path.IsPathRooted(path) alone is the correct,
++        // cross-platform test for "is this already an absolute path" and is what Path.GetFullPath
++        // below actually relies on, so the Uri detour is dropped entirely rather than worked around.
++        if (!Path.IsPathRooted(path))
+         {
+             CommandLineLogger.LogFatal($"Cannot proceed without absolute path [E2]: {path}", 1);
+         }

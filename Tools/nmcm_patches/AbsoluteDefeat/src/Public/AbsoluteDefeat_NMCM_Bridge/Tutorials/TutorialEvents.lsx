@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<save>
+    <version major="4" minor="0" revision="10" build="200"/>
+    <region id="TutorialEvents">
+        <node id="root">
+            <children>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="ADNB_OPT_SUMMONS"/>
+                    <attribute id="UUID" type="guid" value="0ccdef93-b9d6-43ef-862d-72ec16f1c076"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="ADNB_OPT_DOWNED"/>
+                    <attribute id="UUID" type="guid" value="e6b5e30e-d429-4c4e-843a-c934102e1ae0"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="ADNB_DEBUG_UP"/>
+                    <attribute id="UUID" type="guid" value="daccd6e2-e48f-4a3f-ae33-6c66fc088540"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="ADNB_DEBUG_DOWN"/>
+                    <attribute id="UUID" type="guid" value="8ef58cd3-b611-446a-aab6-ef90805c365f"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="ADNB_BTN_SURRENDER"/>
+                    <attribute id="UUID" type="guid" value="e1f39073-e1ca-426b-9c9d-8448710ea2f5"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="ADNB_BTN_SOFTLOCKFIX"/>
+                    <attribute id="UUID" type="guid" value="0dabccf2-1f2f-492c-9d8b-9b7fcc9050eb"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="ADNB_PAGE_OPENED"/>
+                    <attribute id="UUID" type="guid" value="7475728c-6d81-43d6-9897-67db341aa391"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="ADNB_ACT_RESET"/>
+                    <attribute id="UUID" type="guid" value="90809479-679a-478d-b063-c9e745ae4567"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+            </children>
+        </node>
+    </region>
+</save>
