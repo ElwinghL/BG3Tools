@@ -15,16 +15,21 @@ Les points de cette categories sont a trier, reformuler et classer par les agent
 mais les causes racines ne sont pas corrigées :
 
 - ~~**23a.** `native_mods.py::_hardlink_into` appelait `os.link(source, target)` sans repli~~ — fait : remplacé par `platform_utils.link_or_symlink` (même helper déjà utilisé par `linking.py._replace_with_hardlink` pour ce même bug de fond). Causait **6 des 8 plantages du log** (`OSError: [Errno 18] Invalid cross-device link` en déployant un mod natif — `Native Camera Tweaks`, `Baldur's Priority` — depuis `BG3_Managed/NativeMods/<archive>/` vers `BG3_Managed/Installation BG3/bin/NativeMods/`, deux points de montage différents). Import `os` retiré de `native_mods.py` (devenu inutile)
-- **23b.** `AttributeError: 'NoneType' object has no attribute 'render_strips'`
-  — 2 occurrences, entièrement dans les internals Textual (`_compositor.py` /
-  `widget.py` / `visual.py`, déclenché par `_on_timer_update` →
-  `_refresh_layout`), aucune frame `bg3_mod_tui` dans la trace. Un widget dont
-  `render()` a retourné `None` (ou dont le `Visual` a été invalidé) se fait
-  quand même rendre par un tick de rafraîchissement différé — même famille que
-  le bug déjà documenté ci-dessus (`Widget.remove()` asynchrone chez Textual,
-  état incohérent entre suppression et prochain rendu), mais pas la même
-  fonction concernée. Cause racine (quel widget, dans quel écran) non
-  identifiée — à reproduire avec le composant en cause avant de corriger
+- ~~**23b.** `AttributeError: 'NoneType' object has no attribute 'render_strips'`~~
+  — fait (déjà) : cause racine identifiée rétroactivement — `DownloadProgressConsole`
+  (`bg3_mod_tui/widgets/download_console.py`) définissait une méthode `_render()`
+  qui écrasait par erreur `Widget._render(self) -> Visual` (méthode interne
+  Textual utilisée par le compositeur), retournant `None` au lieu d'un `Visual`.
+  Le widget a été introduit le 2026-09-10 (commit `0514688`, sous-tâche 5c) et
+  corrigé le 2026-09-13 (commit `5b86738`, "fix/DownloadsTabClickBug",
+  renommage en `_refresh_content` + `tests/test_download_console.py`) — la
+  session de crash.log qui a produit ces 2 occurrences date du 2026-09-11,
+  pile dans cette fenêtre : même bug, déjà résolu avant que cette investigation
+  ne démarre. Vérifié en balayant TOUT le projet (`tests/test_no_private_textual_api_shadowing.py`,
+  garde-fou générique qui découvre dynamiquement toutes les classes
+  Widget/Screen custom de `bg3_mod_tui` et échoue si l'une d'elles redéfinit
+  une méthode privée déjà utilisée en interne par Textual) : aucune autre
+  collision de ce type n'existe ailleurs dans le code à ce jour
 
 ### 1. Lecteur natif `.pak` (remplacer Divine.exe)
 
