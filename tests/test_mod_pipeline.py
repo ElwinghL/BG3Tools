@@ -23,6 +23,7 @@ from bg3_mod_tui.mod_pipeline import (
     download_mods_from_links_file,
     download_subscribed_modio_mods,
     extract_archives_to_mods,
+    redownload_nexus_mod,
 )
 from bg3_mod_tui.providers.modio import ModIOMod
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusMod
@@ -773,4 +774,60 @@ def test_download_mods_from_links_file_select_files_reste_sequentiel(tmp_path, m
 
     assert sorted(select_calls) == mod_ids
     assert sorted(report["downloaded"]) == mod_ids
+    assert report["failed"] == []
+
+
+def test_redownload_nexus_mod_recupere_un_mod_deja_present(tmp_path, monkeypatch):
+    # Sous-tâche 4d du TODO ("Câbler check_nexus_updates au
+    # téléchargement") : un mod repéré comme obsolète par
+    # `check_nexus_updates` est, par définition, déjà présent localement
+    # (`dest_dir`/`archives_installed_dir`) — `redownload_nexus_mod` doit
+    # donc le télécharger quand même (skip_existing=False), pas le sauter
+    # comme "déjà présent" (ce que ferait `download_mods_from_links_file`,
+    # voir le test symétrique ci-dessous).
+    dest_dir = tmp_path / "a_traiter"
+    dest_dir.mkdir()
+    mod_id = 42
+    # Archive déjà présente dans dest_dir, dans une version périmée
+    # (convention navigateur reconnue par `known_mod_ids`/
+    # `parse_archive_metadata`, voir tests/test_inventory.py).
+    (dest_dir / "Mod42-42-1-0-1690000000.zip").write_bytes(b"vieille version")
+
+    mods = {mod_id: NexusMod(mod_id=mod_id, name="Mod42", version="2.0", summary="")}
+    files = {mod_id: [(4200, "Mod42-v2.zip")]}
+    client = _FakeNexusClientDownloads(mods, files)
+
+    def fake_download_file(url, destination_dir, *, fallback_stem=None, on_progress=None):
+        path = Path(destination_dir) / "Mod42-v2.zip"
+        path.write_bytes(b"nouvelle version")
+        return path
+
+    monkeypatch.setattr(mod_pipeline, "download_file", fake_download_file)
+
+    report = redownload_nexus_mod(client, mod_id, dest_dir)
+
+    assert report["downloaded"] == [mod_id]
+    assert report["skipped"] == []
+    assert report["failed"] == []
+
+
+def test_download_mods_from_links_file_saute_un_mod_deja_present(tmp_path, monkeypatch):
+    # Comportement historique (`skip_existing=True` par défaut), pour
+    # contraster avec `redownload_nexus_mod` ci-dessus : le téléchargement
+    # par lot, lui, ne doit PAS re-télécharger un mod déjà présent.
+    links_file = tmp_path / "nexus_links_to_add.md"
+    dest_dir = tmp_path / "a_traiter"
+    dest_dir.mkdir()
+    mod_id = 42
+    (dest_dir / "Mod42-42-1-0-1690000000.zip").write_bytes(b"vieille version")
+    _write_links_file(links_file, [mod_id])
+
+    mods = {mod_id: NexusMod(mod_id=mod_id, name="Mod42", version="2.0", summary="")}
+    files = {mod_id: [(4200, "Mod42-v2.zip")]}
+    client = _FakeNexusClientDownloads(mods, files)
+
+    report = download_mods_from_links_file(client, links_file, dest_dir)
+
+    assert report["downloaded"] == []
+    assert report["skipped"] == [mod_id]
     assert report["failed"] == []
