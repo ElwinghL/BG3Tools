@@ -5,7 +5,12 @@ description = "TUI de gestion et téléchargement de mods BG3 (Nexus Mods / mod.
 license = { text = "MIT" }
 requires-python = ">=3.11"
 dependencies = [
-    "textual>=0.58",
+    # >=3.0 : Textual 2.0.0 a introduit la sélection de texte au clic
+    # (ALLOW_SELECT), avec un bug (corrigé en 3.0.0, PR Textualize/textual#5627)
+    # qui ne respectait pas `ALLOW_SELECT = False` sur `Button` — cause du
+    # bug "un clic sur un bouton sélectionne son texte" (TODO 15a). `>=0.58`
+    # laissait `pip`/`uv` résoudre n'importe quelle version 2.x affectée.
+    "textual>=3.0",
     "httpx>=0.27",
     "python-dotenv>=1.0",
     "tomlkit>=0.12",
