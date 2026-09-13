@@ -162,7 +162,7 @@ sacrifié pour y arriver, tant pis.
 
 ### 11. Console extender intercepter/flux
 
-- **11a.** Outil interceptant la console du script extender (Proton lag) → rapport dans un terminal TUI lisible
+- ~~**11a.** Outil interceptant la console du script extender (Proton lag) → rapport dans un terminal TUI lisible~~ — fait : BG3SE journalise en fichiers texte sous `LogDirectory` (`My Documents\OsirisLogs`, distinct de `Config.appdata_path`) quand `EnableLogging`/`LogRuntime`/... sont actifs, sans nom de fichier stable garanti (tous les `*.log` suivis). Sur suggestion d'Elwingh (console = outil externe, pas un widget TUI intégré) : nouveau bouton "Console Script Extender..." ouvrant un terminal externe dédié (réutilise `terminal_launcher.open_in_terminal`, déjà utilisé pour se relancer soi-même) qui `tail -F` les logs (ou `Get-Content -Wait` sous Windows) — lecture seule, jamais d'écriture de commande vers le jeu
 - **11b.** Transmission bidirectionnelle (lecture + écrit de commandes)
 - **11c.** Auto-complétion des commandes disponibles
 
@@ -170,12 +170,12 @@ sacrifié pour y arriver, tant pis.
 
 ### 20. NMCM (Native Mod Configuration Menu) et interface MCM
 
-- **20a.** Ajouter [NMCM](https://github.com/Luiznunes12/bg3-nmcm) (aussi sur [mod.io](https://mod.io/g/baldursgate3/m/native-mod-configuration-menu)) comme dépendance suivie (mod majeur, trois sources identiques disponibles) — même logique que les outils suivis dans `Tools/TOOLS.md`, pour toujours avoir la version la plus avancée plutôt qu'une copie figée
+- ~~**20a.** Ajouter NMCM comme dépendance suivie, même logique que les outils suivis dans `Tools/TOOLS.md`~~ — fait : ligne ajoutée dans `Tools/TOOLS.md`, sous-module git `Tools/bg3-nmcm` (pattern identique aux autres outils GitHub suivis, `_add_or_update_git_submodule`), licence MIT documentée dans `THIRD_PARTY_LICENSES.md` (vérifiée via l'API GitHub)
 - **20b.** Spéculatif : portage/patch des mods déjà compatibles MCM pour leur donner une interface NMCM — dépend de 20a, pas de mod concret identifié à ce jour
 
 ### 21. Isoler le temps de lecture Rust pur (sans PyO3/Python) dans le comparatif
 
-- **21a.** `scripts/compare_pak_reader.py` mesure aujourd'hui Rust uniquement via le binding PyO3 (`pak_reader_rs`, Python → Rust) — jamais un appel Rust natif direct. Ajouter un chemin de mesure isolé (binaire/exemple Rust autonome, pas de Python dans la boucle) permettrait de départager le coût réel de lecture `.pak` du coût de binding — déjà noté comme "manque connu" dans les README de `bg3rustpaklib`/`bg3pythonpaklib` (section Comparisons), formalisé ici comme tâche de suivi
+- ~~**21a.** Ajouter un chemin de mesure isolé (binaire/exemple Rust autonome, pas de Python dans la boucle) pour départager le coût réel de lecture `.pak` du coût du binding PyO3~~ — fait : nouvel exemple `native_timing.rs` dans `Tools/bg3rustpaklib`, nouveau chemin `--tool rust-native` dans `scripts/compare_pak_reader.py` (parse son JSON, affiche l'overhead FFI/binding par fichier et au total quand les rapports `rust`/`rust-native` sont présents). Aucun chiffre réel mesuré (pas de vrais `.pak` BG3 accessibles dans l'environnement de dev utilisé) — intégration vérifiée de bout en bout sur un `.pak` synthétique
 
 ### 12. Release standalone
 
