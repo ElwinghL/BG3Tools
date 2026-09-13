@@ -315,15 +315,37 @@ class PakArchive:
         return self._by_name.get(internal_path.replace("\\", "/").lower())
 
     def find_suffix(self, suffix: str) -> PakFileEntry | None:
-        """Première entrée dont le chemin interne se termine par `suffix`
-        (insensible à la casse) — utile pour `meta.lsx`/`meta.lsf` dont on
-        ne connaît pas le dossier de mod exact à l'avance (ex:
-        `Mods/<Dossier inconnu>/meta.lsx`)."""
+        """Entrée dont le chemin interne se termine par `suffix`
+        (insensible à la casse) et dont le chemin est le plus COURT (le
+        moins de séparateurs `/`) parmi les candidats — utile pour
+        `meta.lsx`/`meta.lsf` dont on ne connaît pas le dossier de mod
+        exact à l'avance (ex: `Mods/<Dossier inconnu>/meta.lsx`).
+
+        Certains mods embarquent PLUSIEURS fichiers se terminant par
+        `meta.lsx` : le vrai descripteur du mod à la racine
+        (`Mods/<Dossier>/meta.lsx`, 2 séparateurs) ET, par coïncidence de
+        nom, un fichier de configuration sans rapport plus profond dans
+        l'arborescence (ex: `Mods/<Dossier>/GUI/meta.lsx`, 3 séparateurs
+        — repéré sur un vrai .pak, "KrynnspaceCoreLibrary", dont le
+        descripteur n'était jamais trouvé à cause de ça : le "premier"
+        match dans l'ordre de la table de fichiers du .pak n'est PAS
+        forcément le bon). Préférer systématiquement le chemin le plus
+        court résout ce cas sans connaître le nom du dossier de mod à
+        l'avance ; en cas d'égalité, garde le premier trouvé (ordre
+        d'origine, comportement inchangé pour le cas simple à un seul
+        candidat)."""
         suffix = suffix.replace("\\", "/").lower()
+        best: PakFileEntry | None = None
+        best_depth = None
         for entry in self.entries:
-            if entry.name.lower().endswith(suffix):
-                return entry
-        return None
+            name = entry.name.lower()
+            if not name.endswith(suffix):
+                continue
+            depth = name.count("/")
+            if best is None or depth < best_depth:
+                best = entry
+                best_depth = depth
+        return best
 
     def read(self, entry: PakFileEntry) -> bytes:
         """Lit et décompresse le contenu de `entry`. Ne gère que les .pak
