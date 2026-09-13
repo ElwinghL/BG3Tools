@@ -123,6 +123,14 @@ class ModToolsConfig:
         return self.managed_dir / "mods_inventory.json"
 
     @property
+    def documentation_index_file(self) -> Path:
+        """Sortie de `data_extractor.build_documentation_index` (voir TODO.md
+        section 16) : classes/sous-classes/dons/objets repérés dans la
+        documentation des mods installés (16a), à terme enrichis par la
+        lecture réelle des .pak (16b)."""
+        return self.managed_dir / "mods_documentation.json"
+
+    @property
     def native_mods_manifest_file(self) -> Path:
         return self.project_root / NATIVE_MODS_MANIFEST_FILE_NAME
 

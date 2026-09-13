@@ -99,9 +99,9 @@ mais les causes racines ne sont pas corrigées :
 
 ### 16. `data-extractor` : extraction JSON classes/sous-classes/dons/objets depuis les mods
 
-- **16a.** Parcourir la doc des mods (première étape, sans lecture .pak) pour lister classes/sous-classes/dons/objets
-- **16b.** Étendre au contenu réel des .pak (réutiliser `pak_reader.py`) une fois 16a en place
-- **16c.** Sortie dans des structures JSON adaptées (une structure par type d'entité)
+- ~~**16a.** Parcourir la doc des mods (première étape, sans lecture .pak) pour lister classes/sous-classes/dons/objets~~ — fait : `bg3_mod_tui/data_extractor.py` (`build_documentation_index`), construit la documentation best-effort de chaque .pak installé à partir de `mods_inventory.json` (`inventory.build_inventory`, pas de lecture .pak) + résumé Nexus optionnel (`providers.nexus.NexusClient.mod_info`, best-effort) scanné pour des mentions de classes/sous-classes/dons/objets (`scan_entity_mentions`, expressions multi-mots volontairement conservatrices — "don"/"objet"/"classe" seuls sont trop ambigus en français courant, testé). Un échec Nexus sur un mod (clé absente, 404, réseau) est journalisé et ignoré, pas d'échec global (même tolérance que `pak_metadata.build_deployed_uuid_index`). Testé (`tests/test_data_extractor.py`, 16 tests)
+- **16b.** Étendre au contenu réel des .pak (réutiliser `pak_reader.py`) une fois 16a en place — squelette posé : `data_extractor.extract_pak_entities` réservé (lève `NotImplementedError` explicite plutôt qu'une extraction approximative), pistes de fichiers internes visés (`Progression.lsx`/`ClassDescriptions.lsx`, `Stats/Generated/Data/{Feat,Weapon,Armor,Object}.txt`, `RootTemplates/*.lsf`) documentées en commentaire mais NON vérifiées contre un vrai .pak BG3 dans cet environnement de dev
+- **16c.** Sortie dans des structures JSON adaptées (une structure par type d'entité) — squelette posé : `data_extractor.documentation_index_to_json`/`save_documentation_index` produisent déjà le format visé (`classes`/`sous_classes`/`dons`/`objets`, une liste par type), sans champ `guid` tant que 16b n'existe pas (mentions textuelles seulement, pas d'entité confirmée) ; à revoir une fois 16b en place pour enrichir/remplacer les mentions par de vraies entités
 
 ### 18. Audit de compatibilité et de syntaxe des mods (BG3 Compatibility Framework)
 
