@@ -768,19 +768,30 @@ class _ActiveTask(NamedTuple):
       (rapport isolé, etc.) et peut tourner aux côtés de n'importe quelle
       autre tâche.
     - `tab_id` : l'onglet de `#logs-tabs` où cette tâche écrit ses logs
-      (l'onglet "Tâches" principal si aucune autre tâche n'était active à
-      son lancement, sinon un onglet dynamique dédié — voir
-      `_acquire_task_console`).
+      (l'onglet principal de son `pool` si aucune autre tâche du même pool
+      n'était active à son lancement, sinon un onglet dynamique dédié —
+      voir `_acquire_task_console`).
     - `write` : le callback d'écriture de cette tâche, SANS
       `call_from_thread` (voir `_acquire_task_console`) — réutilisé par
       `on_worker_state_changed`, qui tourne déjà sur le thread UI, pour
       afficher une erreur de worker dans la BONNE console/onglet plutôt
       que dans l'onglet "Tâches" principal par défaut.
+    - `pool` : "tasks" (console "Tâches", mods/profils...) ou "tools"
+      (console "Outils" — voir `_MAIN_CONSOLES` et sous-tâche 7d). Sert
+      UNIQUEMENT à choisir la console/l'onglet dynamique dans
+      `_acquire_task_console` : le verrouillage par ressource
+      (`_resource_conflict`, dans `_start_task`) reste calculé sur
+      `self._active_tasks` en entier, tous pools confondus — deux tâches
+      qui écrivent dans les mêmes fichiers (ex: "Extraire vers Mods/" et
+      "Compiler Compat. Framework", toutes deux taguées "mods-dir") doivent
+      rester mutuellement exclusives même si elles logguent dans des
+      consoles différentes.
     """
 
     resource_tags: frozenset[str]
     tab_id: str
     write: Callable[[str], None]
+    pool: str = "tasks"
 
 
 def _resource_conflict(
@@ -1239,17 +1250,28 @@ class ActionsScreen(Screen):
     def handle_log_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         self._clear_log_tab_indicator(event.pane.id or "")
 
-    def _acquire_task_console(
-        self, title: str
-    ) -> tuple[Callable[[str], None], Callable[[str], None], str]:
-        """Choisit la console où une tâche "Tâches" doit écrire ses logs
-        (appelée UNIQUEMENT depuis le thread UI, avant de lancer le worker
-        — voir `_start_task`) :
+    # Console principale de chaque pool (`_ActiveTask.pool`) : (tab_id,
+    # méthode d'écriture directe, sans call_from_thread). "tasks" = onglet
+    # "Tâches" (mods, profils...) ; "tools" = onglet "Outils" (téléchargement
+    # d'outils, compilation Compat. Framework/Mod Fixer, lancement d'un
+    # exécutable, protontricks, optimisation du préfixe — sous-tâche 7d).
+    def _main_console_for_pool(self, pool: str) -> tuple[str, Callable[[str], None]]:
+        if pool == "tools":
+            return "tools-log-tab", self._tool_log
+        return "actions-log-tab", self._log
 
-        - Si aucune tâche n'est actuellement active (`self._active_tasks`
-          vide), la tâche utilise la console principale `#actions-log`
-          (onglet "Tâches" existant), comme avant ce mécanisme.
-        - Sinon (une tâche tourne déjà), un nouvel onglet est créé
+    def _acquire_task_console(
+        self, title: str, pool: str = "tasks"
+    ) -> tuple[Callable[[str], None], Callable[[str], None], str]:
+        """Choisit la console où une tâche doit écrire ses logs (appelée
+        UNIQUEMENT depuis le thread UI, avant de lancer le worker — voir
+        `_start_task`) :
+
+        - Si aucune tâche du MÊME `pool` n'est actuellement active (parmi
+          `self._active_tasks`), la tâche utilise la console principale de
+          ce pool (`_main_console_for_pool` : "Tâches" ou "Outils"), comme
+          avant ce mécanisme.
+        - Sinon (une tâche de ce pool tourne déjà), un nouvel onglet est créé
           dynamiquement (`TabbedContent.add_pane`) avec sa propre
           `ConsoleLog`, pour ne pas mélanger deux flux de logs différents
           dans une seule console. Son libellé reprend le nom de l'action
@@ -1274,17 +1296,19 @@ class ActionsScreen(Screen):
         qui tourne déjà sur le thread UI, comme `on_worker_state_changed`
         pour signaler une erreur de worker dans la bonne console.
         """
-        if not self._active_tasks:
+        main_tab_id, main_write = self._main_console_for_pool(pool)
+        active_in_pool = [task for task in self._active_tasks.values() if task.pool == pool]
+        if not active_in_pool:
             def write_main(message: str) -> None:
                 try:
-                    self._log(message)
+                    main_write(message)
                 except Exception:
                     return
 
             def log_main(message: str) -> None:
                 self.app.call_from_thread(write_main, message)
 
-            return log_main, write_main, "actions-log-tab"
+            return log_main, write_main, main_tab_id
 
         self._dynamic_task_tab_seq += 1
         seq = self._dynamic_task_tab_seq
@@ -1320,13 +1344,17 @@ class ActionsScreen(Screen):
         title: str,
         resource_tags: frozenset[str],
         launch: Callable[[Callable[[str], None]], "Worker | None"],
+        pool: str = "tasks",
     ) -> None:
-        """Point d'entrée commun à tous les boutons/évènements "Tâches" qui
-        lancent un worker `@work` écrivant dans la console des tâches (voir
-        les `handle_*` correspondants). Deux responsabilités :
+        """Point d'entrée commun à tous les boutons/évènements qui lancent
+        un worker `@work` écrivant dans une console à onglets dynamiques
+        (voir les `handle_*` correspondants). `pool` sélectionne la console
+        principale/le groupe de verrouillage-onglet : "tasks" (console
+        "Tâches", par défaut) ou "tools" (console "Outils" — sous-tâche 7d).
+        Deux responsabilités :
 
-        1. Détection "une tâche tourne déjà" + routage vers la bonne
-           console (`_acquire_task_console`) : le mécanisme retenu est un
+        1. Détection "une tâche de ce pool tourne déjà" + routage vers la
+           bonne console (`_acquire_task_console`) : le mécanisme retenu est un
            simple dictionnaire `self._active_tasks` (worker -> ressources
            tenues + onglet), peuplé ici et vidé par
            `on_worker_state_changed` dès que le `Worker` Textual associé
@@ -1348,23 +1376,30 @@ class ActionsScreen(Screen):
            explicitement). Les actions à lecture seule (rapport isolé,
            scan sans écriture dans Mods/) déclarent `resource_tags=
            frozenset()` et tournent donc toujours librement en parallèle.
+           Ce verrouillage porte sur `self._active_tasks` EN ENTIER, tous
+           pools confondus (voir `_ActiveTask.pool`) : une tâche "Outils"
+           qui écrit dans Mods/ (ex: Compat. Framework) doit rester
+           mutuellement exclusive avec une tâche "Tâches" qui écrit aussi
+           dans Mods/ (ex: Extraire vers Mods/), même si elles logguent
+           dans deux consoles différentes.
         """
         conflict = _resource_conflict(
             [task.resource_tags for task in self._active_tasks.values()], resource_tags
         )
         if conflict:
-            self._log(
+            _, main_write = self._main_console_for_pool(pool)
+            main_write(
                 f"[#D8C091]« {title} » différée : {', '.join(sorted(conflict))} "
                 f"déjà utilisé(e) par une tâche en cours — relance une fois "
                 f"celle-ci terminée.[/#D8C091]"
             )
             return
 
-        log, write, tab_id = self._acquire_task_console(title)
+        log, write, tab_id = self._acquire_task_console(title, pool)
         worker = launch(log)
         if worker is not None:
             self._active_tasks[worker] = _ActiveTask(
-                resource_tags=resource_tags, tab_id=tab_id, write=write
+                resource_tags=resource_tags, tab_id=tab_id, write=write, pool=pool
             )
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
@@ -1769,6 +1804,7 @@ class ActionsScreen(Screen):
             title="MAJ des outils",
             resource_tags=frozenset({"tools-dir", "game-bin-dir"}),
             launch=self.run_download_tools,
+            pool="tools",
         )
 
     @work(exclusive=True, thread=True, group="run_download_tools", exit_on_error=False)
@@ -1813,6 +1849,7 @@ class ActionsScreen(Screen):
             title="Compiler Compat. Framework",
             resource_tags=frozenset({"mods-dir", "tools-dir"}),
             launch=self.run_build_compat_framework,
+            pool="tools",
         )
 
     @work(exclusive=True, thread=True, group="run_build_compat_framework", exit_on_error=False)
@@ -1846,6 +1883,7 @@ class ActionsScreen(Screen):
             title="Forker Mod Fixer",
             resource_tags=frozenset({"mods-dir", "tools-dir"}),
             launch=self.run_build_mod_fixer_fork,
+            pool="tools",
         )
 
     @work(exclusive=True, thread=True, group="run_build_mod_fixer_fork", exit_on_error=False)
@@ -1882,6 +1920,7 @@ class ActionsScreen(Screen):
             title="Tout mettre à jour (outils + Compat Framework + Mod Fixer)",
             resource_tags=frozenset({"tools-dir", "game-bin-dir", "mods-dir"}),
             launch=self.run_update_all,
+            pool="tools",
         )
 
     @work(exclusive=True, thread=True, group="run_update_all", exit_on_error=False)
@@ -1912,14 +1951,24 @@ class ActionsScreen(Screen):
         def on_picked(exe_path: Path | None) -> None:
             if exe_path is None:
                 return
-            self.run_launch_tool(exe_path)
+            # Sous-tâche 7d : passe par `_start_task` (pool "tools") plutôt
+            # que d'appeler `run_launch_tool` directement, pour que deux
+            # lancements simultanés (le worker reste `exclusive=False`,
+            # plusieurs outils peuvent tourner en parallèle) obtiennent
+            # chacun leur propre onglet dynamique sous "Outils" au lieu
+            # d'entrelacer leurs sorties dans `#tools-log`.
+            self._start_task(
+                title=f"Lancer {exe_path.name}",
+                resource_tags=frozenset(),
+                launch=lambda log: self.run_launch_tool(exe_path, log),
+                pool="tools",
+            )
 
         self.app.push_screen(ToolPickerScreen(
             executables, self._config.project_root), on_picked)
 
     @work(exclusive=False, thread=True, exit_on_error=False)
-    def run_launch_tool(self, exe_path: Path) -> None:
-        def log(msg): return self.app.call_from_thread(self._tool_log, msg)
+    def run_launch_tool(self, exe_path: Path, log: Callable[[str], None]) -> None:
         log_dir = self._config.logs_dir
         try:
             launch_tool(
@@ -1952,11 +2001,17 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-protontricks")
     def handle_protontricks(self) -> None:
-        self.run_protontricks()
+        # Sous-tâche 7d : onglet dynamique "Outils" dédié si un autre outil
+        # (ou un autre protontricks) tourne déjà — voir `handle_launch_tool`.
+        self._start_task(
+            title="Ouvrir protontricks",
+            resource_tags=frozenset(),
+            launch=self.run_protontricks,
+            pool="tools",
+        )
 
     @work(exclusive=False, thread=True, exit_on_error=False)
-    def run_protontricks(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._tool_log, msg)
+    def run_protontricks(self, log: Callable[[str], None]) -> None:
         log_dir = self._config.logs_dir
         try:
             open_protontricks(self._config.appdata_path, log_dir=log_dir)
@@ -2709,11 +2764,19 @@ class ActionsScreen(Screen):
 
     @on(Button.Pressed, "#action-optimize-prefix")
     def handle_optimize_prefix(self) -> None:
-        self.run_optimize_prefix()
+        # Sous-tâche 7d : même routage "Outils" que `handle_launch_tool` —
+        # profite aussi de `group=` explicite ci-dessous (absent avant ce
+        # correctif, ce qui partageait le groupe "default" de `@work` avec
+        # `run_validate_paks` et pouvait annuler l'un des deux workers).
+        self._start_task(
+            title="Optimiser le préfixe",
+            resource_tags=frozenset(),
+            launch=self.run_optimize_prefix,
+            pool="tools",
+        )
 
-    @work(exclusive=True, thread=True, exit_on_error=False)
-    def run_optimize_prefix(self) -> None:
-        def log(msg): return self.app.call_from_thread(self._tool_log, msg)
+    @work(exclusive=True, thread=True, group="run_optimize_prefix", exit_on_error=False)
+    def run_optimize_prefix(self, log: Callable[[str], None]) -> None:
         log("=== Optimisation du préfixe Proton pour les outils ===")
         try:
             prefix = find_proton_prefix(self._config.appdata_path)
