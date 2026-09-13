@@ -767,7 +767,8 @@ class _ActiveTask(NamedTuple):
       tâche ne fait que lire/écrire des fichiers qui lui sont propres
       (rapport isolé, etc.) et peut tourner aux côtés de n'importe quelle
       autre tâche.
-    - `tab_id` : l'onglet de `#logs-tabs` où cette tâche écrit ses logs
+    - `tab_id` : l'onglet (`#tasks-tabs` ou `#tools-tabs` selon `pool`,
+      voir `_tabbed_content_for_tab`) où cette tâche écrit ses logs
       (l'onglet principal de son `pool` si aucune autre tâche du même pool
       n'était active à son lancement, sinon un onglet dynamique dédié —
       voir `_acquire_task_console`).
@@ -858,20 +859,41 @@ class ActionsScreen(Screen):
         width: 100%;
         margin-bottom: 1;
     }
-    #logs-tabs {
+    /* Disposition demandée par Elwingh (sous-tâche 7) : les trois consoles
+       (principale/Tâches, Outils, Web) doivent rester VISIBLES simultanément
+       — plus question de les cacher derrière un seul TabbedContent à 4
+       onglets qu'il fallait cliquer pour changer (régression de 7a/7c, qui
+       n'avait gardé que des onglets). Principale en rouge en haut à gauche
+       (avec ses propres onglets dynamiques pour les tâches en parallèle,
+       sous-tâche 7b), Web en bleu en haut à droite (pas d'onglets, sous-tâche
+       7d), Outils en vert sur toute la largeur en bas (avec ses propres
+       onglets dynamiques, sous-tâche 7d). */
+    #logs-column {
         margin-left: 2;
         width: 1fr;
         height: 1fr;
     }
-    #logs-tabs TabPane {
+    #logs-top {
+        height: 3fr;
+    }
+    #tasks-tabs {
+        width: 3fr;
+        border: round red;
+    }
+    #tasks-tabs TabPane {
+        padding: 0;
+    }
+    #tools-tabs {
+        height: 1fr;
+        border: round green;
+    }
+    #tools-tabs TabPane {
         padding: 0;
     }
     #actions-log {
-        border: round $panel;
         height: 1fr;
     }
     #tools-log {
-        border: round $accent;
         height: 1fr;
     }
     #actions-body {
@@ -919,7 +941,8 @@ class ActionsScreen(Screen):
         width: 14;
     }
     #web-console-log {
-        border: round $accent;
+        width: 1fr;
+        border: round blue;
         height: 1fr;
     }
     #downloads-progress {
@@ -1198,55 +1221,68 @@ class ActionsScreen(Screen):
                         tooltip="Importe une archive de profil (.tar.zst) exportée par un autre BG3 Mod TUI.",
                     )
                 yield Button("Quitter", id="action-quit", variant="error")
-            with TabbedContent(id="logs-tabs"):
-                with TabPane("Tâches", id="actions-log-tab"):
-                    yield ConsoleLog(id="actions-log", wrap=True, highlight=True, markup=True)
-                with TabPane("Téléchargements", id="downloads-log-tab"):
-                    yield DownloadProgressConsole(id="downloads-progress")
-                with TabPane("Outils", id="tools-log-tab"):
-                    yield ConsoleLog(id="tools-log", wrap=True, highlight=True, markup=True)
-                with TabPane("Web", id="web-console-log-tab"):
+            with Vertical(id="logs-column"):
+                with Horizontal(id="logs-top"):
+                    with TabbedContent(id="tasks-tabs"):
+                        with TabPane("Tâches", id="actions-log-tab"):
+                            yield ConsoleLog(id="actions-log", wrap=True, highlight=True, markup=True)
+                        with TabPane("Téléchargements", id="downloads-log-tab"):
+                            yield DownloadProgressConsole(id="downloads-progress")
                     yield ConsoleLog(id="web-console-log", wrap=True, highlight=True, markup=True)
+                with TabbedContent(id="tools-tabs"):
+                    with TabPane("Outils", id="tools-log-tab"):
+                        yield ConsoleLog(id="tools-log", wrap=True, highlight=True, markup=True)
         yield Footer()
 
     # Libellés de base des onglets de consoles (utilisés pour reconstruire le
     # texte avec l'indicateur "●" quand un onglet inactif reçoit un message).
+    # Web n'y figure plus : elle est toujours visible (sous-tâche 7c/7d),
+    # plus besoin d'indicateur d'activité pour un onglet caché.
     _LOG_TAB_LABELS = {
         "actions-log-tab": "Tâches",
         "downloads-log-tab": "Téléchargements",
         "tools-log-tab": "Outils",
-        "web-console-log-tab": "Web",
     }
+
+    def _tabbed_content_for_tab(self, tab_id: str) -> TabbedContent | None:
+        """Les onglets dynamiques (sous-tâche 7d) vivent dans deux
+        `TabbedContent` distincts depuis que Web en est sortie (toujours
+        visible, plus dans un onglet) : `#tasks-tabs` (pool "tasks") et
+        `#tools-tabs` (pool "tools"). `tab_id` est unique entre les deux,
+        donc on essaie l'un puis l'autre plutôt que de maintenir une carte
+        séparée tab_id -> conteneur."""
+        for selector in ("#tasks-tabs", "#tools-tabs"):
+            try:
+                tabbed_content = self.query_one(selector, TabbedContent)
+                tabbed_content.get_tab(tab_id)
+            except Exception:
+                continue
+            return tabbed_content
+        return None
 
     def _mark_log_tab_active(self, tab_id: str) -> None:
         """Ajoute un indicateur "●" au libellé de l'onglet `tab_id` si ce
         n'est pas l'onglet actuellement affiché, pour signaler discrètement
         qu'une console en arrière-plan a reçu un nouveau message. Fonctionne
-        aussi bien pour les 4 onglets statiques que pour un onglet dynamique
+        aussi bien pour les onglets statiques que pour un onglet dynamique
         de tâche (voir `_acquire_task_console`), tant que son libellé de
         base est enregistré dans `self._log_tab_labels`."""
-        try:
-            tabbed_content = self.query_one("#logs-tabs", TabbedContent)
-        except Exception:
+        tabbed_content = self._tabbed_content_for_tab(tab_id)
+        if tabbed_content is None or tabbed_content.active == tab_id:
             return
-        if tabbed_content.active == tab_id:
-            return
-        try:
-            tab = tabbed_content.get_tab(tab_id)
-        except Exception:
-            return
+        tab = tabbed_content.get_tab(tab_id)
         base_label = self._log_tab_labels.get(tab_id, str(tab.label))
         tab.label = f"{base_label} ●"
 
     def _clear_log_tab_indicator(self, tab_id: str) -> None:
-        try:
-            tabbed_content = self.query_one("#logs-tabs", TabbedContent)
-            tab = tabbed_content.get_tab(tab_id)
-        except Exception:
+        tabbed_content = self._tabbed_content_for_tab(tab_id)
+        if tabbed_content is None:
             return
+        tab = tabbed_content.get_tab(tab_id)
         tab.label = self._log_tab_labels.get(tab_id, str(tab.label))
 
-    @on(TabbedContent.TabActivated, "#logs-tabs")
+    @on(TabbedContent.TabActivated, "#tasks-tabs")
+    @on(TabbedContent.TabActivated, "#tools-tabs")
     def handle_log_tab_activated(self, event: TabbedContent.TabActivated) -> None:
         self._clear_log_tab_indicator(event.pane.id or "")
 
@@ -1317,7 +1353,8 @@ class ActionsScreen(Screen):
         label = f"{title} ({seq})"
         self._log_tab_labels[tab_id] = label
 
-        tabbed_content = self.query_one("#logs-tabs", TabbedContent)
+        tabs_selector = "#tasks-tabs" if pool == "tasks" else "#tools-tabs"
+        tabbed_content = self.query_one(tabs_selector, TabbedContent)
         tabbed_content.add_pane(
             TabPane(
                 label,
@@ -2813,11 +2850,13 @@ class ActionsScreen(Screen):
             self._web_server_handle = None
 
     def _web_log(self, message: str) -> None:
+        # Pas de `_mark_log_tab_active` ici : Web n'est plus dans un onglet
+        # (toujours visible en bleu à droite — sous-tâche 7c/7d), donc plus
+        # besoin d'indicateur "●" pour signaler un message reçu en arrière-plan.
         try:
             self.query_one("#web-console-log", ConsoleLog).write(message)
         except Exception:
             pass
-        self._mark_log_tab_active("web-console-log-tab")
 
     @on(Button.Pressed, "#planet-button")
     def handle_planet_button(self) -> None:
