@@ -162,8 +162,8 @@ sacrifié pour y arriver, tant pis.
 
 ### 11. Console extender intercepter/flux
 
-- ~~**11a.** Outil interceptant la console du script extender (Proton lag) → rapport dans un terminal TUI lisible~~ — fait : BG3SE journalise en fichiers texte sous `LogDirectory` (`My Documents\OsirisLogs`, distinct de `Config.appdata_path`) quand `EnableLogging`/`LogRuntime`/... sont actifs, sans nom de fichier stable garanti (tous les `*.log` suivis). Sur suggestion d'Elwingh (console = outil externe, pas un widget TUI intégré) : nouveau bouton "Console Script Extender..." ouvrant un terminal externe dédié (réutilise `terminal_launcher.open_in_terminal`, déjà utilisé pour se relancer soi-même) qui `tail -F` les logs (ou `Get-Content -Wait` sous Windows) — lecture seule, jamais d'écriture de commande vers le jeu
-- **11b.** Transmission bidirectionnelle (lecture + écrit de commandes)
+- **11a.** ~~Outil interceptant la console du script extender (Proton lag) → rapport dans un terminal TUI lisible~~ **reformulé par Elwingh** : le besoin réel n'est PAS de lire les logs (`*.log` sous `LogDirectory`) mais d'intercepter les vrais flux I/O de la console interactive BG3SE (un REPL Lua, `AllocConsole()`/`ReadConsoleW` dans `CoreLib/Console.cpp` et `BG3Extender/Extender/Shared/Console.cpp`, upstream Norbyte/bg3se) pour pouvoir taper des commandes Lua depuis un terminal Linux classique plutôt que la console Win32 native (laggy sous le rendu GUI de Wine/Proton). Première implémentation (tail de logs, lecture seule) reconnue insuffisante et **revert** de `main`. Piste retenue : patcher le fork `ElwinghL/bg3se` pour rediriger stdio vers un named pipe/socket consommable par un client Python — recherche de faisabilité en cours (build C++ Windows du fork, points d'interception précis, design du client Python). Couvre de fait une bonne partie de 11b (écriture de commandes) puisque le besoin est bidirectionnel dès le départ
+- **11b.** Transmission bidirectionnelle (lecture + écrit de commandes) — voir 11a reformulé, largement fusionné avec le besoin ci-dessus
 - **11c.** Auto-complétion des commandes disponibles
 
 ## P4 — Futur
