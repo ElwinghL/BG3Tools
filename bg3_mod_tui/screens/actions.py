@@ -1170,48 +1170,17 @@ class ActionsScreen(Screen):
                         ),
                     )
                     yield Button(
-                        "MAJ des outils",
-                        id="action-tools",
-                        tooltip="Télécharge ou met à jour les outils listés dans Tools/TOOLS.md (BG3 Mod Manager, Load Order Optimizer, Script Extender, ExportTools/LSLib, Para Tool...).",
-                    )
-                    yield Button(
-                        "Compiler Compat. Framework",
-                        id="action-compat-framework",
-                        tooltip=(
-                            "BG3 Compatibility Framework n'a ni release GitHub avec .pak "
-                            "tout fait, ni .pak commité dans son dépôt (juste les "
-                            "sources) : ce bouton l'empaquette en .pak via Divine.exe "
-                            "(LSLib) et le dépose dans Mods/ — nécessite d'avoir "
-                            "téléchargé l'outil (MAJ des outils) au préalable."
-                        ),
-                    )
-                    yield Button(
-                        "Forker Mod Fixer",
-                        id="action-mod-fixer-fork",
-                        tooltip=(
-                            "Mod Fixer (Nexus #141) n'a pas de meta.lsx (il patche "
-                            "directement le module Gustav), d'où le warning "
-                            "\"no meta.lsx\"/\"no valid load-order UUID\" dans les "
-                            "validateurs de load order — bénin mais gênant à distinguer "
-                            "d'un vrai problème. Ce bouton remplace ModFixer.pak par une "
-                            "version forkée (module séparé, meta.lsx propre, même UUID "
-                            "stable à chaque reconstruction) via Divine.exe — un seul "
-                            "fichier au final, l'original étant sauvegardé une fois pour "
-                            "toutes dans ModFixer.pak.orig. Effet non garanti à 100% (voir "
-                            "mod_fixer_fork.py) et de toute façon plus nécessaire depuis le "
-                            "Patch 7 de BG3 selon Nexus."
-                        ),
-                    )
-                    yield Button(
                         "Tout mettre à jour (outils + Compat Framework + Mod Fixer)",
                         id="action-update-all",
                         tooltip=(
-                            "Enchaîne dans l'ordre les 3 actions ci-dessus : "
-                            "MAJ des outils, puis Compiler Compat. Framework, "
-                            "puis Forker Mod Fixer — avec une progression "
-                            "[i/3] dans le log. S'arrête à la première étape "
-                            "en échec (les suivantes dépendent de Divine.exe "
-                            "téléchargé par la 1ère)."
+                            "Enchaîne dans l'ordre : MAJ des outils listés dans "
+                            "Tools/TOOLS.md (BG3 Mod Manager, Load Order Optimizer, "
+                            "Script Extender, ExportTools/LSLib, Para Tool...), puis "
+                            "compilation de BG3 Compatibility Framework en .pak via "
+                            "Divine.exe (LSLib), puis fork de Mod Fixer (Nexus #141) "
+                            "avec un meta.lsx propre — avec une progression [i/3] dans "
+                            "le log. S'arrête à la première étape en échec (les "
+                            "suivantes dépendent de Divine.exe téléchargé par la 1ère)."
                         ),
                     )
                     yield Button(
@@ -1957,30 +1926,15 @@ class ActionsScreen(Screen):
             f"— voir le détail ci-dessus), {len(report['failed'])} échec(s)."
         )
 
-    @on(Button.Pressed, "#action-tools")
-    def handle_tools(self) -> None:
-        # Écrit dans Tools/ (peut remplacer Divine.exe/LSLib en cours de
-        # route) et dans bin/ du jeu : incompatible avec toute action qui
-        # lit Tools/ (compilation Compat. Framework/Mod Fixer) ou écrit
-        # dans bin/.
-        self._start_task(
-            title="MAJ des outils",
-            resource_tags=frozenset({"tools-dir", "game-bin-dir"}),
-            launch=self.run_download_tools,
-            pool="tools",
-        )
-
-    @work(exclusive=True, thread=True, group="run_download_tools", exit_on_error=False)
-    def run_download_tools(self, log: Callable[[str], None]) -> None:
-        self._download_tools_task(log)
-
     def _download_tools_task(self, log: Callable[[str], None]) -> bool:
         """Corps effectif de la MAJ des outils — factorisé (même principe
-        que `_restore_profile_task`) pour être appelé à la fois par
-        `run_download_tools` (worker dédié, bouton "MAJ des outils") et par
-        `run_update_all` en première étape de la séquence unifiée. Retourne
-        `True` en cas de succès, `False` sinon (utilisé par `run_update_all`
-        pour décider d'enchaîner ou d'arrêter la séquence)."""
+        que `_restore_profile_task`) pour être appelé par `run_update_all`
+        en première étape de la séquence unifiée (l'ancien bouton dédié
+        "MAJ des outils" et son worker `run_download_tools` ont été retirés,
+        `run_update_all` les enchaînant déjà tous — voir TODO section 9b).
+        Retourne `True` en cas de succès, `False` sinon (utilisé par
+        `run_update_all` pour décider d'enchaîner ou d'arrêter la
+        séquence)."""
         log("=== Téléchargement/mise à jour des outils (TOOLS.md) ===")
         try:
             entries = parse_tools_table(self._config.tools_md_file)
@@ -2003,28 +1957,13 @@ class ActionsScreen(Screen):
         log("Terminé.")
         return True
 
-    @on(Button.Pressed, "#action-compat-framework")
-    def handle_compat_framework(self) -> None:
-        # Lit Divine.exe sous Tools/ et écrit le .pak résultant dans Mods/ :
-        # incompatible avec la MAJ des outils (pourrait remplacer Divine.exe
-        # en cours de lecture) et avec toute action qui écrit dans Mods/.
-        self._start_task(
-            title="Compiler Compat. Framework",
-            resource_tags=frozenset({"mods-dir", "tools-dir"}),
-            launch=self.run_build_compat_framework,
-            pool="tools",
-        )
-
-    @work(exclusive=True, thread=True, group="run_build_compat_framework", exit_on_error=False)
-    def run_build_compat_framework(self, log: Callable[[str], None]) -> None:
-        self._build_compat_framework_task(log)
-
     def _build_compat_framework_task(self, log: Callable[[str], None]) -> bool:
         """Corps effectif de la compilation de Compat. Framework —
-        factorisé pour être appelé par `run_build_compat_framework` (bouton
-        dédié) et par `run_update_all` (2ème étape de la séquence unifiée).
-        Retourne `True`/`False` selon le succès (voir
-        `_download_tools_task`)."""
+        factorisé pour être appelé par `run_update_all` (2ème étape de la
+        séquence unifiée ; l'ancien bouton dédié "Compiler Compat.
+        Framework" et son worker `run_build_compat_framework` ont été
+        retirés, voir TODO section 9b). Retourne `True`/`False` selon le
+        succès (voir `_download_tools_task`)."""
         log("=== Compilation de BG3 Compatibility Framework (Divine.exe) ===")
         try:
             build_compat_framework_pak(
@@ -2038,25 +1977,11 @@ class ActionsScreen(Screen):
             return False
         return True
 
-    @on(Button.Pressed, "#action-mod-fixer-fork")
-    def handle_mod_fixer_fork(self) -> None:
-        # Même raison que "Compiler Compat. Framework" : lit Divine.exe
-        # sous Tools/, écrit dans Mods/.
-        self._start_task(
-            title="Forker Mod Fixer",
-            resource_tags=frozenset({"mods-dir", "tools-dir"}),
-            launch=self.run_build_mod_fixer_fork,
-            pool="tools",
-        )
-
-    @work(exclusive=True, thread=True, group="run_build_mod_fixer_fork", exit_on_error=False)
-    def run_build_mod_fixer_fork(self, log: Callable[[str], None]) -> None:
-        self._build_mod_fixer_fork_task(log)
-
     def _build_mod_fixer_fork_task(self, log: Callable[[str], None]) -> bool:
         """Corps effectif du fork de Mod Fixer — factorisé pour être
-        appelé par `run_build_mod_fixer_fork` (bouton dédié) et par
-        `run_update_all` (3ème et dernière étape de la séquence unifiée).
+        appelé par `run_update_all` (3ème et dernière étape de la séquence
+        unifiée ; l'ancien bouton dédié "Forker Mod Fixer" et son worker
+        `run_build_mod_fixer_fork` ont été retirés, voir TODO section 9b).
         Retourne `True`/`False` selon le succès (voir
         `_download_tools_task`)."""
         log("=== Fork de Mod Fixer avec meta.lsx (Divine.exe) ===")
