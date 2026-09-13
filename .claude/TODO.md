@@ -4,6 +4,11 @@
 
 Les points de cette categories sont a trier, reformuler et classer par les agents competents. Cette categorie ne doit pas etre supprimee, elle peut rester vide, accompagne de ce petit texte d'explication.
 
+- Suppressio ndes boutons superflus deja couvert par d'autres boutons (Mise a jour des outils, compilation du framework de compatibilite...)
+  - On garde le bouton qui fait toutes ces actions en simultane
+  - On peut aussi ajouter des elements qui effectuent les actions de ce genre a ce bouton
+- Regarder comment Le Mod Manager check la presence ou non du script extender pour presenter une correction plus precise qui prenne en compte notre hardlink
+
 ## P0 — Critique / Fondation
 
 - ~~**BUG** : clic sur "Extraire vers Mods/" (et la plupart des boutons "Tâches" déjà dans le top 3 d'usage) faisait planter tout le TUI sans message d'erreur lisible~~ — fait : cause racine identifiée dans `ActionsScreen._refresh_quick_actions` — `Widget.remove()` est asynchrone chez Textual, donc le remontage d'un bouton "quick action" avec le même id pouvait arriver avant que l'ancien soit réellement retiré du DOM, levant `DuplicateIds` (touchait quasi tous les boutons déjà présents dans le top 3 d'usage, pas seulement "Extraire"). Corrigé (`await bar.query(Button).remove()` avant remontage) et durci en profondeur pour éviter toute récidive silencieuse : les ~20 workers `@work` de l'écran sont passés en `exit_on_error=False`, `on_worker_state_changed` capte désormais toute erreur de worker restante (affichée dans la console de la tâche concernée au lieu de planter tout le TUI), et un nouveau module `bg3_mod_tui/crash_log.py` trace chaque erreur/plantage avec un timestamp dans `crash.log` à la racine du projet
