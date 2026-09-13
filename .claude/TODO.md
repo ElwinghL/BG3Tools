@@ -198,3 +198,4 @@ sacrifié pour y arriver, tant pis.
 - matching mods glisser-déposer → Nexus/Mod.io (nom, UUID meta.lsx, fallback lien manuel mémorisé)
 - analyse BG3-pyUpgrade + mod armes existants
 - fork local de Mod Fixer avec meta.lsx propre (remplace ModFixer.pak, backup dans ModFixer.pak.orig, UUID stable entre reconstructions)
+- `NexusFileSelectionScreen` présélectionne automatiquement les variantes UT (Unique Tav) + EOTB (Eye of the Beholder) au lieu de tout cocher par défaut, pour les mods publiant des fichiers Simple/UT/EOTB/UT+EOTB mutuellement exclusifs (ex: les collections "Mantis'...") — Elwingh a les deux mods installés et avait par erreur validé plusieurs variantes incompatibles à la fois faute de tout décocher à la main ; nouveau module pur et testé `nexus_variant_selection.infer_ut_eotb_preselection` (préfère la variante combinée si elle existe, sinon UT+EOTB séparés)
