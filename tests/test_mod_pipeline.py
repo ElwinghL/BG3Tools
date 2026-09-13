@@ -585,6 +585,8 @@ def test_cleanup_duplicate_archives_ignore_les_fichiers_non_archives(tmp_path):
     report = cleanup_duplicate_archives(tmp_path)
 
     assert report["removed"] == []
+    assert (tmp_path / "notes.txt").is_file()
+    assert (tmp_path / "notes (1).txt").is_file()
 
 
 # --- Sous-tâche P1 "Téléchargements parallèles" (5a/5b/5c/5d) ------------
@@ -772,5 +774,3 @@ def test_download_mods_from_links_file_select_files_reste_sequentiel(tmp_path, m
     assert sorted(select_calls) == mod_ids
     assert sorted(report["downloaded"]) == mod_ids
     assert report["failed"] == []
-    assert (tmp_path / "notes.txt").is_file()
-    assert (tmp_path / "notes (1).txt").is_file()
