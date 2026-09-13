@@ -372,6 +372,40 @@ def parse_meta_lsx_bytes(data: bytes) -> tuple[str, str, str] | None:
     return (uuid, name or "", folder or "") if uuid else None
 
 
+def parse_meta_lsx_dependencies_bytes(data: bytes) -> list[tuple[str, str]]:
+    """Extrait la liste `[(UUID, Name), ...]` des dépendances déclarées
+    par un mod dans son `meta.lsx` (nœud `Dependencies/children/node[@id=
+    'ModuleShortDesc']` — voir `_META_LSX` dans `tests/test_pak_reader.py`
+    pour la structure XML exacte, confirmée contre un vrai `meta.lsx`
+    d'exemple de BG3 Script Extender). Complémentaire à
+    `parse_meta_lsx_bytes`, qui ignore volontairement ce nœud pour ne
+    retourner que l'identité DU mod lui-même — utilisé par
+    `pak_metadata`/`mod_dependencies` pour vérifier que chaque dépendance
+    déclarée correspond à un mod (ou module de base du jeu) effectivement
+    présent. Liste vide (pas d'erreur) si le nœud est absent/vide ou le
+    XML invalide."""
+    try:
+        root = ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return []
+    dependencies_node = root.find(".//node[@id='Dependencies']")
+    if dependencies_node is None:
+        return []
+    dependencies: list[tuple[str, str]] = []
+    for dep in dependencies_node.findall("./children/node[@id='ModuleShortDesc']"):
+        dep_uuid = None
+        dep_name = None
+        for attribute in dep.findall("attribute"):
+            attr_id = attribute.get("id")
+            if attr_id == "UUID":
+                dep_uuid = attribute.get("value")
+            elif attr_id == "Name":
+                dep_name = attribute.get("value")
+        if dep_uuid:
+            dependencies.append((dep_uuid, dep_name or ""))
+    return dependencies
+
+
 def read_pak_identity_native(pak_path: Path) -> tuple[str, str] | None:
     """Équivalent natif de `pak_metadata.read_pak_identity`, sans
     Divine.exe : ouvre `pak_path` via `PakArchive`, localise son
