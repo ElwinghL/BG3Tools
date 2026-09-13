@@ -9,6 +9,35 @@ Les points de cette categories sont a trier, reformuler et classer par les agent
 - ~~**BUG** : clic sur "Extraire vers Mods/" (et la plupart des boutons "Tâches" déjà dans le top 3 d'usage) faisait planter tout le TUI sans message d'erreur lisible~~ — fait : cause racine identifiée dans `ActionsScreen._refresh_quick_actions` — `Widget.remove()` est asynchrone chez Textual, donc le remontage d'un bouton "quick action" avec le même id pouvait arriver avant que l'ancien soit réellement retiré du DOM, levant `DuplicateIds` (touchait quasi tous les boutons déjà présents dans le top 3 d'usage, pas seulement "Extraire"). Corrigé (`await bar.query(Button).remove()` avant remontage) et durci en profondeur pour éviter toute récidive silencieuse : les ~20 workers `@work` de l'écran sont passés en `exit_on_error=False`, `on_worker_state_changed` capte désormais toute erreur de worker restante (affichée dans la console de la tâche concernée au lieu de planter tout le TUI), et un nouveau module `bg3_mod_tui/crash_log.py` trace chaque erreur/plantage avec un timestamp dans `crash.log` à la racine du projet
   - (au passage, corrigé aussi : `linking.py._replace_with_hardlink` ne savait pas remplacer un `modsettings.lsx` déjà symlinké par le repli inter-filesystem du commit précédent — `EEXIST` systématique)
 
+### 23. Deux bugs trouvés via `crash.log` (session du 2026-09-11, 8 plantages)
+
+`crash_log.py` a fait son travail (aucun des deux ne plante plus tout le TUI),
+mais les causes racines ne sont pas corrigées :
+
+- **23a.** `native_mods.py::_hardlink_into` (ligne 89, `os.link(source, target)`
+  sans repli) — **6 des 8 plantages du log**, tous `OSError: [Errno 18] Invalid
+  cross-device link` en déployant un mod natif (`Native Camera Tweaks`,
+  `Baldur's Priority`) depuis `BG3_Managed/NativeMods/<archive>/` vers
+  `BG3_Managed/Installation BG3/bin/NativeMods/` — deux points de montage
+  différents. **Exactement le même bug de fond** que celui déjà corrigé dans
+  `linking.py._replace_with_hardlink` (voir note ci-dessus et commit "Repli
+  symlink pour les hardlinks inter-filesystems") : le helper générique existe
+  déjà (`platform_utils.link_or_symlink`, gère `errno.EXDEV` en retombant sur
+  un symlink) mais `_hardlink_into` ne l'utilise pas, il appelle `os.link`
+  directement. Correctif attendu : remplacer l'appel par
+  `link_or_symlink(source, target)` (après gestion de l'existence/inode déjà
+  en place dans la fonction, inchangée)
+- **23b.** `AttributeError: 'NoneType' object has no attribute 'render_strips'`
+  — 2 occurrences, entièrement dans les internals Textual (`_compositor.py` /
+  `widget.py` / `visual.py`, déclenché par `_on_timer_update` →
+  `_refresh_layout`), aucune frame `bg3_mod_tui` dans la trace. Un widget dont
+  `render()` a retourné `None` (ou dont le `Visual` a été invalidé) se fait
+  quand même rendre par un tick de rafraîchissement différé — même famille que
+  le bug déjà documenté ci-dessus (`Widget.remove()` asynchrone chez Textual,
+  état incohérent entre suppression et prochain rendu), mais pas la même
+  fonction concernée. Cause racine (quel widget, dans quel écran) non
+  identifiée — à reproduire avec le composant en cause avant de corriger
+
 ### 1. Lecteur natif `.pak` (remplacer Divine.exe)
 
 - ~~**1a-1e.**~~ — fait : `bg3_mod_tui/pak_reader.py` (mmap, header LSPK v15/16/18, index LZ4), parsing meta.lsx/meta.lsf, intégré dans `pak_metadata.read_pak_identity` (le point d'usage réel de Divine.exe — `inventory._match_pak_to_archive` ne lit aucun .pak, seulement les noms de fichiers), avec repli automatique sur Divine.exe y compris sur exception imprévue (`1e`)

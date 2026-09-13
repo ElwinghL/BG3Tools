@@ -7,6 +7,11 @@
 /native_mods_manifest.json
 /BG3_Managed/
 
+# Journal de plantages écrit par bg3_mod_tui/crash_log.py (un timestamp +
+# traceback par entrée) — spécifique à la machine/session de l'utilisateur,
+# jamais à committer.
+/crash.log
+
 # Exports de profil (*.bg3profile.tar.zst, voir profile_archive.py) : la
 # boîte de dialogue d'export peut par défaut proposer la racine du dépôt
 # comme destination — ignoré pour ne pas committer un gros binaire par
