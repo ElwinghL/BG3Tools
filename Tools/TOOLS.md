@@ -15,3 +15,4 @@ Liste des outils tiers utilisés dans ce workspace (non versionnés, voir
 | MoreReactiveCompanions      | `Tools/MoreReactiveCompanionsConfigApp/`                          | https://www.nexusmods.com/baldursgate3/mods/5447                                               |
 | bg3rustpaklib                | `Tools/bg3rustpaklib/`                                            | https://github.com/ElwinghL/bg3rustpaklib                                                      |
 | bg3pythonpaklib              | `Tools/bg3pythonpaklib/`                                          | https://github.com/ElwinghL/bg3pythonpaklib                                                    |
+| NMCM (Native Mod Configuration Menu) | `Tools/bg3-nmcm/`                                         | https://github.com/Luiznunes12/bg3-nmcm / https://mod.io/g/baldursgate3/m/native-mod-configuration-menu |
