@@ -20,6 +20,7 @@ from bg3_mod_tui.pak_reader import (
     parse_file_list,
     parse_lspk_header,
     parse_meta_lsx_bytes,
+    parse_meta_lsx_dependencies_bytes,
 )
 
 _SIGNATURE_BYTES = struct.pack("<I", 0x4B50534C)
@@ -197,6 +198,20 @@ def test_parse_meta_lsx_bytes_xml_invalide():
 
 def test_parse_meta_lsx_bytes_sans_module_info():
     assert parse_meta_lsx_bytes(b"<save><region/></save>") is None
+
+
+def test_parse_meta_lsx_dependencies_bytes_extrait_module_short_desc():
+    assert parse_meta_lsx_dependencies_bytes(_META_LSX) == [
+        ("11111111-1111-1111-1111-111111111111", "UneDependance")
+    ]
+
+
+def test_parse_meta_lsx_dependencies_bytes_sans_noeud_dependencies():
+    assert parse_meta_lsx_dependencies_bytes(b"<save><region/></save>") == []
+
+
+def test_parse_meta_lsx_dependencies_bytes_xml_invalide():
+    assert parse_meta_lsx_dependencies_bytes(b"<pas de xml valide") == []
 
 
 def test_extract_uuid_from_lsf_bytes_direct():

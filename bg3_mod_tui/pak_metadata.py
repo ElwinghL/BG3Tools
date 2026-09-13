@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -30,6 +31,7 @@ from bg3_mod_tui.pak_reader import (
     PakReaderError,
     extract_uuid_from_lsf_bytes,
     parse_meta_lsx_bytes,
+    parse_meta_lsx_dependencies_bytes,
     read_meta_lsx_or_lsf_bytes,
 )
 from bg3_mod_tui.platform_utils import find_proton_prefix, is_windows, to_wine_path
@@ -109,6 +111,19 @@ def parse_meta_lsx(meta_path: Path) -> tuple[str, str] | None:
         elif attr_id == "Name":
             name = attribute.get("value")
     return (uuid, name or "") if uuid else None
+
+
+def parse_meta_lsx_dependencies(meta_path: Path) -> list[tuple[str, str]]:
+    """Variante `Path` (fichier déjà extrait sur disque, ex: par Divine.exe)
+    de `pak_reader.parse_meta_lsx_dependencies_bytes` — même structure
+    XML, juste lu depuis un fichier plutôt que des octets déjà en
+    mémoire (voir `parse_meta_lsx`/`parse_meta_lsx_bytes` pour la même
+    distinction native/disque sur l'identité du mod)."""
+    try:
+        data = meta_path.read_bytes()
+    except OSError:
+        return []
+    return parse_meta_lsx_dependencies_bytes(data)
 
 
 def _read_pak_identity_native(pak_path: Path) -> tuple[str, str] | None:
@@ -199,6 +214,134 @@ def read_pak_identity(
     if not matches:
         return None
     return parse_meta_lsx(matches[0])
+
+
+@dataclass(frozen=True)
+class ModuleMetadata:
+    """Identité d'un mod + ses dépendances déclarées (voir
+    `read_pak_module_metadata`) — utilisé par `mod_dependencies` pour
+    vérifier que chaque dépendance correspond à un mod effectivement
+    présent."""
+
+    uuid: str
+    name: str
+    dependencies: tuple[tuple[str, str], ...]
+
+
+def read_pak_module_metadata(
+    pak_path: Path,
+    *,
+    divine_exe: Path | None,
+    reference_path: Path,
+    work_dir: Path,
+) -> ModuleMetadata | None:
+    """Comme `read_pak_identity`, mais extrait EN PLUS les dépendances
+    déclarées (`Dependencies`) — un seul passage natif ou une seule
+    extraction Divine.exe pour les deux, plutôt que d'appeler
+    `read_pak_identity` et une hypothétique fonction dépendances séparée
+    (qui redemanderait une 2ème extraction Divine.exe du même .pak, lente
+    — voir `_DIVINE_TIMEOUT_SECONDS`). Ne gère les dépendances que pour un
+    `meta.lsx` (XML) : un mod avec seulement un `meta.lsf` (binaire)
+    retourne des dépendances vides (limite déjà documentée sur
+    `pak_reader.extract_uuid_from_lsf_bytes` — approche par regex, pas de
+    structure exploitable pour `Dependencies`).
+
+    Mêmes garanties que `read_pak_identity` : repli automatique sur
+    Divine.exe si la lecture native échoue, `None` si le .pak n'a aucun
+    `meta.lsx`/`meta.lsf` exploitable, `PakMetadataError` si le repli
+    Divine.exe lui-même échoue OU si un repli serait nécessaire mais
+    `divine_exe` vaut `None` (LSLib pas encore téléchargé — voir
+    `ActionsScreen.run_check_dependencies`, qui alerte l'utilisateur et
+    laisse `build_module_metadata_index` sauter ce .pak plutôt que de
+    faire échouer toute la vérification pour un seul .pak récalcitrant)."""
+    try:
+        found = read_meta_lsx_or_lsf_bytes(pak_path)
+    except PakReaderError:
+        found = None  # cas prévu -> repli Divine.exe ci-dessous
+    except Exception:  # noqa: BLE001 - même filet de sécurité que `_read_pak_identity_native`
+        found = None
+    else:
+        if found is None:
+            return None  # pas de meta.lsx/meta.lsf du tout : pas une erreur, pas de repli
+        kind, content = found
+        if kind == "lsx":
+            identity = parse_meta_lsx_bytes(content)
+            if identity is None:
+                return None
+            uuid, name, _folder = identity
+            dependencies = parse_meta_lsx_dependencies_bytes(content)
+        else:
+            uuid = extract_uuid_from_lsf_bytes(content)
+            if uuid is None:
+                return None
+            name = ""
+            dependencies = []
+        return ModuleMetadata(uuid=uuid, name=name, dependencies=tuple(dependencies))
+
+    if divine_exe is None:
+        raise PakMetadataError(
+            "lecture native impossible et Divine.exe introuvable pour le repli."
+        )
+
+    use_wine_path = not is_windows()
+    _run_divine(
+        divine_exe,
+        [
+            "-g", "bg3",
+            "-a", "extract-package",
+            "-s", _path_arg(pak_path, use_wine_path=use_wine_path),
+            "-d", _path_arg(work_dir, use_wine_path=use_wine_path),
+            "-x", "*meta.lsx",
+        ],
+        reference_path=reference_path,
+    )
+    matches = list(work_dir.rglob("meta.lsx"))
+    if not matches:
+        return None
+    identity = parse_meta_lsx(matches[0])
+    if identity is None:
+        return None
+    uuid, name = identity
+    dependencies = parse_meta_lsx_dependencies(matches[0])
+    return ModuleMetadata(uuid=uuid, name=name, dependencies=tuple(dependencies))
+
+
+def build_module_metadata_index(
+    pak_paths: list[Path],
+    *,
+    divine_exe: Path | None,
+    reference_path: Path,
+    log: LogFn = lambda _msg: None,
+) -> dict[str, ModuleMetadata]:
+    """UUID -> `ModuleMetadata` (nom + dépendances) pour chaque .pak de
+    `pak_paths` — même structure/logging que `build_deployed_uuid_index`,
+    mais capture aussi les dépendances (voir `read_pak_module_metadata`)
+    pour `mod_dependencies.find_missing_dependencies`. Un .pak en échec
+    est journalisé et ignoré (pas d'échec global)."""
+    index: dict[str, ModuleMetadata] = {}
+    total = len(pak_paths)
+    step = 1 if total <= 20 else 10
+    with tempfile.TemporaryDirectory(prefix="bg3_pak_deps_") as tmp:
+        tmp_path = Path(tmp)
+        for count, pak in enumerate(pak_paths, start=1):
+            if step == 1 or count % step == 1 or count == total:
+                log(f"  [{count}/{total}] {pak.name}...")
+            work_dir = tmp_path / str(count)
+            work_dir.mkdir()
+            try:
+                metadata = read_pak_module_metadata(
+                    pak, divine_exe=divine_exe, reference_path=reference_path, work_dir=work_dir
+                )
+            except PakMetadataError as exc:
+                log(f"[#D8C091]{pak.name} : {exc}[/#D8C091]")
+                metadata = None
+            finally:
+                shutil.rmtree(work_dir, ignore_errors=True)
+            if metadata:
+                index[metadata.uuid] = ModuleMetadata(
+                    uuid=metadata.uuid, name=metadata.name or pak.stem, dependencies=metadata.dependencies
+                )
+    return index
 
 
 def build_deployed_uuid_index(

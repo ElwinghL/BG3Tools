@@ -47,16 +47,17 @@ from bg3_mod_tui.inventory import (
 from bg3_mod_tui.launcher import LauncherError, launch_tool, open_protontricks, resolve_wine_bin
 from bg3_mod_tui.log_format import fmt_http_log_line
 from bg3_mod_tui.linking import LinkingError, setup_links
+from bg3_mod_tui.mod_dependencies import count_dependency_declarations, find_missing_dependencies
+from bg3_mod_tui.mod_fixer_fork import ModFixerForkError, build_fork as build_mod_fixer_fork
 from bg3_mod_tui.script_extender_console import build_tail_command, find_osiris_log_dir
 from bg3_mod_tui.terminal_launcher import open_in_terminal
-from bg3_mod_tui.mod_fixer_fork import ModFixerForkError, build_fork as build_mod_fixer_fork
 from bg3_mod_tui.native_mods import (
     NativeModsManifestError,
     deploy_native_mods_from_manifest,
     load_manifest as load_native_mods_manifest,
 )
 from bg3_mod_tui.nexus_variant_selection import infer_ut_eotb_preselection
-from bg3_mod_tui.pak_metadata import archive_pak_identities, build_deployed_uuid_index
+from bg3_mod_tui.pak_metadata import archive_pak_identities, build_deployed_uuid_index, build_module_metadata_index
 from bg3_mod_tui.pak_validator import validate_paks
 from bg3_mod_tui.pak_origin import (
     find_orphaned_paks,
@@ -1296,6 +1297,19 @@ class ActionsScreen(Screen):
                             "actif. Lecture seule : ne génère pas modsettings.lsx et ne "
                             "lance pas le jeu. Pas un remplacement fiable à 100% de "
                             "Divine.exe, juste un check rapide (voir pak_validator.py)."
+                        ),
+                    )
+                    yield Button(
+                        "Vérifier les dépendances...",
+                        id="action-check-dependencies",
+                        tooltip=(
+                            "Lit les dépendances déclarées (nœud Dependencies du meta.lsx) "
+                            "de chaque .pak actuellement présent dans Mods/, et signale "
+                            "celles dont aucun mod correspondant n'est déployé — rapport "
+                            "dans mod_dependencies.md sous le profil actif. Ignore les "
+                            "modules de base du jeu (Gustav, Shared...). Ne détecte PAS les "
+                            "incompatibilités (pas d'information structurée pour ça dans "
+                            "meta.lsx, contrairement aux dépendances)."
                         ),
                     )
                     yield Button(
@@ -2616,6 +2630,99 @@ class ActionsScreen(Screen):
             log(f"[#C46F6F]{len(invalid)} .pak invalide(s)[/#C46F6F] sur {len(valid) + len(invalid)} -> {report_path}")
         else:
             log(f"{len(valid)} .pak valide(s) -> {report_path}")
+
+    @on(Button.Pressed, "#action-check-dependencies")
+    def handle_check_dependencies(self) -> None:
+        # Lecture seule des .pak déployés, écrit son propre rapport
+        # (mod_dependencies.md) — même raisonnement que "Inventaire des
+        # mods"/"Archives orphelines".
+        self._start_task(
+            title="Vérifier les dépendances...",
+            resource_tags=frozenset(),
+            launch=self.run_check_dependencies,
+        )
+
+    @work(exclusive=True, thread=True, group="run_check_dependencies", exit_on_error=False)
+    def run_check_dependencies(self, log: Callable[[str], None]) -> None:
+        """Ignore volontairement les incompatibilités (décision explicite
+        d'Elwingh) : BG3 n'a pas de champ structuré pour ça dans meta.lsx,
+        contrairement aux dépendances (`Dependencies`/`ModuleShortDesc`) —
+        voir `mod_dependencies.py` pour le détail. Repli explicite si
+        Divine.exe est introuvable (LSLib pas encore téléchargé) : les
+        .pak illisibles nativement sont sautés (loggés) plutôt que de
+        faire échouer toute la vérification."""
+        log("=== Vérification des dépendances déclarées (meta.lsx) ===")
+        pak_paths = sorted(self._config.managed_mods_link.glob("*.pak"))
+        if not pak_paths:
+            log("Aucun .pak actuellement déployé dans Mods/.")
+            return
+
+        divine_exe = find_divine_exe(self._config.tools_dir)
+        if divine_exe is None:
+            log(
+                "[#D8C091]Divine.exe introuvable sous Tools/ExportTools/ — la lecture "
+                "native suffit pour la quasi-totalité des .pak actuels, mais un .pak "
+                "dans un format non géré nativement serait sauté plutôt que vérifié "
+                "via Divine.exe (voir « MAJ des outils »).[/#D8C091]"
+            )
+
+        log(f"Lecture des dépendances de {len(pak_paths)} .pak déployé(s)...")
+        mods = build_module_metadata_index(
+            pak_paths,
+            divine_exe=divine_exe,
+            reference_path=self._config.project_root,
+            log=log,
+        )
+        missing = find_missing_dependencies(mods)
+        declaration_counts = count_dependency_declarations(mods)
+        self._write_mod_dependencies_report(
+            missing, declaration_counts=declaration_counts, total_checked=len(mods), log=log
+        )
+
+    def _write_mod_dependencies_report(
+        self,
+        missing: dict[str, list[tuple[str, str]]],
+        *,
+        declaration_counts: dict[str, int],
+        total_checked: int,
+        log: Callable[[str], None],
+    ) -> None:
+        report_dir = profile_data_dir(self._config.profiles_dir, self._config.active_profile)
+        report_dir.mkdir(parents=True, exist_ok=True)
+        report_path = report_dir / "mod_dependencies.md"
+
+        lines = ["# Dépendances manquantes\n"]
+        lines.append(
+            "Dépendances déclarées (`Dependencies` de `meta.lsx`) sans mod "
+            "correspondant actuellement déployé dans Mods/ (modules de base du "
+            "jeu — Gustav, Shared... — ignorés). **N'inclut pas les "
+            "incompatibilités** : BG3 n'a pas de champ structuré pour ça dans "
+            "meta.lsx, contrairement aux dépendances (voir mod_dependencies.py).\n"
+            "\n"
+            "Le nombre entre parenthèses (« vu chez N mod(s) ») compte, parmi "
+            "TOUS les mods vérifiés, combien déclarent cette même dépendance : "
+            "un nombre élevé est souvent un module « système » ajouté en bloc "
+            "par l'outil d'export de l'auteur (BG3 Mod Manager/Divine.exe), pas "
+            "un vrai prérequis à installer — un nombre de 1 ou 2 mérite "
+            "davantage attention.\n"
+        )
+        if missing:
+            lines.append(f"{len(missing)} mod(s) sur {total_checked} avec au moins une dépendance manquante :\n")
+            for mod_name in sorted(missing):
+                lines.append(f"## {mod_name}\n")
+                for dep_uuid, dep_name in missing[mod_name]:
+                    label = dep_name or dep_uuid
+                    count = declaration_counts.get(dep_uuid, 1)
+                    lines.append(f"- {label} (`{dep_uuid}`) — vu chez {count} mod(s)")
+                lines.append("")
+        else:
+            lines.append(f"Les {total_checked} mod(s) vérifié(s) ont toutes leurs dépendances déclarées satisfaites.")
+
+        report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        if missing:
+            log(f"[#C46F6F]{len(missing)} mod(s) avec dépendance(s) manquante(s)[/#C46F6F] sur {total_checked} -> {report_path}")
+        else:
+            log(f"{total_checked} mod(s) vérifié(s), aucune dépendance manquante -> {report_path}")
 
     @on(Button.Pressed, "#action-nexus-updates")
     def handle_nexus_updates(self) -> None:
