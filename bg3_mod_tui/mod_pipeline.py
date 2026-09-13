@@ -928,7 +928,7 @@ def extract_archives_to_mods(
                         copied_paks.append(pak)
 
                 if failed_paks:
-                    names = ", ".join(pak.name for pak in failed_paks)
+                    names = ", ".join(pak.name for pak, _exc in failed_paks)
                     log(
                         fmt_row(
                             archive.name,
