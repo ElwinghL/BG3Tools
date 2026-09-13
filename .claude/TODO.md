@@ -213,10 +213,32 @@ sacrifié pour y arriver, tant pis.
     vit uniquement dans BG3Tools (`scripts/lslib_fork_linux_build/`) en attendant
     relecture. Pour le transformer en vraie branche du fork après review, voir les
     instructions en tête de `build_lslib_fork_linux.sh`.
-  - Limitation connue : pas de `.pak` réel disponible sur cette machine pour un
-    test d'extraction/écriture de bout en bout (seul un smoke-test `--help`/usage
-    a été fait) — à vérifier par le prochain relecteur sur un profil BG3 réel,
-    avant 19c.
+  - Limitation levée depuis (voir `Tools/nmcm_patches/AbsoluteDefeat/README.md`,
+    section 20b) : un vrai test `create-package` de bout en bout (packager un
+    mod source réel, relire le `.pak` produit via `list-package` ET
+    `pak_reader.py`) a révélé **deux bugs Linux** du fork, corrigés localement
+    (non poussés) via un second patch,
+    `scripts/lslib_fork_linux_build/0002-fix-linux-path-validation.patch`
+    (appliqué automatiquement par `build_lslib_fork_linux.sh`) :
+    1. `Divine.CLI.CommandLineActions.TryToValidatePath` plantait
+       (`System.InvalidOperationException: This operation is not supported for
+       a relative URI`) sur TOUT chemin absolu Unix passé à `-s`/`-d`, y
+       compris hors de ce projet — `Uri.TryCreate(...).IsFile` ne reconnaît
+       une syntaxe Windows (lettre de lecteur/UNC/`file://`) que sous cette
+       forme, un chemin Unix étant parsé comme URI relative. Corrigé en
+       remplaçant ce détour par `Path.IsPathRooted(path)` seul.
+    2. Packager (`create-package`, testé avec `none` et `zlib`) depuis une
+       source vivant sur le point de montage externe `M2`
+       (`/run/media/system/M2/BG3Tools/…`, la racine même de ce projet)
+       produit un `.pak` illisible par Divine lui-même (`list-package`
+       échoue) ET par `pak_reader.py`, sans rapport avec le contenu du mod
+       (bisecté fichier par fichier) ni avec un seuil de nombre de fichiers
+       (reproduit et non-reproduit sur des arbres synthétiques). Cause racine
+       non identifiée (probable particularité mmap/lecture de fichier de ce
+       point de montage sous ce build .NET). Contournement appliqué : stager
+       une copie de la source ailleurs (`/tmp`) avant `create-package`, ce qui
+       produit systématiquement un `.pak` valide — à creuser si ce point de
+       montage doit être utilisé plus largement pour du packaging.
 - **19c.** Une fois un build fonctionnel obtenu : basculer `Tools/ExportTools`
   (sous-module git, actuellement `Norbyte/lslib`) vers `ElwinghL/lslib`, mettre à
   jour `Tools/TOOLS.md`, re-épingler le commit, et relancer
@@ -246,7 +268,7 @@ sacrifié pour y arriver, tant pis.
 ### 20. NMCM (Native Mod Configuration Menu) et interface MCM
 
 - ~~**20a.** Ajouter NMCM comme dépendance suivie, même logique que les outils suivis dans `Tools/TOOLS.md`~~ — fait : ligne ajoutée dans `Tools/TOOLS.md`, sous-module git `Tools/bg3-nmcm` (pattern identique aux autres outils GitHub suivis, `_add_or_update_git_submodule`), licence MIT documentée dans `THIRD_PARTY_LICENSES.md` (vérifiée via l'API GitHub)
-- **20b.** Spéculatif : portage/patch des mods déjà compatibles MCM pour leur donner une interface NMCM — dépend de 20a, pas de mod concret identifié à ce jour
+- ~~**20b.** Patch pilote : portage/patch d'un mod déjà compatible MCM pour lui donner une interface NMCM~~ — fait (statiquement) : `Tools/nmcm_patches/AbsoluteDefeat/` — nouveau mini-mod séparé `AbsoluteDefeat_NMCM_Bridge` (UUID `4af12fa8-50e7-4a17-8ddc-8c6ef83df8c7`, slot NMCM 3 — vérifié libre dans `docs/slot-registry.md`) donnant à Absolute Defeat (déjà installé) une page NMCM en plus de sa page MCM existante, sans toucher à `AbsoluteDefeat.pak` : 2 checkbox + 1 stepper (0-2, `debug_level`) + 2 boutons, goal Osiris qui écrit dans `DB_ADNB_*`/stamp les passives ET appelle 3 PROCs custom capturés côté Lua (`Ext.Osiris.RegisterListener` sur `PROC_ADNB_SyncSetting`/`Fire`/`RequestSync`) qui répercutent dans le stockage MCM réel via `Mods.BG3MCM.MCMAPI:SetSettingValue` (lu dans le vrai Lua d'Absolute Defeat, `GetSettingValue` confirmé, `SetSettingValue` extrapolé par symétrie — voir README) ; les 2 boutons (Surrender/Emergency Stop) relayés côté client (`Ext.Net.PostMessageToServer` vers les canaux exacts d'Absolute Defeat, `AD_Surrender`/`AD_AttemptSoftlockFix`, confirmés dans son Lua) car un `RegisterNetListener` serveur ne répond qu'à un message venant réellement d'un client. `.pak` buildé et relu (Divine `list-package` + `pak_reader.py`, 10 fichiers, identité correcte) via le fork LSLib Linux (section 19) — **2 bugs Linux du fork découverts et patchés localement au passage** (non poussés sur le remote) : `TryToValidatePath` plantait sur TOUT chemin absolu Unix (`Uri.IsFile` suppose une syntaxe Windows — patch `0002-fix-linux-path-validation.patch`), et packager depuis une source vivant sur le point de montage `M2` produit un `.pak` illisible quelle que soit la méthode de compression (contournement : stager la source ailleurs avant `create-package`, cause racine non identifiée). Non testable en jeu ici (pas de jeu lancé) — checklist de validation manuelle dans le README du patch.
 
 ### 21. Isoler le temps de lecture Rust pur (sans PyO3/Python) dans le comparatif
 
