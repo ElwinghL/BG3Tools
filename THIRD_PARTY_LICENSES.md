@@ -158,6 +158,17 @@ format est due au travail de reverse engineering de **Norbyte** dans LSLib
   Apache-2.0**), `roxmltree` (**MIT OR Apache-2.0**), `regex` (**MIT OR Apache-2.0**), `flate2` (**MIT OR
   Apache-2.0**). Toutes permissives et compatibles avec la licence MIT de ce dépôt.
 
+## 12. NMCM (Native Mod Configuration Menu)
+
+- **Projet** : [Luiznunes12/bg3-nmcm](https://github.com/Luiznunes12/bg3-nmcm)
+  (aussi disponible sur [mod.io](https://mod.io/g/baldursgate3/m/native-mod-configuration-menu)).
+- **Licence** : **MIT** (confirmée via l'API GitHub du dépôt, vérifié le
+  2026-09-13).
+- **Usage dans ModTools** : outil tiers listé dans `Tools/TOOLS.md`
+  (`Tools/bg3-nmcm/`), suivi comme les autres dépôts GitHub de ce fichier
+  (sous-module git, voir `.gitmodules`) — non modifié, non redistribué
+  dans ce dépôt.
+
 ## Résumé
 
 | Outil/dépendance            | Licence                              | Statut de vérification |
