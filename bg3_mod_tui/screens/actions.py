@@ -98,6 +98,7 @@ from bg3_mod_tui.providers.modio import ModIOAPIError, ModIOClient
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusClient
 from bg3_mod_tui.tools_manager import ToolsError, download_and_extract_tool, find_executables, parse_tools_table
 from bg3_mod_tui.usage_stats import increment_usage_stat, load_usage_stats, top_actions
+from bg3_mod_tui.widgets.bg3se_console import BG3SEConsole
 from bg3_mod_tui.widgets.console_log import ConsoleLog
 from bg3_mod_tui.widgets.download_console import DownloadProgressConsole
 
@@ -1380,6 +1381,12 @@ class ActionsScreen(Screen):
                 with TabbedContent(id="tools-tabs"):
                     with TabPane("Outils", id="tools-log-tab"):
                         yield ConsoleLog(id="tools-log", wrap=True, highlight=True, markup=True)
+                    with TabPane("Console BG3SE", id="bg3se-console-tab"):
+                        yield BG3SEConsole(
+                            host=self._config.bg3se_console_host,
+                            port=self._config.bg3se_console_port,
+                            id="bg3se-console",
+                        )
         yield Footer()
 
     # Libellés de base des onglets de consoles (utilisés pour reconstruire le

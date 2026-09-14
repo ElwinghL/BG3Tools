@@ -80,6 +80,15 @@ class ModToolsConfig:
     # (fonctionnalité pas encore implémentée).
     public_url: str = ""
     public_port: str = ""
+    # Console BG3SE (section 11 du TODO) : le pont TCP RemoteConsole écoute
+    # en boucle locale (127.0.0.1) côté jeu — transparent à travers
+    # Proton/Wine (winsock s'appuie directement sur la pile réseau de
+    # l'hôte), donc pas besoin de passer par le préfixe Wine pour l'atteindre
+    # depuis Linux, contrairement à un named pipe Windows. Port par défaut
+    # aligné sur `ExtenderConfig::RemoteConsolePort` côté C++
+    # (Tools/BG3 Script Extender/BG3Extender/Extender/Shared/ExtenderConfig.h).
+    bg3se_console_host: str = "127.0.0.1"
+    bg3se_console_port: int = 9997
 
     @property
     def install_path(self) -> Path:
