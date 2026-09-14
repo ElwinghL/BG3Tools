@@ -31,6 +31,9 @@ LogFn = Callable[[str], None]
 
 NATIVE_MOD_LOADER_DIR_NAME = "Native Mod Loader"
 SCRIPT_EXTENDER_DIR_NAME = "BG3 Script Extender"
+# Sortie (non versionnée, locale à chaque checkout) d'un build de notre
+# fork ElwinghL/bg3se — voir `deploy_script_extender`.
+SCRIPT_EXTENDER_DIST_SUBDIR = "dist"
 SCRIPT_EXTENDER_DLL_TARGET_NAME = "DWrite.dll"
 SCRIPT_EXTENDER_SETTINGS_NAME = "ScriptExtenderSettings.json"
 
@@ -157,8 +160,10 @@ def _hardlink_replace(target: Path, source: Path, *, log: LogFn) -> None:
 
 def deploy_script_extender(tools_dir: Path, game_bin_dir: Path, *, log: LogFn) -> None:
     """Installe le Script Extender dans le dossier bin/ du jeu : notre
-    copie gérée de la DLL (Tools/BG3 Script Extender/) est reliée par
-    hardlink vers `bin/DWrite.dll`, de même pour
+    copie gérée de la DLL (Tools/BG3 Script Extender/dist/ si présent —
+    notre propre build du fork ElwinghL/bg3se — sinon la racine de
+    Tools/BG3 Script Extender/, ex: une release upstream Norbyte) est
+    reliée par hardlink vers `bin/DWrite.dll`, de même pour
     `ScriptExtenderSettings.json` (créé avec les valeurs par défaut du
     README s'il n'existe pas encore côté Tools/ — une configuration déjà
     déployée dans bin/ est migrée vers Tools/ plutôt qu'écrasée, pour ne
@@ -168,13 +173,25 @@ def deploy_script_extender(tools_dir: Path, game_bin_dir: Path, *, log: LogFn) -
         log(f"[BG3 Script Extender] dossier introuvable : {source_dir}")
         return
 
-    dlls = [
-        d for d in source_dir.glob("*.dll") if d.name != SCRIPT_EXTENDER_SETTINGS_NAME
-    ]
-    if not dlls:
-        log(f"[BG3 Script Extender] aucune DLL trouvée dans {source_dir}.")
+    # `dist/` (voir SCRIPT_EXTENDER_DIST_SUBDIR) est la sortie de notre
+    # propre build du fork ElwinghL/bg3se — prioritaire sur toute DLL posée
+    # directement à la racine de `source_dir` (ex: une release upstream
+    # Norbyte téléchargée manuellement), pour ne jamais redéployer par
+    # erreur un binaire qui n'est pas le nôtre une fois `dist/` peuplé.
+    dist_dir = source_dir / SCRIPT_EXTENDER_DIST_SUBDIR
+    search_dirs = [dist_dir, source_dir] if dist_dir.is_dir() else [source_dir]
+
+    source_dll: Path | None = None
+    for candidate_dir in search_dirs:
+        dlls = [
+            d for d in candidate_dir.glob("*.dll") if d.name != SCRIPT_EXTENDER_SETTINGS_NAME
+        ]
+        if dlls:
+            source_dll = next((d for d in dlls if d.name.lower() == "dwrite.dll"), dlls[0])
+            break
+    if source_dll is None:
+        log(f"[BG3 Script Extender] aucune DLL trouvée dans {source_dir} (ni dans dist/).")
         return
-    source_dll = next((d for d in dlls if d.name.lower() == "dwrite.dll"), dlls[0])
 
     if not game_bin_dir.is_dir():
         log(f"[BG3 Script Extender] dossier bin/ du jeu introuvable : {game_bin_dir}")
