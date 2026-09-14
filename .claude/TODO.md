@@ -209,10 +209,11 @@ sacrifié pour y arriver, tant pis.
     Reproductible via `scripts/lslib_fork_linux_build/build_lslib_fork_linux.sh`
     (clone + applique `scripts/lslib_fork_linux_build/0001-linux-build-pak-only-scope.patch`
     + build ; script testé de bout en bout).
-  - **Non poussé** vers `ElwinghL/lslib` (aucun remote partagé touché) : le patch
-    vit uniquement dans BG3Tools (`scripts/lslib_fork_linux_build/`) en attendant
-    relecture. Pour le transformer en vraie branche du fork après review, voir les
-    instructions en tête de `build_lslib_fork_linux.sh`.
+  - **Poussé sur `ElwinghL/lslib`** (2026-09-13, autorisation explicite d'Elwingh) :
+    branche `fix/LinuxBuildPakOnlyScope`, 2 commits (le trim de périmètre ci-dessus
+    + le fix `TryToValidatePath` du second patch, voir plus bas) — build revérifié
+    sur cette branche avant push (`dotnet build` → 0 erreur). PR pas ouverte (pas
+    demandé) : https://github.com/ElwinghL/lslib/pull/new/fix/LinuxBuildPakOnlyScope
   - Limitation levée depuis (voir `Tools/nmcm_patches/AbsoluteDefeat/README.md`,
     section 20b) : un vrai test `create-package` de bout en bout (packager un
     mod source réel, relire le `.pak` produit via `list-package` ET
@@ -238,7 +239,9 @@ sacrifié pour y arriver, tant pis.
        point de montage sous ce build .NET). Contournement appliqué : stager
        une copie de la source ailleurs (`/tmp`) avant `create-package`, ce qui
        produit systématiquement un `.pak` valide — à creuser si ce point de
-       montage doit être utilisé plus largement pour du packaging.
+       montage doit être utilisé plus largement pour du packaging. Ce second
+       correctif est INCLUS dans la branche poussée `fix/LinuxBuildPakOnlyScope`
+       (2 commits, voir ci-dessus).
 - **19c.** Une fois un build fonctionnel obtenu : basculer `Tools/ExportTools`
   (sous-module git, actuellement `Norbyte/lslib`) vers `ElwinghL/lslib`, mettre à
   jour `Tools/TOOLS.md`, re-épingler le commit, et relancer
