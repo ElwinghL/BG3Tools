@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<stats stat_object_definition_id="3e76b74c-a5ae-4268-944a-aa9c31e2185e">
+  <stat_objects>
+    <stat_object is_substat="false">
+      <fields>
+        <field name="UUID" type="IdTableFieldDefinition" value="7f9a695b-ba8f-48ea-8212-4c39d234aaa3" />
+        <field name="Name" type="NameTableFieldDefinition" value="VSNB_SHARE_0" />
+        <field name="DisplayName" type="TranslatedStringTableFieldDefinition" handle="h30b87dc6g627bg40a9gafebg1ee195dd50a8" version="1" />
+        <field name="Description" type="TranslatedStringTableFieldDefinition" handle="h20e8e1c5g075bg42b6gb7c8g695602c51336" version="1" />
+        <field name="Icon" type="StringTableFieldDefinition" value="PassiveFeature_Generic_Threat" />
+      </fields>
+    </stat_object>
+    <stat_object is_substat="false">
+      <fields>
+        <field name="UUID" type="IdTableFieldDefinition" value="d6b3ac17-262b-4176-a2af-91901e7e3f82" />
+        <field name="Name" type="NameTableFieldDefinition" value="VSNB_SHARE_1" />
+        <field name="DisplayName" type="TranslatedStringTableFieldDefinition" handle="h860a6ac2gc6c9g4592g99d7g1cdd3ad8aa15" version="1" />
+        <field name="Description" type="TranslatedStringTableFieldDefinition" handle="h20e8e1c5g075bg42b6gb7c8g695602c51336" version="1" />
+        <field name="Icon" type="StringTableFieldDefinition" value="PassiveFeature_Generic_Threat" />
+      </fields>
+    </stat_object>
+    <stat_object is_substat="false">
+      <fields>
+        <field name="UUID" type="IdTableFieldDefinition" value="27233cf6-adcd-4046-9753-affcca4b5a9c" />
+        <field name="Name" type="NameTableFieldDefinition" value="VSNB_SHARE_2" />
+        <field name="DisplayName" type="TranslatedStringTableFieldDefinition" handle="he948f0e4g21e2g4aa6gab68ga00c95218f7c" version="1" />
+        <field name="Description" type="TranslatedStringTableFieldDefinition" handle="h20e8e1c5g075bg42b6gb7c8g695602c51336" version="1" />
+        <field name="Icon" type="StringTableFieldDefinition" value="PassiveFeature_Generic_Threat" />
+      </fields>
+    </stat_object>
+    <stat_object is_substat="false">
+      <fields>
+        <field name="UUID" type="IdTableFieldDefinition" value="d8b9d7f1-57f0-4b92-9bd6-7cdfd665de23" />
+        <field name="Name" type="NameTableFieldDefinition" value="VSNB_DEBUG_CARRIER" />
+        <field name="DisplayName" type="TranslatedStringTableFieldDefinition" handle="h6c1fab73g48abg409dgaa73gf366da418850" version="1" />
+        <field name="Description" type="TranslatedStringTableFieldDefinition" handle="h20e8e1c5g075bg42b6gb7c8g695602c51336" version="1" />
+        <field name="Icon" type="StringTableFieldDefinition" value="PassiveFeature_Generic_Threat" />
+        <field name="Boosts" type="StringTableFieldDefinition" value="ActionResource(VSNB_DebugG,2,0)" />
+      </fields>
+    </stat_object>
+  </stat_objects>
+</stats>
