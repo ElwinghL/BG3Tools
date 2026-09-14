@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from dotenv import load_dotenv
 from textual.app import App
 from textual.binding import Binding
 
-from bg3_mod_tui.config import ModToolsConfig, load_config
+from bg3_mod_tui.config import PROJECT_ROOT, ModToolsConfig, load_config
 from bg3_mod_tui.crash_log import log_crash
 from bg3_mod_tui.screens.actions import ActionsScreen
 from bg3_mod_tui.screens.setup import SetupScreen
 from bg3_mod_tui.theme import BG3_THEME
 
-ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
+# Même racine que `bg3modtools.toml` (dépôt en usage principal, dossier de
+# config XDG si installé en dehors du dépôt — voir config.resolve_project_root).
+ENV_PATH = PROJECT_ROOT / ".env"
 
 
 class BG3ModTUIApp(App):

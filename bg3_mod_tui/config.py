@@ -2,12 +2,56 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import tomlkit
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "bg3modtools.toml"
+XDG_APP_DIR_NAME = "bg3-mod-tui"
+
+
+def _is_repo_checkout(base_dir: Path) -> bool:
+    """Le package est-il utilisé depuis l'intérieur du dépôt BG3Tools
+    (mode principal, cf. `run.sh`/`run.bat`, `base_dir` = racine du dépôt)
+    plutôt qu'installé ailleurs via pip (`pip install .`/wheel, en dehors
+    du dépôt — voir TODO.md 12a) ? Détecté par la présence de marqueurs du
+    dépôt (`.git` ou `Tools/`) à côté du package."""
+    return (base_dir / ".git").exists() or (base_dir / "Tools").is_dir()
+
+
+def _xdg_config_home() -> Path:
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg)
+    return Path.home() / ".config"
+
+
+def resolve_project_root(base_dir: Path | None = None) -> Path:
+    """Racine utilisée pour `bg3modtools.toml`, `BG3_Managed/`, `Tools/`,
+    `.env`, etc.
+
+    - Mode dépôt (usage principal) : `base_dir` (parent de `bg3_mod_tui/`)
+      contient `.git` ou `Tools/` -> c'est la racine du dépôt BG3Tools,
+      comme avant (comportement inchangé).
+    - Mode package installé en dehors du dépôt (`pip install .`/wheel,
+      TODO 12a) : aucun de ces marqueurs -> dossier de config XDG dédié
+      (`$XDG_CONFIG_HOME/bg3-mod-tui`, ou `~/.config/bg3-mod-tui`), créé au
+      besoin par `save_config`/les appelants qui écrivent dedans.
+
+    `base_dir` est injectable (au lieu de toujours dériver de
+    `Path(__file__)`) pour permettre de tester cette logique de résolution
+    sans installer réellement le package ailleurs (voir tests/test_config.py).
+    """
+    if base_dir is None:
+        base_dir = Path(__file__).resolve().parent.parent
+    if _is_repo_checkout(base_dir):
+        return base_dir
+    return _xdg_config_home() / XDG_APP_DIR_NAME
+
+
+PROJECT_ROOT = resolve_project_root()
+CONFIG_PATH = PROJECT_ROOT / "bg3modtools.toml"
 MANAGED_DIR_NAME = "BG3_Managed"
 
 MODS_SUBDIR = "Mods"

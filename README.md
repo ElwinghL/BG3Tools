@@ -39,6 +39,48 @@ Une clé API Nexus Mods (`NEXUS_API_KEY`) et/ou mod.io (`MODIO_API_KEY`,
 `MOD_IO_USER_ID`) sont nécessaires pour le téléchargement — voir
 `.env.example`.
 
+## Installation en package Python indépendant (hors du dépôt)
+
+`bg3_mod_tui/` est aussi installable comme un package Python standard
+(wheel), utilisable dans un venv séparé, sans le reste du dépôt BG3Tools à
+côté — utile par exemple pour l'installer via `pipx`/`uv tool`, ou dans un
+environnement dédié plutôt que via `run.sh`/`run.bat`.
+
+```bash
+# Depuis une copie du dépôt (ou un tarball/wheel publié) :
+pip install .
+# ou, pour obtenir juste le fichier .whl (ex: à copier/distribuer ailleurs) :
+pip wheel . -w dist/
+```
+
+Ça installe la commande `bg3-mod-tui`, qui lance directement le TUI :
+
+```bash
+bg3-mod-tui
+```
+
+**Mode dépôt vs mode package installé.** L'usage principal reste de
+lancer le TUI *depuis l'intérieur du dépôt* (`./run.sh`/`run.bat`) : dans
+ce cas, `bg3modtools.toml`, `.env`, `BG3_Managed/` et `Tools/` restent à la
+racine du dépôt, comme avant. Si le package est installé et exécuté *en
+dehors* du dépôt (aucun `.git` ni dossier `Tools/` à côté du code source
+installé), il bascule automatiquement vers un dossier de configuration XDG
+dédié :
+
+- `$XDG_CONFIG_HOME/bg3-mod-tui/` si `XDG_CONFIG_HOME` est défini ;
+- sinon `~/.config/bg3-mod-tui/`.
+
+`bg3modtools.toml`, `.env` et `BG3_Managed/` (mods gérés, profils, logs,
+etc.) sont alors créés sous ce dossier au lieu de la racine du dépôt. Les
+fichiers spécifiques au dépôt (`Tools/` avec les outils tiers embarqués,
+`nexus_links_to_add.md`, `Tools/TOOLS.md`) n'existent pas dans ce mode :
+les fonctionnalités qui en dépendent (téléchargement/lancement des outils
+tiers listés dans `Tools/TOOLS.md`, import du fichier de liens Nexus) se
+comportent alors en best-effort (dossier/fichier absent signalé, sans
+bloquer le reste du TUI) plutôt que d'empêcher le lancement ; le mode
+"dépôt" reste donc recommandé pour profiter de l'intégralité des
+fonctionnalités. Voir `bg3_mod_tui/config.py` (`resolve_project_root`).
+
 ## Fonctionnalités (menu principal)
 
 1. **Télécharger les mods (Nexus)** — lit `nexus_links_to_add.md` (un lien

@@ -39,6 +39,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from bg3_mod_tui.config import PROJECT_ROOT
 from bg3_mod_tui.platform_utils import is_windows
 from bg3_mod_tui.theme import BG3_THEME
 
@@ -61,8 +62,10 @@ def _hex_to_rgb_csv(hex_color: str) -> str:
 # Fichiers .ttf embarqués dans le dépôt (voir fonts/README.md) — installés
 # pour l'utilisateur courant si absents, pour qu'un profil de terminal qui
 # référence FONT_NAME fonctionne réellement après un `git clone` sur une
-# machine où la police n'est pas déjà installée.
-FONTS_SOURCE_DIR = Path(__file__).resolve().parent.parent / "fonts" / "MesloLGS NF"
+# machine où la police n'est pas déjà installée. Absent quand le package
+# est installé en dehors du dépôt (pip install/wheel, TODO 12a) — géré en
+# best-effort par `_ensure_font_installed` (ne bloque jamais le lancement).
+FONTS_SOURCE_DIR = PROJECT_ROOT / "fonts" / "MesloLGS NF"
 FONT_FILES = [
     "MesloLGS NF Regular.ttf",
     "MesloLGS NF Bold.ttf",
