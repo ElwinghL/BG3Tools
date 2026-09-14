@@ -16,6 +16,10 @@ dependencies = [
     "tomlkit>=0.12",
     "zstandard>=0.22",
     "lz4>=4.3",
+    # Importé directement (bg3_mod_tui/log_format.py) : bien que déjà tiré
+    # transitivement par `textual`, on le déclare explicitement puisqu'il
+    # s'agit d'une dépendance directe du package, pas seulement de Textual.
+    "rich>=13.0",
 ]
 
 [project.scripts]
