@@ -1,0 +1,304 @@
+Version 1
+SubGoalCombiner SGC_AND
+INITSECTION
+// VisibleShields_NMCM_Bridge :: NMCM front end for Visible Shields Universal's own MCM settings.
+// Self contained. This goal OWNS DB_VSNB_Share and DB_VSNB_Debug: no other goal writes to them.
+// It subscribes to the framework by declaring a body of PROC_NMCM_Boot().
+// TOP-LEVEL goal, with no ParentTargetEdge: with one, this goal is dead in a session that starts
+// outside its parent act.
+// DB_VSNB_Share holds the INDEX into MCM_blueprint.json's share_mode Options.Choices array (0,1,2),
+// never the string itself -- Osiris facts are STRING/INTEGER, and the exact choice string
+// ("Melee + shield  /  Ranged", etc.) only exists in BootstrapServer.lua, which is what actually
+// calls Mods.BG3MCM.MCMAPI:SetSettingValue. See that file for why: read from Visible Shields
+// Universal's own shipped Lua (BootstrapClient.lua's SHARE_CHOICE table), MCM stores the raw
+// English choice string for an enum setting, not an index -- confirmed, not guessed.
+// Defaults below mirror Visible Shields Universal's own MCM_blueprint.json ("Default" field of each
+// setting): share_mode = index 0 ("Melee + shield  /  Ranged"), debug_level = 0.
+DB_VSNB_Share(0);
+DB_VSNB_Debug(0);
+KBSECTION
+// ===================================================================================
+// Boot: claim the slot, seed/re-sync on every startup, enable this mod's own events.
+// ===================================================================================
+PROC
+PROC_NMCM_Boot()
+THEN
+PROC_NMCM_Mark("NMCM_SLOT4_CLAIMED", 1);
+PROC_NMCM_ClaimSlot(4, "VisibleShields_NMCM_Bridge");
+// Seed before mirror: within one file, textual order of PROC bodies is the order they run in.
+// Guarded PER FACT, not by a single version flag, so a later update that adds a new setting seeds
+// only the new one and never touches what the player already chose.
+PROC
+PROC_NMCM_Boot()
+AND
+NOT DB_VSNB_Share(_)
+THEN
+DB_VSNB_Share(0);
+PROC
+PROC_NMCM_Boot()
+AND
+NOT DB_VSNB_Debug(_)
+THEN
+DB_VSNB_Debug(0);
+// Mirror resync, share_mode: exactly one of the three markers lit, matching NMCM's own
+// drop-down-of-N-values reference control (examples/controls/list). LAW: never remove and re-add
+// the SAME passive in the same frame -- each body below removes only the OTHER two and lights its
+// own LAST. Also covers a companion recruited later, who joins with none of the markers.
+PROC
+PROC_NMCM_Boot()
+AND
+DB_VSNB_Share(0)
+THEN
+PROC_NMCM_Mark("VSNB_SHARE_1", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 0);
+PROC_NMCM_Mark("VSNB_SHARE_0", 1);
+PROC
+PROC_NMCM_Boot()
+AND
+DB_VSNB_Share(1)
+THEN
+PROC_NMCM_Mark("VSNB_SHARE_0", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 0);
+PROC_NMCM_Mark("VSNB_SHARE_1", 1);
+PROC
+PROC_NMCM_Boot()
+AND
+DB_VSNB_Share(2)
+THEN
+PROC_NMCM_Mark("VSNB_SHARE_0", 0);
+PROC_NMCM_Mark("VSNB_SHARE_1", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 1);
+// The debug level carrier GRANTS the action resource, so it is applied per player rather than
+// through PROC_NMCM_Mark, which is for the passives the SCREEN READS.
+PROC
+PROC_NMCM_Boot()
+AND
+DB_Players(_P)
+THEN
+AddPassive(_P, "VSNB_DEBUG_CARRIER");
+PROC
+PROC_NMCM_Boot()
+AND
+DB_VSNB_Debug(_)
+THEN
+PROC_VSNB_DebugApply();
+// Enable this mod's own UI events. WITHOUT THIS, CLICKS NEVER ARRIVE in a campaign already in
+// progress, with nothing in any log: the set of enabled tutorial events is per character and is
+// born with the character.
+PROC
+PROC_NMCM_Boot()
+AND
+DB_Players(_P)
+THEN
+EnableTutorialEvent(_P, (TUTORIALEVENT)VSNB_SHARE_SET_0_fb60184c-3d6e-4b38-b29c-df8bec9b2645);
+EnableTutorialEvent(_P, (TUTORIALEVENT)VSNB_SHARE_SET_1_32c26120-3c19-4c73-b498-f5793edf828c);
+EnableTutorialEvent(_P, (TUTORIALEVENT)VSNB_SHARE_SET_2_036978b6-8468-44f7-9ff8-8fd4ff8e5363);
+EnableTutorialEvent(_P, (TUTORIALEVENT)VSNB_DEBUG_UP_a7f95a06-2458-414d-9bb7-c12553b56779);
+EnableTutorialEvent(_P, (TUTORIALEVENT)VSNB_DEBUG_DOWN_de8b9707-b1f9-422a-a8d2-04d9aac1486e);
+EnableTutorialEvent(_P, (TUTORIALEVENT)VSNB_PAGE_OPENED_9ae292e9-206a-4ec8-87cc-fb991c0fc598);
+EnableTutorialEvent(_P, (TUTORIALEVENT)VSNB_ACT_RESET_e3e2ed15-c97c-4737-b073-9825525e8bfb);
+// Zero-arity signal the Lua bridge (BootstrapServer.lua) listens for via
+// Ext.Osiris.RegisterListener("PROC_VSNB_RequestSync", 0, "after", ...): a good moment to pull the
+// TWO real current values from Mods.BG3MCM.MCMAPI:GetSettingValue and push them back into this
+// goal's own DB facts (Osi.PROC_VSNB_ApplyShare/ApplyDebug), so this page's display reflects Visible
+// Shields Universal's actual stored settings even when they were last changed from its own native
+// MCM page rather than from here.
+PROC
+PROC_NMCM_Boot()
+THEN
+PROC_VSNB_RequestSync();
+// The page re-announces the debug mirror on open: GetHostCharacter is undefined during
+// LevelLoaded/SavegameLoaded, so PartyIncreaseActionResourceValue could not run there for a
+// companion who was not yet a valid host. Re-applying here covers that case.
+IF
+TutorialEvent(_E, VSNB_PAGE_OPENED_9ae292e9-206a-4ec8-87cc-fb991c0fc598)
+THEN
+PROC_VSNB_DebugApply();
+// ===================================================================================
+// share_mode: drop down of 3 values. Unlike a switch, the identity of the flyout entry clicked IS
+// the value, so selection is direct: ONE EVENT PER VALUE, exactly like NMCM's own list reference
+// control. Direct selection is idempotent, so this needs no busy guard.
+// ===================================================================================
+IF
+TutorialEvent(_E, VSNB_SHARE_SET_0_fb60184c-3d6e-4b38-b29c-df8bec9b2645)
+THEN
+PROC_VSNB_ShareSet(0);
+IF
+TutorialEvent(_E, VSNB_SHARE_SET_1_32c26120-3c19-4c73-b498-f5793edf828c)
+THEN
+PROC_VSNB_ShareSet(1);
+IF
+TutorialEvent(_E, VSNB_SHARE_SET_2_036978b6-8468-44f7-9ff8-8fd4ff8e5363)
+THEN
+PROC_VSNB_ShareSet(2);
+// Exactly one marker at a time. Same law as boot's mirror: remove the OTHER two first, light your
+// own LAST (removing and re-adding the SAME passive in one execution cancels out and the screen
+// reads blank).
+PROC
+PROC_VSNB_ShareSet((INTEGER)_V)
+AND
+_V == 0
+AND
+DB_VSNB_Share(_Old)
+THEN
+NOT DB_VSNB_Share(_Old);
+DB_VSNB_Share(0);
+PROC_NMCM_Mark("VSNB_SHARE_1", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 0);
+PROC_NMCM_Mark("VSNB_SHARE_0", 1);
+PROC_VSNB_SyncSetting("share_mode", 0);
+PROC
+PROC_VSNB_ShareSet((INTEGER)_V)
+AND
+_V == 1
+AND
+DB_VSNB_Share(_Old)
+THEN
+NOT DB_VSNB_Share(_Old);
+DB_VSNB_Share(1);
+PROC_NMCM_Mark("VSNB_SHARE_0", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 0);
+PROC_NMCM_Mark("VSNB_SHARE_1", 1);
+PROC_VSNB_SyncSetting("share_mode", 1);
+PROC
+PROC_VSNB_ShareSet((INTEGER)_V)
+AND
+_V == 2
+AND
+DB_VSNB_Share(_Old)
+THEN
+NOT DB_VSNB_Share(_Old);
+DB_VSNB_Share(2);
+PROC_NMCM_Mark("VSNB_SHARE_0", 0);
+PROC_NMCM_Mark("VSNB_SHARE_1", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 1);
+PROC_VSNB_SyncSetting("share_mode", 2);
+// ===================================================================================
+// Debug level stepper (Visible Shields Universal "debug_level", slider_int, Options.Min=0,
+// Options.Max=2). Same numeric-mirror law as NMCM's own reference control and as
+// AbsoluteDefeat_NMCM_Bridge's own debug stepper: the Action Resource is a MIRROR, never the owner,
+// mirrored WITHOUT reading it (floor with a large negative delta, which the engine clamps to zero,
+// then add the value the DB owns).
+// ===================================================================================
+IF
+TutorialEvent(_E, VSNB_DEBUG_UP_a7f95a06-2458-414d-9bb7-c12553b56779)
+THEN
+PROC_VSNB_DebugStep(1);
+IF
+TutorialEvent(_E, VSNB_DEBUG_DOWN_de8b9707-b1f9-422a-a8d2-04d9aac1486e)
+THEN
+PROC_VSNB_DebugStep(-1);
+// The range is enforced on the OWNER of the value (0..2, from MCM_blueprint.json Options.Min/Max),
+// not on the resource, whose own clamp is unrelated.
+PROC
+PROC_VSNB_DebugStep((INTEGER)_D)
+AND
+DB_VSNB_Debug(_Old)
+AND
+IntegerSum(_Old, _D, _Raw)
+AND
+IntegerMax(_Raw, 0, _Floor)
+AND
+IntegerMin(_Floor, 2, _New)
+THEN
+PROC_VSNB_DebugSetTo(_New);
+PROC
+PROC_VSNB_DebugSetTo((INTEGER)_N)
+AND
+DB_VSNB_Debug(_Old)
+THEN
+NOT DB_VSNB_Debug(_Old);
+DB_VSNB_Debug(_N);
+PROC_VSNB_DebugApply();
+PROC_VSNB_SyncSetting("debug_level", _N);
+// The mirror: DB to Action Resource, without ever reading the resource. GetHostCharacter gives ONE
+// character and the resource is party wide, so one call is enough.
+PROC
+PROC_VSNB_DebugApply()
+AND
+DB_VSNB_Debug(_N)
+AND
+GetHostCharacter(_H)
+AND
+IntegerToReal(_N, _R)
+AND
+RealSubtract(0.0, 1000.0, _Floor)
+THEN
+PartyIncreaseActionResourceValue(_H, "VSNB_DebugG", _Floor);
+PartyIncreaseActionResourceValue(_H, "VSNB_DebugG", _R);
+// ===================================================================================
+// This mod's OWN reset, reached only by VSNB_ACT_RESET. Restores Visible Shields Universal's own
+// blueprint defaults and pushes them to MCM the same way a normal click would. Deliberately leaves
+// NMCM_SLOT4_CLAIMED alone: claiming is not a player preference, and clearing it would make this
+// mod vanish from the menu until the next startup.
+// ===================================================================================
+IF
+TutorialEvent(_E, VSNB_ACT_RESET_e3e2ed15-c97c-4737-b073-9825525e8bfb)
+THEN
+PROC_VSNB_Reset();
+PROC
+PROC_VSNB_Reset()
+THEN
+PROC_VSNB_ShareSet(0);
+PROC_VSNB_DebugSetTo(0);
+// ===================================================================================
+// Called FROM Lua (Osi.PROC_VSNB_ApplyShare/ApplyDebug) during the resync requested by
+// PROC_VSNB_RequestSync above. Sets this goal's own DB fact and marker directly from Visible
+// Shields Universal's real current MCM value, WITHOUT forwarding back to PROC_VSNB_SyncSetting: the
+// value already came from MCM, so echoing it back would be a needless round trip, not a feedback
+// loop (the value is identical either way), but it is skipped on principle.
+// ===================================================================================
+PROC
+PROC_VSNB_ApplyShare((INTEGER)_V)
+AND
+DB_VSNB_Share(_Old)
+AND
+_V != _Old
+AND
+_V == 0
+THEN
+NOT DB_VSNB_Share(_Old);
+DB_VSNB_Share(0);
+PROC_NMCM_Mark("VSNB_SHARE_1", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 0);
+PROC_NMCM_Mark("VSNB_SHARE_0", 1);
+PROC
+PROC_VSNB_ApplyShare((INTEGER)_V)
+AND
+DB_VSNB_Share(_Old)
+AND
+_V != _Old
+AND
+_V == 1
+THEN
+NOT DB_VSNB_Share(_Old);
+DB_VSNB_Share(1);
+PROC_NMCM_Mark("VSNB_SHARE_0", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 0);
+PROC_NMCM_Mark("VSNB_SHARE_1", 1);
+PROC
+PROC_VSNB_ApplyShare((INTEGER)_V)
+AND
+DB_VSNB_Share(_Old)
+AND
+_V != _Old
+AND
+_V == 2
+THEN
+NOT DB_VSNB_Share(_Old);
+DB_VSNB_Share(2);
+PROC_NMCM_Mark("VSNB_SHARE_0", 0);
+PROC_NMCM_Mark("VSNB_SHARE_1", 0);
+PROC_NMCM_Mark("VSNB_SHARE_2", 1);
+PROC
+PROC_VSNB_ApplyDebug((INTEGER)_V)
+AND
+DB_VSNB_Debug(_Old)
+AND
+_V != _Old
+THEN
+NOT DB_VSNB_Debug(_Old);
+DB_VSNB_Debug(_V);
+PROC_VSNB_DebugApply();
+EXITSECTION
+ENDEXITSECTION

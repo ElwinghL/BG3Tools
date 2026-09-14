@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<save>
+    <version major="4" minor="0" revision="10" build="200"/>
+    <region id="TutorialEvents">
+        <node id="root">
+            <children>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="VSNB_SHARE_SET_0"/>
+                    <attribute id="UUID" type="guid" value="fb60184c-3d6e-4b38-b29c-df8bec9b2645"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="VSNB_SHARE_SET_1"/>
+                    <attribute id="UUID" type="guid" value="32c26120-3c19-4c73-b498-f5793edf828c"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="VSNB_SHARE_SET_2"/>
+                    <attribute id="UUID" type="guid" value="036978b6-8468-44f7-9ff8-8fd4ff8e5363"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="VSNB_DEBUG_UP"/>
+                    <attribute id="UUID" type="guid" value="a7f95a06-2458-414d-9bb7-c12553b56779"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="VSNB_DEBUG_DOWN"/>
+                    <attribute id="UUID" type="guid" value="de8b9707-b1f9-422a-a8d2-04d9aac1486e"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="VSNB_PAGE_OPENED"/>
+                    <attribute id="UUID" type="guid" value="9ae292e9-206a-4ec8-87cc-fb991c0fc598"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+                <node id="TutorialEvent">
+                    <attribute id="EventType" type="uint8" value="8"/>
+                    <attribute id="Name" type="LSString" value="VSNB_ACT_RESET"/>
+                    <attribute id="UUID" type="guid" value="e3e2ed15-c97c-4737-b073-9825525e8bfb"/>
+                    <attribute id="UserAction" type="uint8" value="0"/>
+                </node>
+
+            </children>
+        </node>
+    </region>
+</save>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<contentList xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+<content contentuid="hc261d90cg81bag43c8g9c31g368cefe1e951" version="1">Visible Shields (NMCM)</content>
+<content contentuid="h15137cecgb5ffg4b04gbe74gfe1bd8058401" version="1">Visible Shields</content>
+<content contentuid="he2b7a281g6450g4a36gb4e3g6a28e4ae7130" version="1">General settings</content>
+<content contentuid="h027b3b07gfa12g46eag954agf94b1ef15b74" version="1">Unofficial NMCM front end for Visible Shields Universal's own MCM settings. Changing a row here changes the same stored value Visible Shields Universal's MCM page reads, nothing more.</content>
+<content contentuid="h613ceeeeg0fb7g41dcgb5f0g2ed1439dbced" version="1">What shows on your back</content>
+<content contentuid="ha01ee40dg8fe7g43fdg89e8gd1555e6d5e60" version="1">Melee set / ranged set -- what shows on the back while you hold each. Showing both sets of weapons is party only.</content>
+<content contentuid="hdbe58b28gb62bg4609g8dc5g3345791d7542" version="1">Melee + shield  /  Ranged</content>
+<content contentuid="h5e236258g10dbg413bgbce2g8d007ec97843" version="1">Melee + shield  /  Ranged + shield</content>
+<content contentuid="h8cc01964g2d03g4474gb8dbg25bfb722cbc5" version="1">Melee + ranged + shield  /  Melee + ranged + shield</content>
+<content contentuid="hb5f4e9f2g321ag420bgb00cg200e8965b8d5" version="1">Debug Level</content>
+<content contentuid="h8083fca2ge631g4132g847ag915549fb6288" version="1">0 = failures only, 1 = minimal, 2 = verbose logs.</content>
+<content contentuid="h30b87dc6g627bg40a9gafebg1ee195dd50a8" version="1">VSNB_SHARE_0</content>
+<content contentuid="h860a6ac2gc6c9g4592g99d7g1cdd3ad8aa15" version="1">VSNB_SHARE_1</content>
+<content contentuid="he948f0e4g21e2g4aa6gab68ga00c95218f7c" version="1">VSNB_SHARE_2</content>
+<content contentuid="h6c1fab73g48abg409dgaa73gf366da418850" version="1">VSNB_DEBUG_CARRIER</content>
+<content contentuid="h20e8e1c5g075bg42b6gb7c8g695602c51336" version="1">An internal marker the mod configuration menu reads. It has no effect on your character.</content>
+<content contentuid="h7718b1f8gdfe0g4586g8bf7ga52658287089" version="1">Visible Shields NMCM Bridge: Debug level</content>
+<content contentuid="h50fa3c25g8525g45fegb13ag6d3e1121d89d" version="1">Numeric storage mirror for the bridge's debug level setting.</content>
+</contentList>
