@@ -16,7 +16,7 @@
 	url = https://github.com/laughingleader/bg3modmanager.git
 [submodule "Tools/BG3 Script Extender"]
 	path = Tools/BG3 Script Extender
-	url = https://github.com/Norbyte/bg3se.git
+	url = https://github.com/ElwinghL/bg3se.git
 [submodule "Tools/BG3-Compatibility-Framework"]
 	path = Tools/BG3-Compatibility-Framework
 	url = https://github.com/BG3-Community-Library-Team/BG3-Compatibility-Framework.git
