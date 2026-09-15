@@ -143,17 +143,22 @@ def build_divine_incomplete_status(reports_dir: Path) -> dict[str, Any]:
         )
     return {
         "note": (
-            "La série 'Divine.exe' du dashboard vient de divine_data_report.json "
-            "(run le plus complet et 100% réussi au moment de cet export — "
-            "voir son 'generated_at' et son nombre de fichiers dans "
-            "read_summary ; le fichier est écrit de façon incrémentale, donc "
-            "ce nombre peut être encore partiel si le run tournait encore à "
-            "l'instant précis de l'export). Une tentative antérieure sur 328 "
-            "fichiers (mods, divine_batch_report.json, 2026-09-10) avait "
-            "échoué à 100% sur le même bug de flag -u que le premier essai "
-            "'data' du jour — corrigé depuis, d'où le run 'data' actuel qui "
-            "réussit. Listée ici pour traçabilité, pas mélangée aux chiffres "
-            "de succès."
+            "La série 'Divine.exe' du dashboard vient de divine_data_report.json : "
+            "run complet (mode per-file, un lancement Wine par .pak) sur les 48 "
+            "fichiers du jeu de base, 42 réussis / 6 en échec — 3 timeouts "
+            "(Materials.pak, Models.pak, SharedSounds.pak) et 3 crashs sans "
+            "message exploitable (Gustav.pak, Textures.pak, VirtualTextures.pak, "
+            "probablement OOM sur les plus gros fichiers/archives multi-parties). "
+            "Les 205 .pak de mods n'ont PAS été passés par Divine.exe cette passe "
+            "(mode per-file trop lent à l'échelle — ~15 min pour 48 fichiers déjà "
+            "— et le mode batch natif de Divine.exe/LSLib plante systématiquement "
+            "sur '-i pak', un bug upstream dans CommandLineArguments."
+            "GetResourceFormatByString qui ne gère pas ce format, pas corrigeable "
+            "côté script). Une tentative antérieure sur 328 fichiers "
+            "(divine_batch_report.json, 2026-09-10) avait échoué à 100% sur un "
+            "bug de flag -u distinct (corrigé depuis, cf. commit dans "
+            "scripts/compare_pak_reader.py) — listée ici pour traçabilité, pas "
+            "mélangée aux chiffres de succès."
         ),
         "attempts": attempts,
     }

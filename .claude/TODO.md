@@ -535,6 +535,48 @@ sacrifié pour y arriver, tant pis.
   échec) reste listée pour traçabilité, jamais mélangée aux chiffres de
   succès. Lien ajouté dans
   `docs/pak-tools-benchmark/pak_tools_benchmark.md`.
+- ~~**22e.** Divine.exe complété (48/48 jeu de base) + bug de mode batch
+  Divine.exe/LSLib trouvé + republication du dashboard~~ — fait :
+  - Wine trouvé (le premier essai résolvait le mauvais préfixe Proton —
+    `resolve_wine_bin(config.appdata_path)` au lieu de
+    `resolve_wine_bin(find_proton_prefix(config.appdata_path))` ; le vrai
+    binaire est fourni par Proton-GE, pas un `wine` système).
+  - Mode batch Divine.exe (`extract-packages`) : deux bugs superposés.
+    D'abord `-u` (n'existe pas dans les arguments CLI de Divine.exe —
+    `use-package-name` n'a qu'une forme longue) → corrigé en
+    `--use-package-name` dans `scripts/compare_pak_reader.py`. Puis, avec
+    le bon flag, crash CLR (`Fatal error. Internal CLR error.
+    0x80131506` dans `CommandLineArguments.GetResourceFormatByString`,
+    appelé inconditionnellement sur `-i pak` en mode batch alors que
+    cette fonction ne connaît que `lsb`/`lsf`/`lsj`/`lsx`) — bug upstream
+    LSLib dans le binaire tiers pré-compilé
+    (`Tools/ExportTools/dist/Tools/Divine.exe`), pas corrigeable côté
+    script. Le mode batch Divine.exe reste donc inutilisable ; documenté
+    comme tel plutôt que contourné en silence.
+  - Mode per-file (fonctionnel) relancé sur les 48 `.pak` du jeu de base :
+    42 réussis / 6 échecs réels (3 timeouts, 3 crashs sans message
+    exploitable — probablement OOM sur les plus gros fichiers/archives
+    multi-parties), ~15 min. Les 205 mods non passés par Divine.exe
+    (trop lent en per-file à cette échelle).
+  - `reports/{python,rust,rust-native}_report.json` (fichiers canoniques
+    lus par `scripts/pak_bench/report.py::load_read_reports`, qui ne lit
+    **que** ces noms précis — pas les `_data_report.json`/
+    `_mods_report.json` séparés générés en 22b/22c) fusionnés
+    manuellement pour couvrir les 253 `.pak` (48+205) au lieu des 205
+    seuls d'avant. `divine_report.json` remplacé par le run 48/48 complet
+    (au lieu de l'ancien run partiel à 5 fichiers).
+  - `docs/pak-tools-benchmark/pak_tools_benchmark.md` réécrit avec ces
+    chiffres complets (253 partout en lecture, Divine.exe 48/253 annoté
+    comme tel) — **attention** : `pak_bench_cli.py report` régénère ce
+    fichier from scratch à chaque fois et écrase toute annotation
+    manuelle (lien dashboard, sections fix/bug) ; un futur regen doit
+    réappliquer ces sections, pas juste `cp` le fichier généré par-dessus
+    `docs/`.
+  - Dashboard (§22d) republié à la même URL avec les données complètes
+    (`scripts/pak_bench/export_dashboard_data.py` : texte de la note
+    `divine_incomplete` aussi corrigé, il décrivait encore un run "peut
+    être encore partiel" alors qu'il est maintenant terminé et complet
+    sur son périmètre réel).
 
 ### 12. Release standalone
 
