@@ -1,0 +1,36 @@
+name: Mirror to GitHub
+
+# Miroir GitHub (github.com/ElwinghL/BG3Tools) poussé explicitement depuis
+# Gitea Actions à chaque push sur main, plutôt que de dépendre du
+# push-mirror natif de Gitea (peu fiable en pratique — retards observés,
+# voir historique). Utilise une clé de déploiement dédiée avec droit
+# d'écriture (secret MIRROR_DEPLOY_KEY, à ajouter manuellement dans les
+# secrets Actions de ce dépôt/organisation — cette clé n'a accès qu'à ce
+# seul dépôt côté GitHub).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  mirror:
+    runs-on: debian-git-bun
+    steps:
+      - name: Checkout (historique complet + tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Configurer la clé de déploiement
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.MIRROR_DEPLOY_KEY }}" > ~/.ssh/mirror_key
+          chmod 600 ~/.ssh/mirror_key
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Pousser main vers le miroir GitHub
+        run: |
+          git remote add github-mirror git@github.com:ElwinghL/BG3Tools.git
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/mirror_key -o IdentitiesOnly=yes" git push github-mirror main
