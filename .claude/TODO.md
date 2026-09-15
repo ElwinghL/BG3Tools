@@ -397,11 +397,9 @@ sacrifié pour y arriver, tant pis.
 - **12b.** GUI Python cross-platform (Linux + Windows) reprenant les fonctionnalités ci-dessus
 - **12c.** Alternative serveur web local : visualisation par navigateur, échange .pak/profils par socket sécurisé (clé + fichier auth type SSH)
 
-### 13. Licence
-
-- ~~**13a.** Identifier et citer les licences des outils/inspirations utilisés~~ — fait : `THIRD_PARTY_LICENSES.md` (dépendances Python via PyPI, LSLib/BG3SE/BG3 Mod Manager/BG3 Compatibility Framework/Native Mod Loader via l'API GitHub, licences vérifiées à la source) + mention dans le README ; deux cas non tranchables documentés tels quels (Para Tool : aucune licence détectée sur le dépôt ; Mod Fixer et MoreReactiveCompanions : pages Nexus Mods non accessibles en automatisé — HTTP 403 — usage sous conditions Nexus par défaut)
-
 ## Fait
+
+- **13a.** Identification et citation des licences des outils/inspirations utilisés : `THIRD_PARTY_LICENSES.md` (dépendances Python via PyPI, LSLib/BG3SE/BG3 Mod Manager/BG3 Compatibility Framework/Native Mod Loader via l'API GitHub, licences vérifiées à la source) + mention dans le README ; Para Tool : aucune licence détectée sur le dépôt (non tranchable). Mod Fixer : plus de flou — repackaging propre publié sous MIT (`github.com/ElwinghL/ModFixer`), créditant figs999 (auteur Nexus #141) et Norbyte/BG3SE (technique). MoreReactiveCompanions : retiré de `THIRD_PARTY_LICENSES.md` (app lancée telle quelle depuis Nexus, jamais modifiée/redistribuée — aucune obligation de licence).
 
 - progression X/Y pour téléchargement depuis fichier texte
 - message "déjà un hardlink" enrichi (mod, chemin)

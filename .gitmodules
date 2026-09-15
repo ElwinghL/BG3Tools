@@ -26,4 +26,7 @@
 	branch = main
 [submodule "Tools/bg3-nmcm"]
 	path = Tools/bg3-nmcm
-	url = https://github.com/Luiznunes12/bg3-nmcm.git
+	url = https://github.com/ElwinghL/bg3-nmcm-patcher.git
+[submodule "Tools/ModFixer"]
+	path = Tools/ModFixer
+	url = https://github.com/ElwinghL/ModFixer.git

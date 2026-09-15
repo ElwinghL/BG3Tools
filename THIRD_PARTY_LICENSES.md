@@ -113,39 +113,39 @@ format est due au travail de reverse engineering de **Norbyte** dans LSLib
   dans ce dépôt (voir `.gitignore`) — seules les sources tierces,
   téléchargées à la demande, sont utilisées, sans modification.
 
-## 9. Mod Fixer (Nexus #141, Norbyte) — fork local
+## 9. Mod Fixer — repackaging propre ([ElwinghL/ModFixer](https://github.com/ElwinghL/ModFixer), MIT)
 
-- **Projet d'origine** : [Mod Fixer sur Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/141),
-  par **Norbyte**.
-- **Licence** : **non spécifiée formellement**. La page Nexus Mods du mod
-  n'a pas pu être consultée de façon automatisée lors de la rédaction de
-  cette page (réponse HTTP 403 — Nexus Mods bloque les accès non
-  authentifiés/automatisés). Aucun fichier de licence distinct n'est
-  publié pour ce mod à la connaissance de l'auteur de ModTools : l'usage
-  se fait donc sous les conditions standard de Nexus Mods (droits d'auteur
-  de l'auteur du mod ; permissions par défaut du site sauf mention
-  contraire sur la page du mod, à vérifier manuellement par l'utilisateur
-  avant toute redistribution).
-- **Usage dans ModTools** : `bg3_mod_tui/mod_fixer_fork.py` reconstruit
-  localement, à partir du `ModFixer.pak` déjà déployé par l'utilisateur
-  (jamais depuis une copie commitée dans ce dépôt), un module BG3 distinct
-  contenant le même fichier utile
-  (`Mods/Gustav/Story/RawFiles/Goals/ForceRecompile.txt`) sous un
-  `meta.lsx` propre — l'original est conservé (`ModFixer.pak.orig`) pour
-  rester réversible. Le contenu fonctionnel du mod (le fichier vide
-  déclencheur de recompilation) n'est pas une création de ModTools ; seule
-  l'enveloppe du module (structure, UUID) est régénérée localement via
-  LSLib.
+- **Technique d'origine** : [Mod Fixer sur Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/141)
+  (mod #141), par **[figs999](https://www.nexusmods.com/profile/figs999)**,
+  qui crédite lui-même **Norbyte** ([BG3 Script Extender](https://github.com/Norbyte/bg3se))
+  pour la technique sous-jacente (forcer la recompilation de la story
+  Osiris via un fichier déposé dans `Story/RawFiles/Goals/` du module de
+  base). Nexus Mods ne permet pas à un auteur de fixer une licence de
+  projet ; la page d'origine n'en spécifie pas.
+- **Ce que contient réellement le mod** : un unique fichier **vide**
+  (`Mods/Gustav/Story/RawFiles/Goals/ForceRecompile.txt`), sans `meta.lsx`
+  propre — aucun contenu créatif/code à reprendre. `ElwinghL/ModFixer` est
+  donc un repackaging écrit de zéro (nouveau `meta.lsx`, UUID généré),
+  reproduisant seulement ce même fichier vide au même chemin — pas une
+  copie des fichiers de l'auteur d'origine.
+- **Licence** : **MIT** ([LICENSE](https://github.com/ElwinghL/ModFixer/blob/main/LICENSE))
+  pour ce repackaging (`meta.lsx` + empaquetage, écrits dans ce dépôt) —
+  ne couvre pas et ne peut pas couvrir la *technique* elle-même, créditée
+  ci-dessus à figs999 et Norbyte.
+- **Usage dans ModTools** : sous-module git `Tools/ModFixer/` (voir
+  `Tools/TOOLS.md`). `bg3_mod_tui/mod_fixer_fork.py` construit ce module
+  directement depuis ce sous-module, en remplacement du `ModFixer.pak`
+  déjà déployé par l'utilisateur (sauvegardé en `ModFixer.pak.orig`, pour
+  rester réversible) — ne dépend plus d'extraire le `.pak` de l'utilisateur
+  pour en tirer le contenu.
 
-## 10. MoreReactiveCompanions
+## 10. MoreReactiveCompanions — non applicable
 
-- **Projet** : [page Nexus Mods](https://www.nexusmods.com/baldursgate3/mods/5447).
-- **Licence** : **non spécifiée** — page Nexus Mods non accessible de
-  façon automatisée lors de la rédaction (HTTP 403). Usage sous les
-  conditions standard de Nexus Mods, à vérifier manuellement sur la page
-  du mod avant toute redistribution.
-- **Usage dans ModTools** : listé dans `Tools/TOOLS.md`
-  (`Tools/MoreReactiveCompanionsConfigApp/`), téléchargé/lancé tel quel.
+Retiré de cette page : ModTools appelle directement l'application de
+configuration fournie par le mod (téléchargée depuis Nexus Mods, jamais
+modifiée ni redistribuée) — aucune obligation de licence n'est déclenchée
+par ce simple lancement tel quel. Voir `Tools/TOOLS.md` pour le lien Nexus
+d'origine si besoin.
 
 ## 11. bg3rustpaklib / bg3pythonpaklib / dépendances Rust (`rust/pak_reader_rs`)
 
@@ -181,8 +181,7 @@ format est due au travail de reverse engineering de **Norbyte** dans LSLib
 | Para Tool (Paramonov86)       | Non spécifiée                         | Vérifié (absence de licence détectée) |
 | Native Mod Loader (gottyduke) | MIT                                   | Vérifié (API GitHub)      |
 | BG3 Compatibility Framework    | MIT                                   | Vérifié (API GitHub)      |
-| Mod Fixer (Norbyte, Nexus #141) | Non spécifiée (conditions Nexus par défaut) | Page Nexus non accessible (403) — non vérifié directement |
-| MoreReactiveCompanions (Nexus #5447) | Non spécifiée (conditions Nexus par défaut) | Page Nexus non accessible (403) — non vérifié directement |
+| Mod Fixer (ElwinghL/ModFixer, repackaging) | MIT | Vérifié (fichier LICENSE du dépôt) |
 | bg3rustpaklib / bg3pythonpaklib (ElwinghL) | MIT | Vérifié (fichier LICENSE de chaque dépôt) |
 | pyo3, roxmltree, regex, flate2 (Cargo, `rust/pak_reader_rs`) | MIT OR Apache-2.0 | Vérifié (`cargo metadata`) |
 
