@@ -96,7 +96,10 @@ def parse_meta_lsx(meta_path: Path) -> tuple[str, str] | None:
     nœud `ModuleInfo` plutôt qu'une recherche brute sur tout le fichier.
     Retourne None si le fichier est invalide ou n'a pas d'UUID."""
     try:
-        tree = ElementTree.parse(meta_path)
+        # meta.lsx local (extrait d'un .pak ou d'un module installé), pas
+        # une source réseau attaquant-contrôlée -> stdlib ElementTree
+        # suffit, pas besoin de defusedxml ici.
+        tree = ElementTree.parse(meta_path)  # nosec B314
     except (ElementTree.ParseError, OSError):
         return None
     module_info = tree.find(".//node[@id='ModuleInfo']")
@@ -202,11 +205,16 @@ def read_pak_identity(
     _run_divine(
         divine_exe,
         [
-            "-g", "bg3",
-            "-a", "extract-package",
-            "-s", _path_arg(pak_path, use_wine_path=use_wine_path),
-            "-d", _path_arg(work_dir, use_wine_path=use_wine_path),
-            "-x", "*meta.lsx",
+            "-g",
+            "bg3",
+            "-a",
+            "extract-package",
+            "-s",
+            _path_arg(pak_path, use_wine_path=use_wine_path),
+            "-d",
+            _path_arg(work_dir, use_wine_path=use_wine_path),
+            "-x",
+            "*meta.lsx",
         ],
         reference_path=reference_path,
     )
@@ -279,19 +287,22 @@ def read_pak_module_metadata(
         return ModuleMetadata(uuid=uuid, name=name, dependencies=tuple(dependencies))
 
     if divine_exe is None:
-        raise PakMetadataError(
-            "lecture native impossible et Divine.exe introuvable pour le repli."
-        )
+        raise PakMetadataError("lecture native impossible et Divine.exe introuvable pour le repli.")
 
     use_wine_path = not is_windows()
     _run_divine(
         divine_exe,
         [
-            "-g", "bg3",
-            "-a", "extract-package",
-            "-s", _path_arg(pak_path, use_wine_path=use_wine_path),
-            "-d", _path_arg(work_dir, use_wine_path=use_wine_path),
-            "-x", "*meta.lsx",
+            "-g",
+            "bg3",
+            "-a",
+            "extract-package",
+            "-s",
+            _path_arg(pak_path, use_wine_path=use_wine_path),
+            "-d",
+            _path_arg(work_dir, use_wine_path=use_wine_path),
+            "-x",
+            "*meta.lsx",
         ],
         reference_path=reference_path,
     )
@@ -339,7 +350,9 @@ def build_module_metadata_index(
                 shutil.rmtree(work_dir, ignore_errors=True)
             if metadata:
                 index[metadata.uuid] = ModuleMetadata(
-                    uuid=metadata.uuid, name=metadata.name or pak.stem, dependencies=metadata.dependencies
+                    uuid=metadata.uuid,
+                    name=metadata.name or pak.stem,
+                    dependencies=metadata.dependencies,
                 )
     return index
 

@@ -1,5 +1,14 @@
 # BG3Tools — Todo List
 
+## Partie utilisateur : NE JAMAIS SUPPRIMER
+
+- Reecrire pour les agents claude cette aprtie
+- Documenter le fonctionenemtn la realisation du bench
+- Integrer les resultats dans les readme de LsLib, pythonpakreader et rspakreader mais aussi dans le readme du projet principal
+- Ajouter un job de verification pour les sous module fork pour les synchroniser quand c'est necessaire
+- Pouvoir lancer le bench sur les vrais pak, sans arguemnts sans utiliser d'outils synthetiques
+- Corriger /run/media/system/M2/BG3Tools/Tools/bg3rustpaklib/examples/native_timing.rs pour que le benchmark puisse le compiler et le mesurer
+
 ## Coordination — chantiers en cours (sous-agents)
 
 Registre de coordination — évite qu'une autre instance Claude ne reprenne un
@@ -59,7 +68,7 @@ pas, même si elle semble terminée.
   (dropdown natif). Statut : en cours, non mergé.
 - `chore/TestCoverageExpansion` (dépôt principal, sous-agent) — la
   couverture globale (`pytest --cov`) est à ~48%, sous le seuil `fail_under
-  = 75` désormais imposé (voir "Terminé récemment" ci-dessous). Sous-agent
+= 75` désormais imposé (voir "Terminé récemment" ci-dessous). Sous-agent
   chargé d'ajouter des tests réels (pas de tests creux/assertions triviales
   juste pour faire monter le pourcentage) en priorisant les fichiers les
   moins couverts (`native_mods.py`, `tools_manager.py`,
@@ -79,6 +88,23 @@ pas, même si elle semble terminée.
   seulement sur la moyenne globale. Mergé dans `main`. Couverture globale
   au moment du merge : ~48% (CI rouge assumée jusqu'à
   `chore/TestCoverageExpansion` ci-dessus).
+- `chore/CodeQualityTooling` — ajout de `mypy` (typage), `radon`/`xenon`
+  (complexité cyclomatique) et `bandit` (sécurité statique) en complément
+  de `ruff`/`pytest-cov` déjà présents, + badges CI/couverture/licence/
+  Python dans `README.md`. `bandit -ll` (Medium/High) bloquant en CI,
+  entièrement vert (3 findings XML B314 justifiés par `# nosec` inline —
+  parsing de `meta.lsx`/.pak locaux, pas de source réseau non fiable).
+  `mypy` et `xenon` lancés en **informationnel** (`|| true`, non bloquant)
+  faute de temps pour corriger la dette legacy déjà présente :
+  - mypy : 67 erreurs sur 10 fichiers au moment de l'ajout (surtout
+    `screens/actions.py`, `mod_pipeline.py`, `screens/main.py`).
+  - xenon : rang **F** sur `mod_pipeline.py::extract_archives_to_mods`,
+    rang **D** sur `mod_pipeline.py::download_nexus_mods_by_id`,
+    `compat_audit.py::audit_mod`, `profile_archive.py::import_profile_archive`,
+    moyenne de module **C** sur `nexus_variant_selection.py`.
+  Suite possible : corriger ces points chauds puis repasser ces deux
+  étapes en bloquant ; brancher un vrai service de couverture (Codecov/
+  Coveralls) si un badge dynamique (pas juste le seuil) est souhaité.
 
 **Disponible ensuite (P2/P3, non pris)**
 
@@ -310,7 +336,7 @@ sacrifié pour y arriver, tant pis.
     trimme `LSTools.sln` + les 3 fichiers CLI de Divine (`CommandLineArguments.cs`,
     `CommandLineActions.cs`, `CommandLineDataProcessor.cs`) pour ne garder que les
     actions `create-package;list-package;extract-single-file;extract-package;
-    extract-packages;convert-resource;convert-resources;convert-loca` (retrait de
+extract-packages;convert-resource;convert-resources;convert-loca` (retrait de
     `convert-model`, `convert-models`, `build-vt`). `CommandLineGR2Processor.cs`
     exclu du build de `Divine.csproj` plutôt que supprimé, pour rester réversible.
   - Une vraie dépendance native est restée dans le périmètre .pak lui-même :
@@ -325,44 +351,41 @@ sacrifié pour y arriver, tant pis.
   - **Build vérifié** : `dotnet build Divine/Divine.csproj -c Release` réussit
     sans erreur (1 seul warning `CS1998` préexistant, sans rapport) sous .NET 8
     dans le conteneur `distrobox bg3tools-dotnet` (Fedora). `dotnet
-    Divine/bin/Release/net8.0/Divine.dll` s'exécute et affiche l'usage attendu
+Divine/bin/Release/net8.0/Divine.dll` s'exécute et affiche l'usage attendu
     (surface d'actions réduite au pak/resource/loca, confirmant le trim).
     Reproductible via `scripts/lslib_fork_linux_build/build_lslib_fork_linux.sh`
-    (clone + applique `scripts/lslib_fork_linux_build/0001-linux-build-pak-only-scope.patch`
-    + build ; script testé de bout en bout).
+    (clone + applique `scripts/lslib_fork_linux_build/0001-linux-build-pak-only-scope.patch` - build ; script testé de bout en bout).
   - **Poussé sur `ElwinghL/lslib`** (2026-09-13, autorisation explicite d'Elwingh) :
     branche `fix/LinuxBuildPakOnlyScope`, 2 commits (le trim de périmètre ci-dessus
-    + le fix `TryToValidatePath` du second patch, voir plus bas) — build revérifié
-    sur cette branche avant push (`dotnet build` → 0 erreur). PR pas ouverte (pas
-    demandé) : https://github.com/ElwinghL/lslib/pull/new/fix/LinuxBuildPakOnlyScope
+    - le fix `TryToValidatePath` du second patch, voir plus bas) — build revérifié
+      sur cette branche avant push (`dotnet build` → 0 erreur). PR pas ouverte (pas
+      demandé) : https://github.com/ElwinghL/lslib/pull/new/fix/LinuxBuildPakOnlyScope
   - Limitation levée depuis (voir `Tools/nmcm_patches/AbsoluteDefeat/README.md`,
     section 20b) : un vrai test `create-package` de bout en bout (packager un
     mod source réel, relire le `.pak` produit via `list-package` ET
     `pak_reader.py`) a révélé **deux bugs Linux** du fork, corrigés localement
     (non poussés) via un second patch,
     `scripts/lslib_fork_linux_build/0002-fix-linux-path-validation.patch`
-    (appliqué automatiquement par `build_lslib_fork_linux.sh`) :
-    1. `Divine.CLI.CommandLineActions.TryToValidatePath` plantait
-       (`System.InvalidOperationException: This operation is not supported for
-       a relative URI`) sur TOUT chemin absolu Unix passé à `-s`/`-d`, y
-       compris hors de ce projet — `Uri.TryCreate(...).IsFile` ne reconnaît
-       une syntaxe Windows (lettre de lecteur/UNC/`file://`) que sous cette
-       forme, un chemin Unix étant parsé comme URI relative. Corrigé en
-       remplaçant ce détour par `Path.IsPathRooted(path)` seul.
-    2. Packager (`create-package`, testé avec `none` et `zlib`) depuis une
-       source vivant sur le point de montage externe `M2`
-       (`/run/media/system/M2/BG3Tools/…`, la racine même de ce projet)
-       produit un `.pak` illisible par Divine lui-même (`list-package`
-       échoue) ET par `pak_reader.py`, sans rapport avec le contenu du mod
-       (bisecté fichier par fichier) ni avec un seuil de nombre de fichiers
-       (reproduit et non-reproduit sur des arbres synthétiques). Cause racine
-       non identifiée (probable particularité mmap/lecture de fichier de ce
-       point de montage sous ce build .NET). Contournement appliqué : stager
-       une copie de la source ailleurs (`/tmp`) avant `create-package`, ce qui
-       produit systématiquement un `.pak` valide — à creuser si ce point de
-       montage doit être utilisé plus largement pour du packaging. Ce second
-       correctif est INCLUS dans la branche poussée `fix/LinuxBuildPakOnlyScope`
-       (2 commits, voir ci-dessus).
+    (appliqué automatiquement par `build_lslib_fork_linux.sh`) : 1. `Divine.CLI.CommandLineActions.TryToValidatePath` plantait
+    (`System.InvalidOperationException: This operation is not supported for
+a relative URI`) sur TOUT chemin absolu Unix passé à `-s`/`-d`, y
+    compris hors de ce projet — `Uri.TryCreate(...).IsFile` ne reconnaît
+    une syntaxe Windows (lettre de lecteur/UNC/`file://`) que sous cette
+    forme, un chemin Unix étant parsé comme URI relative. Corrigé en
+    remplaçant ce détour par `Path.IsPathRooted(path)` seul. 2. Packager (`create-package`, testé avec `none` et `zlib`) depuis une
+    source vivant sur le point de montage externe `M2`
+    (`/run/media/system/M2/BG3Tools/…`, la racine même de ce projet)
+    produit un `.pak` illisible par Divine lui-même (`list-package`
+    échoue) ET par `pak_reader.py`, sans rapport avec le contenu du mod
+    (bisecté fichier par fichier) ni avec un seuil de nombre de fichiers
+    (reproduit et non-reproduit sur des arbres synthétiques). Cause racine
+    non identifiée (probable particularité mmap/lecture de fichier de ce
+    point de montage sous ce build .NET). Contournement appliqué : stager
+    une copie de la source ailleurs (`/tmp`) avant `create-package`, ce qui
+    produit systématiquement un `.pak` valide — à creuser si ce point de
+    montage doit être utilisé plus largement pour du packaging. Ce second
+    correctif est INCLUS dans la branche poussée `fix/LinuxBuildPakOnlyScope`
+    (2 commits, voir ci-dessus).
 - **19c.** Une fois un build fonctionnel obtenu : basculer `Tools/ExportTools`
   (sous-module git, actuellement `Norbyte/lslib`) vers `ElwinghL/lslib`, mettre à
   jour `Tools/TOOLS.md`, re-épingler le commit, et relancer
@@ -414,7 +437,7 @@ sacrifié pour y arriver, tant pis.
   l'importe désormais au lieu de la redéfinir, rétro-compatible (mêmes
   CLI/rapports). Nouveau `scripts/pak_bench_cli.py` (sous-commandes
   `fixtures`/`create`/`edit`/`report`) + `scripts/pak_bench/{create_edit,
-  synthetic,report,strings}.py`. bg3rustpaklib mesuré "natif" via
+synthetic,report,strings}.py`. bg3rustpaklib mesuré "natif" via
   `Tools/bg3rustpaklib/examples/native_timing.rs` (nouveau, release,
   aucun Python/PyO3 dans la boucle — étend le binaire déjà noté "fait" en
   §21a, qui n'était en réalité pas présent dans le pin de sous-module

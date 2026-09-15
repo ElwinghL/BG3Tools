@@ -1,5 +1,15 @@
 # BG3 Mod TUI — v1.0.0
 
+[![CI](https://git.clementleboeuf.ovh:30009/elwinghit/BG3Tools/actions/workflows/ci.yml/badge.svg?branch=main)](https://git.clementleboeuf.ovh:30009/elwinghit/BG3Tools/actions?workflow=ci.yml)
+[![Couverture](https://img.shields.io/badge/couverture-%E2%89%A575%25-brightgreen)](.gitea/workflows/ci.yml)
+[![Licence](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+
+<!-- Le badge de couverture indique le seuil imposé par la CI
+(`fail_under = 75` dans pyproject.toml), pas le pourcentage exact du
+dernier run -- pas de service externe type Codecov branché pour l'instant
+(voir .claude/TODO.md pour cette piste en tant que suite possible). -->
+
 TUI (interface terminal) pour gérer l'installation de mods Baldur's Gate 3 :
 téléchargement (Nexus Mods / mod.io), extraction vers le dossier `Mods/`
 géré par le jeu, synchronisation de `modsettings.lsx`, et lancement des

@@ -170,9 +170,7 @@ def _decompress_entry(data: bytes, method: int, uncompressed_size: int) -> bytes
                 "décompresser ce fichier du .pak."
             )
         try:
-            return _zstandard.ZstdDecompressor().decompress(
-                data, max_output_size=uncompressed_size
-            )
+            return _zstandard.ZstdDecompressor().decompress(data, max_output_size=uncompressed_size)
         except Exception as exc:  # noqa: BLE001 - toute erreur zstd -> repli Divine.exe
             raise CorruptedPak(f"Décompression zstd échouée : {exc}") from exc
     raise CorruptedPak(f"Méthode de compression inconnue (flags={method}).")
@@ -189,7 +187,9 @@ def parse_lspk_header(data: bytes) -> tuple[int, int, int, int]:
         raise CorruptedPak("Fichier trop court pour contenir un header LSPK.")
     (signature,) = struct.unpack_from("<I", data, 0)
     if signature != _SIGNATURE:
-        raise UnsupportedPakVersion("Signature LSPK absente (pas un .pak Larian, ou format ancien).")
+        raise UnsupportedPakVersion(
+            "Signature LSPK absente (pas un .pak Larian, ou format ancien)."
+        )
     version, file_list_offset, file_list_size, _flags, _priority, _md5, num_parts = (
         _HEADER_STRUCT.unpack_from(data, 4)
     )
@@ -265,7 +265,9 @@ class PakArchive:
     l'ouverture si le .pak n'est pas exploitable nativement — c'est le
     signal pour l'appelant de replier sur Divine.exe."""
 
-    def __init__(self, path: Path, file_obj, mmap_obj: mmap.mmap, version: int, entries: list[PakFileEntry]):
+    def __init__(
+        self, path: Path, file_obj, mmap_obj: mmap.mmap, version: int, entries: list[PakFileEntry]
+    ):
         self._path = path
         self._file = file_obj
         self._mmap = mmap_obj
@@ -374,7 +376,10 @@ def parse_meta_lsx_bytes(data: bytes) -> tuple[str, str, str] | None:
     vide si absent (certains `meta.lsx` très anciens n'ont pas cet
     attribut). Retourne None si le XML est invalide ou sans UUID."""
     try:
-        root = ElementTree.fromstring(data)
+        # XML issu d'un .pak local (LSLib/BG3, pas de source réseau
+        # attaquant-contrôlée) -> stdlib ElementTree suffit, pas besoin de
+        # defusedxml ici.
+        root = ElementTree.fromstring(data)  # nosec B314
     except ElementTree.ParseError:
         return None
     module_info = root.find(".//node[@id='ModuleInfo']")
@@ -407,7 +412,9 @@ def parse_meta_lsx_dependencies_bytes(data: bytes) -> list[tuple[str, str]]:
     présent. Liste vide (pas d'erreur) si le nœud est absent/vide ou le
     XML invalide."""
     try:
-        root = ElementTree.fromstring(data)
+        # Voir parse_meta_lsx_bytes ci-dessus : source locale, pas
+        # attaquant-contrôlée.
+        root = ElementTree.fromstring(data)  # nosec B314
     except ElementTree.ParseError:
         return []
     dependencies_node = root.find(".//node[@id='Dependencies']")
