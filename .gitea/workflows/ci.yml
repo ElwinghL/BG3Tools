@@ -26,5 +26,22 @@ jobs:
       - name: Lancer ruff (lint)
         run: uv run ruff check .
 
+      - name: Lancer mypy (typage, informationnel)
+        # Base legacy avec des erreurs préexistantes (voir .claude/TODO.md) :
+        # ne bloque pas la CI pour l'instant, juste visible dans les logs.
+        run: uv run mypy bg3_mod_tui --ignore-missing-imports || true
+
+      - name: Lancer bandit (sécurité statique)
+        # -ll : ne bloque que sur Medium/High (Low = bruit sur des patterns
+        # subprocess volontaires, ex. lancement de Divine.exe/Wine).
+        run: uv run bandit -r bg3_mod_tui -q -ll
+
+      - name: Lancer xenon (complexité cyclomatique, informationnel)
+        # Base legacy avec des points chauds préexistants (rang F sur
+        # mod_pipeline.py::extract_archives_to_mods, D sur trois autres
+        # fonctions — voir .claude/TODO.md) : ne bloque pas la CI pour
+        # l'instant, juste visible dans les logs, comme mypy ci-dessus.
+        run: uv run xenon --max-absolute F --max-modules F --max-average A bg3_mod_tui || true
+
       - name: Lancer pytest avec couverture
         run: uv run pytest -q --cov --cov-report=term-missing
