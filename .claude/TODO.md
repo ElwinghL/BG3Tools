@@ -2,12 +2,35 @@
 
 ## Partie utilisateur : NE JAMAIS SUPPRIMER
 
-- Reecrire pour les agents claude cette aprtie
-- Documenter le fonctionenemtn la realisation du bench
-- Integrer les resultats dans les readme de LsLib, pythonpakreader et rspakreader mais aussi dans le readme du projet principal
-- Ajouter un job de verification pour les sous module fork pour les synchroniser quand c'est necessaire
-- Pouvoir lancer le bench sur les vrais pak, sans arguemnts sans utiliser d'outils synthetiques
-- Corriger /run/media/system/M2/BG3Tools/Tools/bg3rustpaklib/examples/native_timing.rs pour que le benchmark puisse le compiler et le mesurer
+- ~~Réécrire cette partie pour les agents Claude~~ — fait : reformulation
+  complète de `.claude/TODO.md` le 2026-09-15 (branche `docs/ReformulateTodo`)
+  — dédoublonnage des sections "Coordination"/"Terminé récemment" accumulées
+  au fil des résolutions de conflits de merge, sans perte d'information
+  factuelle (vérifié section par section contre l'état réel du dépôt : git
+  log, branches, worktrees).
+- Documenter le fonctionnement/la réalisation du bench — partiellement fait :
+  spec `docs/superpowers/specs/2026-09-15-pak-tools-benchmark-design.md` +
+  rapport versionné `docs/pak-tools-benchmark/` (voir §22 ci-dessous) ; pas
+  de documentation utilisateur dédiée au-delà de ces deux fichiers.
+- Intégrer les résultats dans les README de LSLib, bg3pythonpaklib et
+  bg3rustpaklib, ainsi que dans le README du projet principal —
+  partiellement fait : READMEs `bg3pythonpaklib`/`bg3rustpaklib`
+  (`.md`+`.fr.md`) mis à jour avec un pointeur vers le nouveau harnais (voir
+  §22a) ; README du fork LSLib et README racine du projet pas encore
+  touchés.
+- Ajouter un job de vérification pour les sous-modules fork, afin de les
+  synchroniser quand c'est nécessaire — pas fait, toujours ouvert.
+- ~~Pouvoir lancer le bench sur les vrais .pak, sans arguments, sans
+  utiliser d'outils synthétiques~~ — fait : voir §22b (lecture sur 48 vrais
+  `.pak` de `Data/`) et §22c (création/édition sur du contenu extrait de
+  vrais `.pak`) ci-dessous. Les fixtures synthétiques restent disponibles en
+  option (`--synthetic`) mais ne sont plus le seul chemin de mesure.
+- ~~Corriger `Tools/bg3rustpaklib/examples/native_timing.rs` pour que le
+  benchmark puisse le compiler et le mesurer~~ — fait : voir §22a/§22b — le
+  binaire n'était en réalité pas présent dans le pin de sous-module utilisé
+  lors du premier passage (§21a, marqué "fait" à tort sur ce point précis) ;
+  redécouvert et corrigé en §22, désormais compilé et mesuré avec de vrais
+  chiffres.
 
 ## Coordination — chantiers en cours (sous-agents)
 
@@ -24,13 +47,30 @@ pas, même si elle semble terminée.
 
 **EN COURS**
 
-- `feat/PakToolsBenchmark` (dépôt principal, worktree
-  `.claude/worktrees/agent-aa5dc47578d03919f`) — stratégie de benchmark
-  comparatif Divine.exe (LSLib) / bg3pythonpaklib / bg3rustpaklib (lecture
-  single/batch, création/édition/batch). Statut : implémentation terminée
-  et validée bout en bout (fixtures synthétiques, pas de vrai `.pak` du
-  jeu mesuré dans cette passe — décision explicite en cours de route),
-  prête à relire/merger par Elwingh. Détail en §22 ci-dessous.
+- `feat/PakToolsBenchmark` (dépôt principal + sous-modules
+  `Tools/bg3rustpaklib`/`Tools/bg3pythonpaklib`, même nom de branche dans
+  chacun ; **le worktree dédié `.claude/worktrees/agent-aa5dc47578d03919f`
+  a été supprimé — ne plus s'y référer**, le dépôt principal travaille
+  directement sur cette branche) — stratégie de benchmark comparatif
+  Divine.exe (LSLib) / bg3pythonpaklib / bg3rustpaklib (lecture
+  single/batch, création/édition/batch). Statut : implémentation terminée,
+  validée sur fixtures synthétiques (création/édition) **et sur les vrais
+  `.pak` du jeu** (lecture, 48 fichiers réels) — un vrai bug de
+  décompression d'archive solide trouvé et corrigé au passage (`LowTex.pak`,
+  détail en §22 ci-dessous). Prête à relire/merger par Elwingh.
+  **Incident de coordination du 2026-09-15** : le worktree de l'agent a été
+  supprimé par erreur (`git worktree remove --force`) alors qu'il contenait
+  deux commits de sous-module jamais poussés — contenu restauré depuis la
+  transcription de l'agent, revérifié (compilation + tests), recommité.
+  Une session concurrente (`bg3tools-cb`) a aussi basculé le dépôt de
+  travail partagé sur sa propre branche pendant la récupération, faisant
+  atterrir un commit sur la mauvaise branche — récupéré par cherry-pick
+  isolé (worktree temporaire dédié) sans toucher au travail de l'autre
+  session. Aucune perte finale, mais le dépôt de travail principal est
+  partagé entre sessions concurrentes : prudence à l'avenir (`git status`
+  systématique avant tout `checkout`/`worktree remove`, jamais de
+  `--force` sans avoir vérifié l'absence de sous-modules indépendants dans
+  le worktree ciblé).
 - Console BG3SE distante (§11b/11c) — trois branches liées, aucune mergée :
   - `feat/RemoteConsoleTCPBridge` (sous-module `ElwinghL/bg3se`) — pont TCP
     `RemoteConsole` réellement implémenté (pas juste conçu) : **compile sans
@@ -58,14 +98,12 @@ pas, même si elle semble terminée.
     En attente que le pont TCP soit confirmé buildable avant merge.
   - Reste ouvert après ces 3 merges : test en conditions réelles contre un
     vrai `bg3.exe` (build Windows requis, aucun toolchain local).
-- `fix/PakEntrySizeZeroBug` (dépôt principal) — bug des entrées `.pak`
-  rapportant une taille de **0** au lieu de la vraie valeur : **corrigé**.
-  Statut : fait, en attente de validation/merge par Elwingh — voir détail §1
-  ci-dessous.
-- `feat/NMCM-VisibleShields-Patch` (§20b, 2e patch pilote) — même pattern que
-  le patch Absolute Defeat (déjà mergé), sur Visible Shields - Universal
-  (`enum` + `slider_int`) — premier patch à gérer un type `enum` côté NMCM
-  (dropdown natif). Statut : en cours, non mergé.
+- `fix/PakEntrySizeZeroBug` (dépôt principal, worktree
+  `.claude/worktrees/agent-aabe3dfd00dedba8e`, toujours actif et propre —
+  vérifié 2026-09-15) — bug des entrées `.pak` rapportant une taille de
+  **0** au lieu de la vraie valeur : **corrigé**. Statut : fait, en attente
+  de validation/merge par Elwingh — voir détail §1 ci-dessous.
+
 **Terminé récemment**
 
 - `chore/TestCoverageExpansion` (dépôt principal, worktree
@@ -123,6 +161,23 @@ pas, même si elle semble terminée.
   Suite possible : corriger ces points chauds puis repasser ces deux
   étapes en bloquant ; brancher un vrai service de couverture (Codecov/
   Coveralls) si un badge dynamique (pas juste le seuil) est souhaité.
+- `feat/NMCM-VisibleShields-Patch` (§20b/20c, 2e patch pilote NMCM) — mergé
+  dans `main` (confirmé par git : `feat/NMCM-VisibleShields-Patch` est
+  ancêtre de `main`, commit de documentation `e3e2140`). Même pattern que
+  le patch Absolute Defeat (déjà mergé), sur Visible Shields - Universal
+  (`enum` + `slider_int`) — premier patch du projet à ponter un setting
+  `enum` côté NMCM (dropdown natif). Détail complet en §20c ci-dessous.
+- `feat/PythonWheelPackaging` (§12a) — `bg3_mod_tui` installable comme
+  package Python indépendant (`pip install .`). Mergé dans `main`
+  (2026-09-14, 268 tests verts). Publication PyPI non demandée, hors scope.
+- `feat/DataExtractorModDocs` (§16a) — mergé dans `main` (commit `74169cd`,
+  2026-09-13). 16b/16c restent ouverts (voir §16 ci-dessous).
+- `feat/CompatFrameworkAudit` (§18a-c) — mergé dans `main` (2026-09-13), 29
+  tests, suite complète (248 tests) verte après intégration avec 16a.
+- `feat/NMCM-AbsoluteDefeat-Patch` (§20b, patch pilote) — mergé dans `main`
+  (2026-09-13, 255 tests verts). Voir détail §20b ci-dessous.
+- `fix/LSLibForkBuildLinux` (§19b) — mergé dans `main` (2026-09-13). Voir
+  détail §19 ci-dessous.
 
 **Disponible ensuite (P2/P3, non pris)**
 
@@ -144,21 +199,6 @@ pas, même si elle semble terminée.
   Elwingh côté fork avant de basculer le sous-module). Une fois mergée :
   mettre à jour `Tools/TOOLS.md`, re-épingler le commit, relancer
   `scripts/compare_pak_reader.py --divine-mode batch`.
-
-**Terminé récemment** (chantiers de sous-agents, hors historique déjà repris
-dans les sections TODO ci-dessous)
-
-- `feat/PythonWheelPackaging` (§12a) — `bg3_mod_tui` installable comme
-  package Python indépendant (`pip install .`). Mergé dans `main`
-  (2026-09-14, 268 tests verts). Publication PyPI non demandée, hors scope.
-- `feat/DataExtractorModDocs` (§16a) — mergé dans `main` (commit `74169cd`,
-  2026-09-13). 16b/16c restent ouverts (voir §16 ci-dessous).
-- `feat/CompatFrameworkAudit` (§18a-c) — mergé dans `main` (2026-09-13), 29
-  tests, suite complète (248 tests) verte après intégration avec 16a.
-- `feat/NMCM-AbsoluteDefeat-Patch` (§20b, patch pilote) — mergé dans `main`
-  (2026-09-13, 255 tests verts). Voir détail §20b ci-dessous.
-- `fix/LSLibForkBuildLinux` (§19b) — mergé dans `main` (2026-09-13). Voir
-  détail §19 ci-dessous.
 
 ## TODO - Categorie human user
 
@@ -354,7 +394,7 @@ sacrifié pour y arriver, tant pis.
     trimme `LSTools.sln` + les 3 fichiers CLI de Divine (`CommandLineArguments.cs`,
     `CommandLineActions.cs`, `CommandLineDataProcessor.cs`) pour ne garder que les
     actions `create-package;list-package;extract-single-file;extract-package;
-extract-packages;convert-resource;convert-resources;convert-loca` (retrait de
+    extract-packages;convert-resource;convert-resources;convert-loca` (retrait de
     `convert-model`, `convert-models`, `build-vt`). `CommandLineGR2Processor.cs`
     exclu du build de `Divine.csproj` plutôt que supprimé, pour rester réversible.
   - Une vraie dépendance native est restée dans le périmètre .pak lui-même :
@@ -369,10 +409,11 @@ extract-packages;convert-resource;convert-resources;convert-loca` (retrait de
   - **Build vérifié** : `dotnet build Divine/Divine.csproj -c Release` réussit
     sans erreur (1 seul warning `CS1998` préexistant, sans rapport) sous .NET 8
     dans le conteneur `distrobox bg3tools-dotnet` (Fedora). `dotnet
-Divine/bin/Release/net8.0/Divine.dll` s'exécute et affiche l'usage attendu
+    Divine/bin/Release/net8.0/Divine.dll` s'exécute et affiche l'usage attendu
     (surface d'actions réduite au pak/resource/loca, confirmant le trim).
     Reproductible via `scripts/lslib_fork_linux_build/build_lslib_fork_linux.sh`
-    (clone + applique `scripts/lslib_fork_linux_build/0001-linux-build-pak-only-scope.patch` - build ; script testé de bout en bout).
+    (clone + applique `scripts/lslib_fork_linux_build/0001-linux-build-pak-only-scope.patch`
+    + build ; script testé de bout en bout).
   - **Poussé sur `ElwinghL/lslib`** (2026-09-13, autorisation explicite d'Elwingh) :
     branche `fix/LinuxBuildPakOnlyScope`, 2 commits (le trim de périmètre ci-dessus
     - le fix `TryToValidatePath` du second patch, voir plus bas) — build revérifié
@@ -471,16 +512,64 @@ synthetic,report,strings}.py`. bg3rustpaklib mesuré "natif" via
   `docs/superpowers/specs/2026-09-15-pak-tools-benchmark-design.md`.
   Rapport versionné : `docs/pak-tools-benchmark/` (Markdown + 2 PNG
   matplotlib, `reports/` reste gitignored — sortie JSON brute locale/
-  régénérable). **Limitation actée** : aucune mesure sur de vrais `.pak`
-  BG3 dans cette passe (décision explicite en cours de route) —
-  uniquement des fixtures synthétiques (`scripts/pak_bench/synthetic.py`),
-  qui valident le pipeline de mesure bout en bout (round-trip vérifié) mais
-  pas la performance absolue attendue sur de vraies archives. Pas
-  d'Artifact HTML interactif dans cette passe (suivi possible, mêmes
-  données JSON). READMEs `bg3pythonpaklib`/`bg3rustpaklib` (`.md`+`.fr.md`)
-  mis à jour avec un pointeur vers le nouveau harnais, sans chiffres
-  fabriqués. Statut : branche prête à relire/merger par Elwingh (pas
-  mergée depuis ce sous-agent, conformément à la consigne de coordination).
+  régénérable). **Limitation initiale de cette passe, levée depuis (voir
+  §22b/22c)** : au moment de 22a, aucune mesure sur de vrais `.pak` BG3
+  n'avait encore été faite — uniquement des fixtures synthétiques
+  (`scripts/pak_bench/synthetic.py`), qui valident le pipeline de mesure
+  bout en bout (round-trip vérifié) mais pas la performance absolue
+  attendue sur de vraies archives. Pas d'Artifact HTML interactif dans
+  cette passe (suivi possible, mêmes données JSON). READMEs
+  `bg3pythonpaklib`/`bg3rustpaklib` (`.md`+`.fr.md`) mis à jour avec un
+  pointeur vers le nouveau harnais, sans chiffres fabriqués. Statut :
+  branche prête à relire/merger par Elwingh (pas mergée depuis ce
+  sous-agent, conformément à la consigne de coordination).
+- ~~**22b.** Lecture mesurée sur les vrais `.pak` du jeu (pas seulement
+  synthétiques) et bug de décompression d'archive solide trouvé au
+  passage~~ — fait : en régénérant `rust-native_report.json` contre les 48
+  vrais `.pak` de `Data/` (lecture seule, rien écrit), `LowTex.pak`
+  (archive solide réelle du jeu de base) échouait avec `Invalid LZ4 block
+  size: 2147549184 > ...`. Cause racine, deux bugs distincts dans
+  `Tools/bg3rustpaklib/src/package/reader.rs` :
+  1. `decompress_solid_archive()` découpait le frame LZ4 7 octets trop
+     tard (à l'offset du premier fichier, qui pointe déjà après l'en-tête
+     LZ4 minimal de 7 octets, au lieu du vrai début du frame) — le magic
+     number LZ4 était donc absent de la tranche passée au décodeur, qui
+     retombait sur un chemin heuristique "legacy" produisant des tailles
+     de bloc aberrantes.
+  2. Les offsets décompressés cumulés étaient assignés dans l'ordre de la
+     table de fichiers, pas dans l'ordre de packing physique
+     (`entry.offset` croissant) — désormais trié avant accumulation.
+  3. `PackagedFile::size()` retombait sur `size_on_disk` pour toute entrée
+     non individuellement compressée (repli correct pour une entrée
+     classique, cf. le bug `UncompressedSize=0` déjà documenté côté
+     Python en section 1 ci-dessus) — mais faux pour une entrée d'archive
+     solide, où `compression_method` vaut toujours `None` au niveau
+     entrée et `size_on_disk` sert au calcul de bornes du frame, pas à la
+     taille décompressée. `size()` est désormais solid-aware.
+  Régression ajoutée : `test_lowtex_solid_archive_decompresses`
+  (`Tools/bg3rustpaklib/tests/pak_integration_tests.rs`, fixture réelle
+  locale gitignored `tests/paks/solid/LowTex.pak`) — vérifie que chaque
+  entrée décompresse exactement à sa taille déclarée. Après fix : 0/48
+  vraies erreurs (les 22 "erreurs" restantes dans le rapport sont
+  attendues — fichiers de continuation `*_N.pak` d'archives multi-parties,
+  que le harnais liste à tort comme des `.pak` indépendants ; annoté dans
+  le rapport plutôt que corrigé, périmètre séparé). Rapport
+  `docs/pak-tools-benchmark/` régénéré avec ces vrais chiffres.
+- ~~**22c.** Création/édition mesurées sur du vrai contenu (pas seulement
+  synthétique)~~ — fait : `scripts/pak_bench_cli.py create`/`edit`
+  attendent des dossiers source réels (pas des `.pak`, ils n'éditent pas
+  un `.pak` existant, ils en créent un puis le modifient) — contenu réel
+  obtenu en extrayant trois vrais `.pak` du jeu de base
+  (`GamePlatform.pak` 43 fichiers/468 Ko, `PsoCache.pak` 1 fichier/3,1 Mo,
+  `LowTex.pak` 5991 fichiers/64 Mo — la même archive solide que §22b) via
+  un exemple Rust jetable (`Package::extract_all`, supprimé après usage).
+  9 runs create + 9 edit (single/batch confondus), 0 échec, 100%
+  round-trip. Divine.exe toujours non exercé sur création/édition (pas de
+  binaire Wine dans cet environnement). Rapport `docs/pak-tools-benchmark/`
+  régénéré une nouvelle fois avec ces chiffres (remplace les chiffres
+  synthétiques précédents dans le tableau création/édition ; les fixtures
+  synthétiques restent disponibles via `--synthetic` pour des profils de
+  taille contrôlés).
 
 ### 12. Release standalone
 
