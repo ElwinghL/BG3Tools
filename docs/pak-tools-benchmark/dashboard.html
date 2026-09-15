@@ -1,0 +1,7311 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Pak Tools Benchmark</title>
+<style>
+  :root {
+    color-scheme: light;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    --surface-1: #fcfcfb;
+    --surface-2: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11,11,11,0.10);
+    --good: #0ca30c;
+    --critical: #d03b3b;
+    --serious-bg: #fdeee8;
+    --serious-border: #ec835a;
+    /* categorical: fixed order — divine / rust-pipeline / rust-native / python */
+    --s-divine: #2a78d6;
+    --s-rust-pipeline: #eb6834;
+    --s-rust-native: #1baf7a;
+    --s-python: #eda100;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --surface-2: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255,255,255,0.10);
+      --good: #0ca30c;
+      --critical: #e66767;
+      --serious-bg: #2a1f19;
+      --serious-border: #d95926;
+      --s-divine: #3987e5;
+      --s-rust-pipeline: #d95926;
+      --s-rust-native: #199e70;
+      --s-python: #c98500;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --surface-2: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --good: #0ca30c;
+    --critical: #e66767;
+    --serious-bg: #2a1f19;
+    --serious-border: #d95926;
+    --s-divine: #3987e5;
+    --s-rust-pipeline: #d95926;
+    --s-rust-native: #199e70;
+    --s-python: #c98500;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-2);
+    color: var(--text-primary);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    padding: 20px 16px 48px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin: 0 0 24px; }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .card p { color: var(--text-secondary); font-size: 12.5px; }
+  .card p.small { font-size: 12px; color: var(--text-muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+  th { color: var(--text-secondary); font-weight: 600; position: sticky; top: 0; background: var(--surface-1); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .matrix td, .matrix th { white-space: normal; }
+  .yes { color: var(--good); font-weight: 600; }
+  .no { color: var(--text-muted); }
+  .partial { color: var(--serious-border); font-weight: 600; }
+
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin: 8px 0 16px; font-size: 12px; color: var(--text-secondary); }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+
+  .chart-group { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
+  .chart-group:last-child { margin-bottom: 0; }
+  .facet-title { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 4px 0 2px; }
+  .bar-row { display: grid; grid-template-columns: 190px 1fr 92px; align-items: center; gap: 10px; padding: 3px 0; }
+  .bar-label { font-size: 12.5px; color: var(--text-secondary); text-align: right; }
+  .bar-track { position: relative; height: 20px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+  .bar-seg { position: absolute; top: 0; bottom: 0; border-radius: 4px; cursor: default; }
+  .bar-value { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+
+  .ce-chart { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-items: end; height: 200px; margin: 10px 0 4px; }
+  .ce-col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 6px; }
+  .ce-bar-wrap { position: relative; width: 46px; height: 100%; display: flex; align-items: flex-end; }
+  .ce-bar { width: 100%; border-radius: 4px 4px 2px 2px; background: var(--s-rust-native); position: relative; cursor: default; min-height: 3px; }
+  .ce-whisker { position: absolute; left: 50%; width: 2px; background: var(--axis); transform: translateX(-50%); }
+  .ce-label { font-size: 11.5px; color: var(--text-secondary); text-align: center; }
+  .ce-val { font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .filters input[type="text"] {
+    flex: 1 1 220px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-primary); font: inherit;
+  }
+  .chip {
+    padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-secondary); font-size: 12.5px; cursor: pointer; user-select: none;
+  }
+  .chip[aria-pressed="true"] { background: var(--s-divine); border-color: var(--s-divine); color: #fff; }
+  .table-scroll { max-height: 440px; overflow: auto; border: 1px solid var(--grid); border-radius: 8px; }
+  tr.highlight td { background: var(--serious-bg); }
+  tr.highlight td:first-child { box-shadow: inset 3px 0 0 var(--serious-border); }
+  .err-badge { color: var(--critical); font-size: 11px; }
+  .ok-badge { color: var(--good); font-size: 11px; }
+  .dash { color: var(--text-muted); }
+  .count { color: var(--text-muted); font-size: 12px; margin-top: 6px; }
+
+  .tooltip {
+    position: fixed; pointer-events: none; z-index: 50;
+    background: var(--text-primary); color: var(--surface-1);
+    font-size: 11.5px; padding: 6px 9px; border-radius: 6px;
+    max-width: 280px; box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    opacity: 0; transition: opacity 0.08s ease; white-space: pre-line;
+  }
+  .tooltip.show { opacity: 1; }
+
+  footer.note { color: var(--text-muted); font-size: 11.5px; margin-top: 28px; }
+  a { color: var(--s-divine); }
+  code { background: var(--surface-2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+</style>
+
+<div class="wrap">
+  <h1>Benchmark comparatif — outils .pak BG3</h1>
+  <p class="subtitle">
+    Divine.exe (LSLib, Wine/Proton) · bg3pythonpaklib · bg3rustpaklib (natif et
+    pipeline PyO3 de production) — mesuré aujourd'hui sur de vrais fichiers
+    <code>.pak</code> de Baldur's Gate 3 (48 du jeu de base + 205 de mods actifs
+    pour la lecture, 3 vrais <code>.pak</code> sources pour création/édition).
+  </p>
+
+  <div class="card">
+    <h2>Matrice de capacités</h2>
+    <table class="matrix">
+      <thead><tr><th>Capacité</th><th>Divine.exe (LSLib)</th><th>bg3pythonpaklib</th><th>bg3rustpaklib</th></tr></thead>
+      <tbody>
+        <tr><td>Lecture pak (index, extraction)</td><td class="yes">Oui</td><td class="yes">Oui</td><td class="yes">Oui</td></tr>
+        <tr><td>Lecture batch (N pak)</td><td class="yes">Oui <span class="dash">(1 process/pak, coût Wine/pak)</span></td><td class="yes">Oui <span class="dash">(in-process)</span></td><td class="yes">Oui <span class="dash">(in-process)</span></td></tr>
+        <tr><td>Création pak (from scratch)</td><td class="yes">Oui</td><td class="no">Non (lecture seule)</td><td class="yes">Oui</td></tr>
+        <tr><td>Édition pak</td><td class="yes">Oui <span class="dash">(extract/modifier/recreate)</span></td><td class="no">Non</td><td class="yes">Oui <span class="dash">(idem)</span></td></tr>
+        <tr><td>Archives solides, API async, .loca</td><td class="partial">Partiel</td><td class="no">Non</td><td class="yes">Oui</td></tr>
+      </tbody>
+    </table>
+    <p class="small">Les cases « Non » ne sont pas mesurées en perf — juste actées comme écart fonctionnel (voir <code>.claude/TODO.md</code> §1f-1i).</p>
+  </div>
+
+  <div class="card">
+    <h2>Lecture — temps par outil (index vs contenu)</h2>
+    <p>Chaque outil dans son jus (barre « natif/pipeline direct ») — bg3rustpaklib apparaît deux fois : mesuré nativement (binaire release, sans FFI) et via le binding PyO3 tel qu'utilisé en production dans <code>bg3_mod_tui</code>. Ce sont deux chiffres différents, jamais mélangés.</p>
+    <div class="legend">
+      <div class="legend-item"><span class="swatch" style="background:var(--s-divine)"></span>Indexation</div>
+      <div class="legend-item"><span class="swatch" style="background:var(--s-rust-pipeline)"></span>Lecture de contenu</div>
+    </div>
+    <div id="read-charts"></div>
+  </div>
+
+  <div class="card">
+    <h2>Création / édition — bg3rustpaklib (médiane, min–max)</h2>
+    <p>9 runs par scénario, sur du contenu réel extrait de 3 vrais <code>.pak</code> (GamePlatform.pak 43 fichiers/468 Ko, PsoCache.pak 1 fichier/3,1 Mo, LowTex.pak 5991 fichiers/64 Mo). 0 échec, 100% round-trip vérifié sur les 36 runs. Seul bg3rustpaklib a des chiffres ici : bg3pythonpaklib est lecture seule ; Divine.exe non exercé sur ces scénarios cette passe (pas de binaire Wine disponible, <code>--skip-divine</code>).</p>
+    <div class="ce-chart" id="ce-chart"></div>
+    <p class="count" id="ce-caption"></p>
+  </div>
+
+  <div class="card">
+    <h2>Détail par fichier .pak</h2>
+    <p>253 fichiers réels (48 du jeu de base + 205 de mods). Cherche un nom, filtre par jeu de données, ou saute directement au cas <strong>LowTex.pak</strong> — l'archive solide dont le bug de décompression a été trouvé et corrigé aujourd'hui dans bg3rustpaklib (pas encore publié sur crates.io) : OK en natif, en échec en pipeline (version crates.io).</p>
+    <div class="filters">
+      <input type="text" id="search" placeholder="Filtrer par nom de .pak…" />
+      <button class="chip" data-ds="all" aria-pressed="true">Tous (253)</button>
+      <button class="chip" data-ds="data">Jeu de base (48)</button>
+      <button class="chip" data-ds="mods">Mods (205)</button>
+      <button class="chip" id="lowtex-btn">⚠ Voir LowTex.pak</button>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>.pak</th><th>Jeu</th>
+            <th class="num">Rust natif</th><th class="num">Rust pipeline</th>
+            <th class="num">Python</th><th class="num">Divine.exe</th>
+          </tr>
+        </thead>
+        <tbody id="detail-body"></tbody>
+      </table>
+    </div>
+    <p class="count" id="detail-count"></p>
+  </div>
+
+  <div class="card">
+    <h2>Méthodologie et limitations</h2>
+    <p>Chaque outil est mesuré <strong>dans son jus</strong> (perf native/brute, sans pont intermédiaire) ET, quand c'est pertinent, dans le <strong>pipeline réel</strong> de BG3Tools (binding FFI, subprocess Wine/Proton) — deux séries distinctes plutôt qu'un chiffre mélangé.</p>
+    <p>Toute la lecture est mesurée sur de vrais <code>.pak</code> du jeu (pas de fixtures synthétiques) : 48 fichiers du jeu de base, 205 de mods actifs. Les 22 erreurs de bg3pythonpaklib/bg3rustpaklib sur le lot « jeu de base » sont attendues : ce sont des parties de continuation d'archives multi-parties (<code>*_N.pak</code>, ex. <code>Textures_1.pak</code>) — seule la partie 0 porte l'en-tête LSPK ; le taux d'erreur réel sur ces 48 fichiers est 0/48.</p>
+    <p>Divine.exe sous Linux passe par Wine/Proton pour la lecture — non représentatif du natif Windows (gap déjà documenté dans les README de bg3pythonpaklib/bg3rustpaklib). Run complet (mode per-file, un lancement Wine par <code>.pak</code>) sur les 48 fichiers du jeu de base : 42 réussis, 6 en échec (3 timeouts sur de gros fichiers, 3 crashs probablement OOM sur des archives volumineuses/multi-parties — <code>Gustav.pak</code>, <code>Textures.pak</code>, <code>VirtualTextures.pak</code>). Les 205 <code>.pak</code> de mods n'ont pas été passés par Divine.exe (mode per-file trop lent à cette échelle, mode batch natif cassé en amont — bug LSLib dans <code>CommandLineArguments.GetResourceFormatByString</code>, voir l'encart ci-dessous).</p>
+    <p>Création/édition non exercée pour Divine.exe cette passe (pas de binaire Wine disponible dans cet environnement) ; le code d'invocation existe et suit le pattern déjà en prod, mais reste non testé en exécution.</p>
+    <p class="small" id="divine-note"></p>
+  </div>
+
+  <footer class="note">
+    Généré à partir de <code>reports/*.json</code> (scripts/pak_bench/export_dashboard_data.py) — voir aussi
+    <code>docs/pak-tools-benchmark/pak_tools_benchmark.md</code> et
+    <code>docs/superpowers/specs/2026-09-15-pak-tools-benchmark-design.md</code>.
+  </footer>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script id="dashboard-data" type="application/json">{
+  "read_summary": [
+    {
+      "tool": "divine",
+      "label": "Divine.exe",
+      "mode": "data",
+      "pak_count": 48,
+      "errors": 6,
+      "index_seconds": 309.7873,
+      "content_seconds": 3.1349,
+      "total_seconds": 312.9223,
+      "generated_at": "2026-09-15T17:48:46.371389+00:00"
+    },
+    {
+      "tool": "python",
+      "label": "bg3pythonpaklib",
+      "mode": "data",
+      "pak_count": 48,
+      "errors": 22,
+      "index_seconds": 1.9767,
+      "content_seconds": 5.1273,
+      "total_seconds": 7.104,
+      "generated_at": "2026-09-15T17:25:23.452363+00:00"
+    },
+    {
+      "tool": "rust_native",
+      "label": "bg3rustpaklib (natif)",
+      "mode": "data",
+      "pak_count": 48,
+      "errors": 22,
+      "index_seconds": 0.6413,
+      "content_seconds": 2.7676,
+      "total_seconds": 3.4088,
+      "generated_at": "2026-09-15T17:23:36.054784+00:00"
+    },
+    {
+      "tool": "rust_pipeline",
+      "label": "bg3rustpaklib (pipeline PyO3)",
+      "mode": "data",
+      "pak_count": 48,
+      "errors": 23,
+      "index_seconds": 0.5032,
+      "content_seconds": 8.7864,
+      "total_seconds": 9.2896,
+      "generated_at": "2026-09-15T17:28:01.736007+00:00"
+    },
+    {
+      "tool": "python",
+      "label": "bg3pythonpaklib",
+      "mode": "mods",
+      "pak_count": 205,
+      "errors": 0,
+      "index_seconds": 0.1282,
+      "content_seconds": 7.8802,
+      "total_seconds": 8.0084,
+      "generated_at": "2026-09-15T17:26:21.773579+00:00"
+    },
+    {
+      "tool": "rust_native",
+      "label": "bg3rustpaklib (natif)",
+      "mode": "mods",
+      "pak_count": 205,
+      "errors": 0,
+      "index_seconds": 0.0532,
+      "content_seconds": 3.8404,
+      "total_seconds": 3.8936,
+      "generated_at": "2026-09-15T17:23:41.087090+00:00"
+    },
+    {
+      "tool": "rust_pipeline",
+      "label": "bg3rustpaklib (pipeline PyO3)",
+      "mode": "mods",
+      "pak_count": 205,
+      "errors": 0,
+      "index_seconds": 0.1726,
+      "content_seconds": 7.9156,
+      "total_seconds": 8.0882,
+      "generated_at": "2026-09-15T17:28:27.975220+00:00"
+    }
+  ],
+  "read_detail": [
+    {
+      "pak": "Assets.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.011322,
+          "content_s": 0.013829,
+          "entries": 1095
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.001708,
+          "content_s": 0.003963,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000532,
+          "content_s": 0.011355,
+          "entries": 1095
+        },
+        "divine": {
+          "error": null,
+          "index_s": 5.013152,
+          "content_s": 0.00914,
+          "entries": 1095
+        }
+      }
+    },
+    {
+      "pak": "DiceSet01.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000319,
+          "content_s": 0.099686,
+          "entries": 30
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.7e-05,
+          "content_s": 0.013213,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000274,
+          "content_s": 0.076045,
+          "entries": 30
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.520372,
+          "content_s": 0.033349,
+          "entries": 30
+        }
+      }
+    },
+    {
+      "pak": "DiceSet02.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00036,
+          "content_s": 0.046614,
+          "entries": 30
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.9e-05,
+          "content_s": 0.011171,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000689,
+          "content_s": 0.040044,
+          "entries": 30
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.442655,
+          "content_s": 0.039055,
+          "entries": 30
+        }
+      }
+    },
+    {
+      "pak": "DiceSet03.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000204,
+          "content_s": 0.039057,
+          "entries": 30
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.7e-05,
+          "content_s": 0.013131,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000837,
+          "content_s": 0.041983,
+          "entries": 30
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.451193,
+          "content_s": 0.035382,
+          "entries": 30
+        }
+      }
+    },
+    {
+      "pak": "DiceSet06.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000175,
+          "content_s": 0.035531,
+          "entries": 30
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000107,
+          "content_s": 0.011487,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000909,
+          "content_s": 0.038311,
+          "entries": 30
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.451545,
+          "content_s": 0.028666,
+          "entries": 30
+        }
+      }
+    },
+    {
+      "pak": "Effects.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.031796,
+          "content_s": 0.01518,
+          "entries": 11040
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.007478,
+          "content_s": 0.002918,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.005821,
+          "content_s": 0.018358,
+          "entries": 11040
+        },
+        "divine": {
+          "error": null,
+          "index_s": 18.454278,
+          "content_s": 0.01678,
+          "entries": 11040
+        }
+      }
+    },
+    {
+      "pak": "Engine.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.006396,
+          "content_s": 0.008403,
+          "entries": 1408
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00091,
+          "content_s": 0.002039,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002064,
+          "content_s": 0.005862,
+          "entries": 1408
+        },
+        "divine": {
+          "error": null,
+          "index_s": 4.629892,
+          "content_s": 0.004939,
+          "entries": 1408
+        }
+      }
+    },
+    {
+      "pak": "EngineShaders.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.014202,
+          "content_s": 0.002662,
+          "entries": 5007
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.004313,
+          "content_s": 0.000258,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001909,
+          "content_s": 0.003473,
+          "entries": 5007
+        },
+        "divine": {
+          "error": null,
+          "index_s": 8.19935,
+          "content_s": 0.004025,
+          "entries": 5007
+        }
+      }
+    },
+    {
+      "pak": "Game.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.092724,
+          "content_s": 0.048805,
+          "entries": 29250
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.025965,
+          "content_s": 0.000212,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.014257,
+          "content_s": 0.047245,
+          "entries": 29250
+        },
+        "divine": {
+          "error": null,
+          "index_s": 59.608833,
+          "content_s": 0.045832,
+          "entries": 29250
+        }
+      }
+    },
+    {
+      "pak": "GamePlatform.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.005171,
+          "content_s": 0.000506,
+          "entries": 43
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000127,
+          "content_s": 0.000371,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.006593,
+          "content_s": 0.000562,
+          "entries": 43
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.698488,
+          "content_s": 0.001053,
+          "entries": 43
+        }
+      }
+    },
+    {
+      "pak": "Gustav.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.489293,
+          "content_s": 0.14424,
+          "entries": 145832
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.176826,
+          "content_s": 0.001574,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.099799,
+          "content_s": 0.153779,
+          "entries": 145832
+        },
+        "divine": {
+          "error": "Échec Divine.exe : ntsync: up and running.",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "GustavX.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.035593,
+          "content_s": 0.085962,
+          "entries": 5018
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.004154,
+          "content_s": 0.060719,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.047284,
+          "content_s": 0.077976,
+          "entries": 5018
+        },
+        "divine": {
+          "error": null,
+          "index_s": 10.027083,
+          "content_s": 0.118148,
+          "entries": 5018
+        }
+      }
+    },
+    {
+      "pak": "Gustav_NavCloud.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00065,
+          "content_s": 0.083055,
+          "entries": 18
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000152,
+          "content_s": 0.074202,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002213,
+          "content_s": 0.080986,
+          "entries": 18
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.811797,
+          "content_s": 0.084064,
+          "entries": 18
+        }
+      }
+    },
+    {
+      "pak": "Gustav_Textures.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.109644,
+          "content_s": 0.141958,
+          "entries": 28146
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.023099,
+          "content_s": 0.039805,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.013701,
+          "content_s": 0.109584,
+          "entries": 28146
+        },
+        "divine": {
+          "error": null,
+          "index_s": 56.095553,
+          "content_s": 0.09184,
+          "entries": 28146
+        }
+      }
+    },
+    {
+      "pak": "Gustav_Video.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.011397,
+          "content_s": 2.874405,
+          "entries": 3
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.2e-05,
+          "content_s": 1.964068,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.006078,
+          "content_s": 6.446587,
+          "entries": 3
+        },
+        "divine": {
+          "error": null,
+          "index_s": 9.441941,
+          "content_s": 2.351509,
+          "entries": 3
+        }
+      }
+    },
+    {
+      "pak": "Icons.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000247,
+          "content_s": 0.139808,
+          "entries": 14
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.0001,
+          "content_s": 0.093058,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.058122,
+          "content_s": 0.152969,
+          "entries": 14
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.785742,
+          "content_s": 0.129085,
+          "entries": 14
+        }
+      }
+    },
+    {
+      "pak": "LowTex.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.015395,
+          "content_s": 0.004377,
+          "entries": 5991
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.063189,
+          "content_s": 0.000199,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "CorruptedPak: decompression error: Invalid LZ4 block size: 2147549184 > 34041749",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 10.45607,
+          "content_s": 0.005284,
+          "entries": 5991
+        }
+      }
+    },
+    {
+      "pak": "Materials.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.195505,
+          "content_s": 0.050278,
+          "entries": 49914
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.047644,
+          "content_s": 0.000288,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.019903,
+          "content_s": 0.048219,
+          "entries": 49914
+        },
+        "divine": {
+          "error": "Timeout Divine.exe : Command '['/home/elwingh/.local/share/Steam/compatibilitytools.d/Proton-GE Latest/files/bin/wine', '/run/media/system/M2/BG3Tools/Tools/Exp",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "Models.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.477818,
+          "content_s": 0.163892,
+          "entries": 146609
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.178854,
+          "content_s": 0.000433,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.104851,
+          "content_s": 0.141505,
+          "entries": 146609
+        },
+        "divine": {
+          "error": "Timeout Divine.exe : Command '['/home/elwingh/.local/share/Steam/compatibilitytools.d/Proton-GE Latest/files/bin/wine', '/run/media/system/M2/BG3Tools/Tools/Exp",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "Patch8_HotFix9.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.030094,
+          "content_s": 0.114473,
+          "entries": 87
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000173,
+          "content_s": 0.120691,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.041077,
+          "content_s": 0.126854,
+          "entries": 87
+        },
+        "divine": {
+          "error": null,
+          "index_s": 6.186398,
+          "content_s": 0.116708,
+          "entries": 87
+        }
+      }
+    },
+    {
+      "pak": "PsoCache.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000168,
+          "content_s": 0.002551,
+          "entries": 1
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.7e-05,
+          "content_s": 0.002843,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.006703,
+          "content_s": 0.008149,
+          "entries": 1
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.332225,
+          "content_s": 0.003755,
+          "entries": 1
+        }
+      }
+    },
+    {
+      "pak": "Shared.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.031385,
+          "content_s": 0.027316,
+          "entries": 11147
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.008224,
+          "content_s": 0.000488,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.003208,
+          "content_s": 0.010666,
+          "entries": 11147
+        },
+        "divine": {
+          "error": null,
+          "index_s": 16.739701,
+          "content_s": 0.010947,
+          "entries": 11147
+        }
+      }
+    },
+    {
+      "pak": "SharedSoundBanks.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.002469,
+          "content_s": 0.003523,
+          "entries": 133
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000169,
+          "content_s": 0.001908,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002023,
+          "content_s": 0.005976,
+          "entries": 133
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.519789,
+          "content_s": 0.005261,
+          "entries": 133
+        }
+      }
+    },
+    {
+      "pak": "SharedSounds.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.338177,
+          "content_s": 0.146354,
+          "entries": 105402
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.073929,
+          "content_s": 0.001318,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.035202,
+          "content_s": 0.132472,
+          "entries": 105402
+        },
+        "divine": {
+          "error": "Timeout Divine.exe : Command '['/home/elwingh/.local/share/Steam/compatibilitytools.d/Proton-GE Latest/files/bin/wine', '/run/media/system/M2/BG3Tools/Tools/Exp",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "Textures.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.041608,
+          "content_s": 0.205772,
+          "entries": 8413
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.007264,
+          "content_s": 0.031424,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.021518,
+          "content_s": 0.219,
+          "entries": 8413
+        },
+        "divine": {
+          "error": "Échec Divine.exe : ntsync: up and running.",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "Textures_1.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 5.538531,
+          "content_s": 5e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "Textures_2.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.19536,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "Textures_3.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.291642,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.034575,
+          "content_s": 0.629031,
+          "entries": 12990
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.016426,
+          "content_s": 0.315782,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.007597,
+          "content_s": 0.788444,
+          "entries": 12990
+        },
+        "divine": {
+          "error": "Échec Divine.exe : ntsync: up and running.",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_1.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.63931,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_10.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.160049,
+          "content_s": 3e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_11.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.178484,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_12.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.2643,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_13.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.115283,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_14.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.186578,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_15.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.190663,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_16.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.206854,
+          "content_s": 5e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_17.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.117671,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_18.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.19024,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_19.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.151945,
+          "content_s": 6e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_2.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.162097,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_3.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.247225,
+          "content_s": 3e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_4.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.19351,
+          "content_s": 4e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_5.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.175312,
+          "content_s": 3e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_6.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.222284,
+          "content_s": 6e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_7.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.202841,
+          "content_s": 6e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_8.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.15403,
+          "content_s": 5e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "VirtualTextures_9.pak",
+      "dataset": "data",
+      "tools": {
+        "python": {
+          "error": "UnsupportedPakVersion: Signature LSPK absente (pas un .pak Larian, ou format ancien).",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_native": {
+          "error": "not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": "UnsupportedPakVersion: not a valid PAK file: no valid signature found",
+          "index_s": 0.0,
+          "content_s": 0.0,
+          "entries": 0
+        },
+        "divine": {
+          "error": null,
+          "index_s": 3.137084,
+          "content_s": 3e-06,
+          "entries": 0
+        }
+      }
+    },
+    {
+      "pak": "AV Item Shipment Framework.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000285,
+          "content_s": 0.01101,
+          "entries": 58
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000329,
+          "content_s": 0.004484,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.0002,
+          "content_s": 0.013765,
+          "entries": 58
+        }
+      }
+    },
+    {
+      "pak": "AbsoluteDefeat.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000223,
+          "content_s": 0.000133,
+          "entries": 35
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000142,
+          "content_s": 6e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000188,
+          "content_s": 0.000167,
+          "entries": 35
+        }
+      }
+    },
+    {
+      "pak": "Aloija_New_Heads_8c611d4b-75d9-40eb-ad61-15f898396e12.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001149,
+          "content_s": 0.692675,
+          "entries": 451
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000496,
+          "content_s": 0.119433,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000243,
+          "content_s": 0.531784,
+          "entries": 451
+        }
+      }
+    },
+    {
+      "pak": "AnimationUnlocker_7131033f-821a-3993-dad4-5bc235cbeb3b.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000214,
+          "content_s": 0.0116,
+          "entries": 17
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000183,
+          "content_s": 0.008932,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.010359,
+          "content_s": 0.009738,
+          "entries": 17
+        }
+      }
+    },
+    {
+      "pak": "AppearanceEditEnhanced.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000228,
+          "content_s": 0.000292,
+          "entries": 16
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000108,
+          "content_s": 0.00011,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000367,
+          "content_s": 0.000318,
+          "entries": 16
+        }
+      }
+    },
+    {
+      "pak": "AppearanceEditOrigins.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000366,
+          "content_s": 0.364417,
+          "entries": 10
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.4e-05,
+          "content_s": 0.181293,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000141,
+          "content_s": 0.446603,
+          "entries": 10
+        }
+      }
+    },
+    {
+      "pak": "ArmouriesOfTheAllegiant.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000852,
+          "content_s": 0.045299,
+          "entries": 343
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000625,
+          "content_s": 0.03029,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000217,
+          "content_s": 0.054198,
+          "entries": 343
+        }
+      }
+    },
+    {
+      "pak": "Artificer.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.002052,
+          "content_s": 0.027117,
+          "entries": 688
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.001091,
+          "content_s": 0.019002,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000706,
+          "content_s": 0.025204,
+          "entries": 688
+        }
+      }
+    },
+    {
+      "pak": "Auto Send Food To Camp.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000193,
+          "content_s": 8.1e-05,
+          "entries": 13
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000193,
+          "content_s": 4.2e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000437,
+          "content_s": 9.2e-05,
+          "entries": 13
+        }
+      }
+    },
+    {
+      "pak": "Aza_Addon_Florrick_LongHair_029e63b4-5c63-d6bd-181f-41bdcdf8e645.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000222,
+          "content_s": 0.012153,
+          "entries": 8
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000205,
+          "content_s": 0.005825,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000119,
+          "content_s": 0.009554,
+          "entries": 8
+        }
+      }
+    },
+    {
+      "pak": "Aza_BSG_Gale_32378f72-9a6a-9601-7481-c2117ba648d2.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000319,
+          "content_s": 0.017947,
+          "entries": 66
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000232,
+          "content_s": 0.011846,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000237,
+          "content_s": 0.015865,
+          "entries": 66
+        }
+      }
+    },
+    {
+      "pak": "Aza_BSG_Wyll_70287851-85c4-2882-b065-5b6a14351e0f.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000659,
+          "content_s": 0.021396,
+          "entries": 209
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000347,
+          "content_s": 0.014844,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000642,
+          "content_s": 0.024413,
+          "entries": 209
+        }
+      }
+    },
+    {
+      "pak": "Aza_BetterShadowHound_c5dec426-24f7-cc31-22ff-95df0839324d.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000447,
+          "content_s": 0.070947,
+          "entries": 43
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000159,
+          "content_s": 0.045986,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000802,
+          "content_s": 0.074389,
+          "entries": 43
+        }
+      }
+    },
+    {
+      "pak": "Aza_Laezel_Appearance_58fcb060-9198-909a-f101-f5de041e979b.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000471,
+          "content_s": 0.006089,
+          "entries": 105
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000236,
+          "content_s": 0.00416,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001216,
+          "content_s": 0.005245,
+          "entries": 105
+        }
+      }
+    },
+    {
+      "pak": "Aza_Laezel_BetterGear_b637575e-1188-a203-7645-8dfbaf610f07.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000699,
+          "content_s": 0.047042,
+          "entries": 184
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000481,
+          "content_s": 0.037403,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000335,
+          "content_s": 0.061924,
+          "entries": 184
+        }
+      }
+    },
+    {
+      "pak": "Aza_Minthara_Redesign_761958a6-5c80-60ba-a050-9d1c80c18e55.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000516,
+          "content_s": 0.209689,
+          "entries": 94
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000187,
+          "content_s": 0.073584,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001684,
+          "content_s": 0.231329,
+          "entries": 94
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_Cazador_Blossom_1defbcf2-c053-49e2-4e83-162d3ced3a38.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001221,
+          "content_s": 0.055241,
+          "entries": 412
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000605,
+          "content_s": 0.036363,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001707,
+          "content_s": 0.072469,
+          "entries": 412
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_ChurchOfShar_Full_519cdf53-c4e7-db87-338a-971dded325fe.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000765,
+          "content_s": 0.012768,
+          "entries": 179
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000259,
+          "content_s": 0.010021,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001576,
+          "content_s": 0.013663,
+          "entries": 179
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_GortashBeard_498e72b4-e34b-96cc-07ce-b3576c5dbff3.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000285,
+          "content_s": 0.005577,
+          "entries": 12
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000114,
+          "content_s": 0.003059,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00053,
+          "content_s": 0.004431,
+          "entries": 12
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_Gortash_4bf296c4-9e10-8d9d-cf8e-8b18d2a8f8f6.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000203,
+          "content_s": 0.004689,
+          "entries": 13
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00032,
+          "content_s": 0.005523,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000506,
+          "content_s": 0.006378,
+          "entries": 13
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_Mystra_SRDivinityPatch_OriginalHead.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000206,
+          "content_s": 0.000123,
+          "entries": 6
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000102,
+          "content_s": 5.9e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000305,
+          "content_s": 0.000184,
+          "entries": 6
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_Mystra_da97ca7a-51cd-e686-6ea3-7a05cf64f0cf.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000187,
+          "content_s": 0.004792,
+          "entries": 7
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000125,
+          "content_s": 0.00333,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000111,
+          "content_s": 0.004367,
+          "entries": 7
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_Orin_4aa8dc34-915c-fbae-9416-22b5ac6d6ea0.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000689,
+          "content_s": 0.097121,
+          "entries": 168
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000386,
+          "content_s": 0.054999,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000442,
+          "content_s": 0.111485,
+          "entries": 168
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_PaladinsOfTyr_0976406f-9578-6170-91b7-df69bc1ea5e7.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000199,
+          "content_s": 0.006037,
+          "entries": 20
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000368,
+          "content_s": 0.003936,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002167,
+          "content_s": 0.005072,
+          "entries": 20
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_TheEmeraldGrove_74cb2214-5ddb-8fa6-9f6b-1f9be9bba6f3.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00084,
+          "content_s": 0.001314,
+          "entries": 261
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000476,
+          "content_s": 0.000585,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000411,
+          "content_s": 0.001303,
+          "entries": 261
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_VampireSpawns_5bfc90ea-d4ef-ee45-38fd-df5583ca0d97.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000417,
+          "content_s": 0.010192,
+          "entries": 64
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000162,
+          "content_s": 0.005962,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000273,
+          "content_s": 0.010638,
+          "entries": 64
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_WaukensInn_a74d34b5-899a-0a12-8afc-5ce33e3cfaaf.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000393,
+          "content_s": 0.010818,
+          "entries": 61
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000162,
+          "content_s": 0.007569,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00076,
+          "content_s": 0.013156,
+          "entries": 61
+        }
+      }
+    },
+    {
+      "pak": "Aza_NPCre_ZhentarimHideout_77b57cd7-abca-f545-d39d-fae4667d5062.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000367,
+          "content_s": 0.01572,
+          "entries": 53
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000154,
+          "content_s": 0.007566,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00037,
+          "content_s": 0.014183,
+          "entries": 53
+        }
+      }
+    },
+    {
+      "pak": "Aza_Orin_NPCre-Makeover_Mashup_b13a4cbf-43a2-7725-5e38-0c4da6fabcf2.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000981,
+          "content_s": 0.202036,
+          "entries": 222
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000319,
+          "content_s": 0.076567,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000539,
+          "content_s": 0.172519,
+          "entries": 222
+        }
+      }
+    },
+    {
+      "pak": "Aza_Shart_Halfplate_edec7b9d-0063-1df6-7b30-d1d4b9a0adc3.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000528,
+          "content_s": 0.007909,
+          "entries": 37
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000117,
+          "content_s": 0.002725,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00514,
+          "content_s": 0.005647,
+          "entries": 37
+        }
+      }
+    },
+    {
+      "pak": "Aza_Weapons_Retexture_09015e8c-83e0-ce30-3e4b-4b7a6bce291d.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000559,
+          "content_s": 0.013505,
+          "entries": 169
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000243,
+          "content_s": 0.00786,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000401,
+          "content_s": 0.014208,
+          "entries": 169
+        }
+      }
+    },
+    {
+      "pak": "BOOOALsBenedictionPotion.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000298,
+          "content_s": 8.5e-05,
+          "entries": 8
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000148,
+          "content_s": 1.7e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000568,
+          "content_s": 5.1e-05,
+          "entries": 8
+        }
+      }
+    },
+    {
+      "pak": "BackstabbingFramework.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000323,
+          "content_s": 0.014659,
+          "entries": 20
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00011,
+          "content_s": 0.010546,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000182,
+          "content_s": 0.017401,
+          "entries": 20
+        }
+      }
+    },
+    {
+      "pak": "BetterContextMenu_f9dd909a-3607-f8e1-da13-b795884f68b5.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000335,
+          "content_s": 0.000679,
+          "entries": 73
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00013,
+          "content_s": 0.000225,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000234,
+          "content_s": 0.000606,
+          "entries": 73
+        }
+      }
+    },
+    {
+      "pak": "BetterHotbar_191c52f3-07bb-f83e-e1db-bb06ea262000.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000293,
+          "content_s": 0.002734,
+          "entries": 66
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000154,
+          "content_s": 0.001364,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000222,
+          "content_s": 0.003395,
+          "entries": 66
+        }
+      }
+    },
+    {
+      "pak": "BetterInventoryUI_6b585be8-ed73-7347-2c58-73146e22b7d4.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000396,
+          "content_s": 0.000743,
+          "entries": 74
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000279,
+          "content_s": 0.000204,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000234,
+          "content_s": 0.000557,
+          "entries": 74
+        }
+      }
+    },
+    {
+      "pak": "BetterTargetInfo_1186f940-7338-fe24-6649-aff698541b7f.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000242,
+          "content_s": 0.000713,
+          "entries": 35
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00012,
+          "content_s": 0.000554,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00024,
+          "content_s": 0.000862,
+          "entries": 35
+        }
+      }
+    },
+    {
+      "pak": "BetterTooltips_bc1081b4-e2a9-ce49-8b60-6f64b7eecce4.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000337,
+          "content_s": 0.00225,
+          "entries": 62
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000133,
+          "content_s": 0.000919,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000396,
+          "content_s": 0.001917,
+          "entries": 62
+        }
+      }
+    },
+    {
+      "pak": "BiggerPotionThrowRadius.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000234,
+          "content_s": 0.000345,
+          "entries": 3
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8e-05,
+          "content_s": 0.000134,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000244,
+          "content_s": 0.000247,
+          "entries": 3
+        }
+      }
+    },
+    {
+      "pak": "Book-club-with-Gale_87cbd5af-34b2-f511-7606-93b389a09cbd.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000249,
+          "content_s": 0.112958,
+          "entries": 26
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000123,
+          "content_s": 0.05704,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000139,
+          "content_s": 0.105284,
+          "entries": 26
+        }
+      }
+    },
+    {
+      "pak": "BushyMinthara_4facb1ee-f04c-a639-3ed4-a858363fa574.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000221,
+          "content_s": 0.001152,
+          "entries": 6
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.0001,
+          "content_s": 0.00099,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000881,
+          "content_s": 0.001029,
+          "entries": 6
+        }
+      }
+    },
+    {
+      "pak": "Camp-Scene-Overhaul_d756bfd1-e403-8ce1-9f81-c6c988a60837.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000242,
+          "content_s": 0.002247,
+          "entries": 45
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000145,
+          "content_s": 0.001114,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000214,
+          "content_s": 0.00236,
+          "entries": 45
+        }
+      }
+    },
+    {
+      "pak": "ChronurgyMagic.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000565,
+          "content_s": 0.030029,
+          "entries": 161
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000212,
+          "content_s": 0.012239,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000281,
+          "content_s": 0.014683,
+          "entries": 161
+        }
+      }
+    },
+    {
+      "pak": "CircleofSporesEnhanced.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00019,
+          "content_s": 0.003759,
+          "entries": 14
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000228,
+          "content_s": 0.004354,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000209,
+          "content_s": 0.003925,
+          "entries": 14
+        }
+      }
+    },
+    {
+      "pak": "CircleofStormchasers.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000309,
+          "content_s": 0.023686,
+          "entries": 60
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00025,
+          "content_s": 0.021565,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000361,
+          "content_s": 0.025243,
+          "entries": 60
+        }
+      }
+    },
+    {
+      "pak": "CircleofWildfire.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00027,
+          "content_s": 0.009671,
+          "entries": 36
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000116,
+          "content_s": 0.008727,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002187,
+          "content_s": 0.010274,
+          "entries": 36
+        }
+      }
+    },
+    {
+      "pak": "CircleoftheBlighted.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000402,
+          "content_s": 0.02993,
+          "entries": 63
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000304,
+          "content_s": 0.021391,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000235,
+          "content_s": 0.034083,
+          "entries": 63
+        }
+      }
+    },
+    {
+      "pak": "CircleoftheShepherd.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000371,
+          "content_s": 0.035367,
+          "entries": 69
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000164,
+          "content_s": 0.024322,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000638,
+          "content_s": 0.041202,
+          "entries": 69
+        }
+      }
+    },
+    {
+      "pak": "ClassSpecializationFeats.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000209,
+          "content_s": 0.000253,
+          "entries": 11
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000103,
+          "content_s": 0.000133,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000555,
+          "content_s": 0.000355,
+          "entries": 11
+        }
+      }
+    },
+    {
+      "pak": "ClockworkSoul.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000328,
+          "content_s": 0.027042,
+          "entries": 48
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000212,
+          "content_s": 0.018449,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000237,
+          "content_s": 0.034121,
+          "entries": 48
+        }
+      }
+    },
+    {
+      "pak": "CollegeofSpirits.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000441,
+          "content_s": 0.034519,
+          "entries": 111
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000167,
+          "content_s": 0.022158,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000276,
+          "content_s": 0.038795,
+          "entries": 111
+        }
+      }
+    },
+    {
+      "pak": "ColorsNewRarities_91a2adb5-b303-c25f-3b40-1bdc8adc0478.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00044,
+          "content_s": 0.000728,
+          "entries": 99
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000183,
+          "content_s": 0.000195,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000239,
+          "content_s": 0.000697,
+          "entries": 99
+        }
+      }
+    },
+    {
+      "pak": "CommunityLibrary.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000845,
+          "content_s": 0.00065,
+          "entries": 311
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000577,
+          "content_s": 0.000517,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000254,
+          "content_s": 0.000633,
+          "entries": 311
+        }
+      }
+    },
+    {
+      "pak": "Companion Gale Can Consume Shadow Weave.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000259,
+          "content_s": 3.5e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000169,
+          "content_s": 1e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000209,
+          "content_s": 3e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "CompatibilityFramework.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000354,
+          "content_s": 0.00036,
+          "entries": 59
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000132,
+          "content_s": 0.000117,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000163,
+          "content_s": 0.00036,
+          "entries": 59
+        }
+      }
+    },
+    {
+      "pak": "Customized Subclass Icons.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000448,
+          "content_s": 0.023169,
+          "entries": 114
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000158,
+          "content_s": 0.014466,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000453,
+          "content_s": 0.026805,
+          "entries": 114
+        }
+      }
+    },
+    {
+      "pak": "DEV_NecromancyExpanded.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000264,
+          "content_s": 0.005645,
+          "entries": 37
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000205,
+          "content_s": 0.005532,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000631,
+          "content_s": 0.006659,
+          "entries": 37
+        }
+      }
+    },
+    {
+      "pak": "DFHairPack_da0b99ca-4406-49c1-bef9-3a08621280a2.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000965,
+          "content_s": 0.117878,
+          "entries": 303
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000271,
+          "content_s": 0.053254,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000384,
+          "content_s": 0.126752,
+          "entries": 303
+        }
+      }
+    },
+    {
+      "pak": "DarkJusticiarChakram.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000298,
+          "content_s": 0.015399,
+          "entries": 32
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000183,
+          "content_s": 0.010173,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.004156,
+          "content_s": 0.017877,
+          "entries": 32
+        }
+      }
+    },
+    {
+      "pak": "DatabaseCleaner.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000172,
+          "content_s": 4.5e-05,
+          "entries": 4
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000113,
+          "content_s": 1.7e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000218,
+          "content_s": 4.5e-05,
+          "entries": 4
+        }
+      }
+    },
+    {
+      "pak": "DisplacerSummon.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000209,
+          "content_s": 0.000437,
+          "entries": 23
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000116,
+          "content_s": 0.000229,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000179,
+          "content_s": 0.000471,
+          "entries": 23
+        }
+      }
+    },
+    {
+      "pak": "DnD2024_897914ef-5c96-053c-44af-0be823f895fe.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.010517,
+          "content_s": 0.004997,
+          "entries": 3785
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.003201,
+          "content_s": 0.001536,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001252,
+          "content_s": 0.003917,
+          "entries": 3785
+        }
+      }
+    },
+    {
+      "pak": "DoNotEat.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000473,
+          "content_s": 4.4e-05,
+          "entries": 3
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000167,
+          "content_s": 2.6e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001004,
+          "content_s": 5e-05,
+          "entries": 3
+        }
+      }
+    },
+    {
+      "pak": "DoubleXP_ffc3723d-e199-6f86-f287-f11e7a02fae8.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.0002,
+          "content_s": 7.6e-05,
+          "entries": 4
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.8e-05,
+          "content_s": 3.3e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000133,
+          "content_s": 6.7e-05,
+          "entries": 4
+        }
+      }
+    },
+    {
+      "pak": "DynamicDifficultyScaling_51c67d03-954d-67d8-d5ea-c3f04d7be8bb.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000935,
+          "content_s": 0.004257,
+          "entries": 184
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000246,
+          "content_s": 0.001486,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000235,
+          "content_s": 0.003646,
+          "entries": 184
+        }
+      }
+    },
+    {
+      "pak": "DynamicExtraEncounters_ea4f827e-2da8-616d-24f5-6882a126a25a.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001505,
+          "content_s": 0.003158,
+          "entries": 276
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000314,
+          "content_s": 0.000811,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.0014,
+          "content_s": 0.003198,
+          "entries": 276
+        }
+      }
+    },
+    {
+      "pak": "Enemies_full_rework_1a512b86-3296-b5e3-eee4-c2c29e6e71cf.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000336,
+          "content_s": 0.00072,
+          "entries": 37
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000115,
+          "content_s": 0.000355,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000295,
+          "content_s": 0.000657,
+          "entries": 37
+        }
+      }
+    },
+    {
+      "pak": "Essential_Feats.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000242,
+          "content_s": 0.004401,
+          "entries": 33
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.9e-05,
+          "content_s": 0.003508,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00024,
+          "content_s": 0.006777,
+          "entries": 33
+        }
+      }
+    },
+    {
+      "pak": "Essential_Feats_ASI.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000181,
+          "content_s": 3.7e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.4e-05,
+          "content_s": 9e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000161,
+          "content_s": 3.6e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "Extra_encounters_plus_6324f71c-80f2-6c13-b2e8-1c3441fa6072.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001276,
+          "content_s": 0.00058,
+          "entries": 481
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000482,
+          "content_s": 0.000113,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000689,
+          "content_s": 0.000892,
+          "entries": 481
+        }
+      }
+    },
+    {
+      "pak": "Extra_enemies_honour_a33f6ead-093c-5f68-89ef-1722b980547e.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000549,
+          "content_s": 0.000493,
+          "entries": 109
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000162,
+          "content_s": 0.000117,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000365,
+          "content_s": 0.000523,
+          "entries": 109
+        }
+      }
+    },
+    {
+      "pak": "EyesOfTheBeholder.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000295,
+          "content_s": 0.002129,
+          "entries": 27
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000121,
+          "content_s": 0.0012,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000272,
+          "content_s": 0.002277,
+          "entries": 27
+        }
+      }
+    },
+    {
+      "pak": "FAR_5e1efd5c-5e82-2c2a-6e9e-e070d141262d.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000837,
+          "content_s": 0.002696,
+          "entries": 284
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000345,
+          "content_s": 0.001221,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000302,
+          "content_s": 0.003115,
+          "entries": 284
+        }
+      }
+    },
+    {
+      "pak": "FREE_90d23839-160a-71a4-d777-4b904cf689f8.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000266,
+          "content_s": 0.0012,
+          "entries": 22
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000113,
+          "content_s": 0.00081,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000292,
+          "content_s": 0.001116,
+          "entries": 22
+        }
+      }
+    },
+    {
+      "pak": "FaerunColors_a669cf0b-926c-4d50-988d-59bc089a0df2.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.002259,
+          "content_s": 0.002134,
+          "entries": 742
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.001181,
+          "content_s": 0.000717,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000509,
+          "content_s": 0.002148,
+          "entries": 742
+        }
+      }
+    },
+    {
+      "pak": "FallOfTheValorous.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.002051,
+          "content_s": 0.001683,
+          "entries": 446
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000869,
+          "content_s": 0.000789,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000576,
+          "content_s": 0.001921,
+          "entries": 446
+        }
+      }
+    },
+    {
+      "pak": "Fallen_Mark_As_Read.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000311,
+          "content_s": 0.000158,
+          "entries": 42
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000167,
+          "content_s": 3.2e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000313,
+          "content_s": 0.000172,
+          "entries": 42
+        }
+      }
+    },
+    {
+      "pak": "Fantastical-VariantHuman.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000261,
+          "content_s": 0.000243,
+          "entries": 7
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.5e-05,
+          "content_s": 0.000198,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000181,
+          "content_s": 0.000271,
+          "entries": 7
+        }
+      }
+    },
+    {
+      "pak": "Feat Every 2 Levels.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000194,
+          "content_s": 4.7e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.7e-05,
+          "content_s": 1.9e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000158,
+          "content_s": 5.1e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "FireproofKarlach.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000214,
+          "content_s": 3.2e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.2e-05,
+          "content_s": 3e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000151,
+          "content_s": 3.3e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "FlorrickIsNotDumb.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000345,
+          "content_s": 0.067406,
+          "entries": 8
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000108,
+          "content_s": 0.042378,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000431,
+          "content_s": 0.062625,
+          "entries": 8
+        }
+      }
+    },
+    {
+      "pak": "GaleDinner.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000167,
+          "content_s": 4.9e-05,
+          "entries": 6
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000111,
+          "content_s": 1.1e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001136,
+          "content_s": 4.9e-05,
+          "entries": 6
+        }
+      }
+    },
+    {
+      "pak": "GalePulsingOrb_4ae1b920-f540-9b30-7871-41806d39e8a6.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000241,
+          "content_s": 0.081732,
+          "entries": 30
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000137,
+          "content_s": 0.046346,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000238,
+          "content_s": 0.089947,
+          "entries": 30
+        }
+      }
+    },
+    {
+      "pak": "GoldenDeath.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000274,
+          "content_s": 0.030825,
+          "entries": 30
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000151,
+          "content_s": 0.010698,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002806,
+          "content_s": 0.036074,
+          "entries": 30
+        }
+      }
+    },
+    {
+      "pak": "GreenKnight.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000284,
+          "content_s": 0.019536,
+          "entries": 27
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000126,
+          "content_s": 0.013336,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001366,
+          "content_s": 0.021139,
+          "entries": 27
+        }
+      }
+    },
+    {
+      "pak": "HOTS_01077070-3ffc-e0fc-ce07-018e8a8a88e7.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001757,
+          "content_s": 0.001273,
+          "entries": 470
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000458,
+          "content_s": 0.000254,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000568,
+          "content_s": 0.000928,
+          "entries": 470
+        }
+      }
+    },
+    {
+      "pak": "HT_DrunkenHumming_ad5805ea-45e8-ced4-b304-373dfd86f02b.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000331,
+          "content_s": 0.000699,
+          "entries": 26
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.8e-05,
+          "content_s": 0.000447,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000338,
+          "content_s": 0.001152,
+          "entries": 26
+        }
+      }
+    },
+    {
+      "pak": "HT_Gale_LearnSpell_b82149d0-7db4-61b7-498d-d0c1aea24213.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000264,
+          "content_s": 0.010608,
+          "entries": 10
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000178,
+          "content_s": 0.008369,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00021,
+          "content_s": 0.012972,
+          "entries": 10
+        }
+      }
+    },
+    {
+      "pak": "HT_HugYourShart_47e3d0dc-fcd1-862a-50a4-0e64ec5a4bf6.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000244,
+          "content_s": 0.005352,
+          "entries": 16
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000122,
+          "content_s": 0.003174,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000263,
+          "content_s": 0.005233,
+          "entries": 16
+        }
+      }
+    },
+    {
+      "pak": "HT_KarlachRomance.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000246,
+          "content_s": 0.00037,
+          "entries": 8
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000115,
+          "content_s": 0.000318,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000186,
+          "content_s": 0.000327,
+          "entries": 8
+        }
+      }
+    },
+    {
+      "pak": "HT_KarlachRomanceOverhaul.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000375,
+          "content_s": 0.006652,
+          "entries": 25
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000143,
+          "content_s": 0.004659,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000171,
+          "content_s": 0.006519,
+          "entries": 25
+        }
+      }
+    },
+    {
+      "pak": "HT_LeakingBloodBag.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00019,
+          "content_s": 0.001794,
+          "entries": 5
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000109,
+          "content_s": 0.00209,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000408,
+          "content_s": 0.002644,
+          "entries": 5
+        }
+      }
+    },
+    {
+      "pak": "HT_LongerAstHug_c6970cf1-0b51-6f7a-44ab-7f4a3ee100c0.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000225,
+          "content_s": 0.002541,
+          "entries": 8
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000102,
+          "content_s": 0.001328,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000183,
+          "content_s": 0.002744,
+          "entries": 8
+        }
+      }
+    },
+    {
+      "pak": "HT_MintharaKiss_0d3c8e22-0376-d0a9-41ec-2d4a6f9bceec.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000286,
+          "content_s": 0.101583,
+          "entries": 12
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00011,
+          "content_s": 0.05289,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000269,
+          "content_s": 0.097467,
+          "entries": 12
+        }
+      }
+    },
+    {
+      "pak": "HT_WyllYouSitWithMe_dbd8d236-ca6e-00ce-0a87-9eaffb18d796.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.0003,
+          "content_s": 0.001624,
+          "entries": 20
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000115,
+          "content_s": 0.000919,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00152,
+          "content_s": 0.001667,
+          "entries": 20
+        }
+      }
+    },
+    {
+      "pak": "HairUnlocked_e4aaf48d-06ef-f536-144a-2da821695182.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000393,
+          "content_s": 0.044733,
+          "entries": 52
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000245,
+          "content_s": 0.023325,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000306,
+          "content_s": 0.046572,
+          "entries": 52
+        }
+      }
+    },
+    {
+      "pak": "Head VFX Universal Automatic Patcher (UAP).pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000251,
+          "content_s": 0.000101,
+          "entries": 15
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000111,
+          "content_s": 2.2e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001657,
+          "content_s": 0.000118,
+          "entries": 15
+        }
+      }
+    },
+    {
+      "pak": "Hunted_DynamicAmbushes_Revenge_System.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000323,
+          "content_s": 0.002408,
+          "entries": 66
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000196,
+          "content_s": 0.001965,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00019,
+          "content_s": 0.003037,
+          "entries": 66
+        }
+      }
+    },
+    {
+      "pak": "Icon_Library_SHV.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.002323,
+          "content_s": 0.014927,
+          "entries": 571
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000531,
+          "content_s": 0.008765,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000582,
+          "content_s": 0.019384,
+          "entries": 571
+        }
+      }
+    },
+    {
+      "pak": "Immersive Loading Screens - All In One.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000444,
+          "content_s": 0.279585,
+          "entries": 90
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000228,
+          "content_s": 0.149993,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001067,
+          "content_s": 0.293838,
+          "entries": 90
+        }
+      }
+    },
+    {
+      "pak": "ImpUI_26922ba9-6018-5252-075d-7ff2ba6ed879.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000304,
+          "content_s": 0.001176,
+          "entries": 27
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000119,
+          "content_s": 0.000513,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.012198,
+          "content_s": 0.00127,
+          "entries": 27
+        }
+      }
+    },
+    {
+      "pak": "Improved_Pickpocketing_e51d6185-8dc5-5e9b-db6a-5893a49b040d.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000217,
+          "content_s": 0.000782,
+          "entries": 4
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000173,
+          "content_s": 0.000967,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000198,
+          "content_s": 0.000775,
+          "entries": 4
+        }
+      }
+    },
+    {
+      "pak": "InfiniteConsumables.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000209,
+          "content_s": 0.000596,
+          "entries": 6
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000159,
+          "content_s": 0.000926,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000203,
+          "content_s": 0.000938,
+          "entries": 6
+        }
+      }
+    },
+    {
+      "pak": "InquisitionDomain.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000258,
+          "content_s": 0.041243,
+          "entries": 38
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000104,
+          "content_s": 0.020319,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000198,
+          "content_s": 0.030651,
+          "entries": 38
+        }
+      }
+    },
+    {
+      "pak": "KDEI_VanillaDeityTagAddOn_a26e1eb7-1444-6e85-5019-e455b7e214de.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000267,
+          "content_s": 0.154378,
+          "entries": 10
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000105,
+          "content_s": 0.081625,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00086,
+          "content_s": 0.106473,
+          "entries": 10
+        }
+      }
+    },
+    {
+      "pak": "Karlach Secret Dialog.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000287,
+          "content_s": 7.3e-05,
+          "entries": 8
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000102,
+          "content_s": 1.3e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001942,
+          "content_s": 7e-05,
+          "entries": 8
+        }
+      }
+    },
+    {
+      "pak": "KarlachsGlowingHorns.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000167,
+          "content_s": 5.2e-05,
+          "entries": 3
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.7e-05,
+          "content_s": 2.2e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000124,
+          "content_s": 5.2e-05,
+          "entries": 3
+        }
+      }
+    },
+    {
+      "pak": "KayHairExtensions_85d64b7f-9a87-aeb1-bfdb-96fb031ae2cf.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000644,
+          "content_s": 0.040707,
+          "entries": 163
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000209,
+          "content_s": 0.021083,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000207,
+          "content_s": 0.041374,
+          "entries": 163
+        }
+      }
+    },
+    {
+      "pak": "KayHairMod_9b4ebeae-112c-dccf-ca35-b7c1197aee01.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000428,
+          "content_s": 0.126511,
+          "entries": 65
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000253,
+          "content_s": 0.06677,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002133,
+          "content_s": 0.119811,
+          "entries": 65
+        }
+      }
+    },
+    {
+      "pak": "KayMaterialLibrary_896aa172-c026-9e72-7c91-9d67e17595e6.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000347,
+          "content_s": 0.017383,
+          "entries": 24
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000118,
+          "content_s": 0.010806,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002029,
+          "content_s": 0.018173,
+          "entries": 24
+        }
+      }
+    },
+    {
+      "pak": "KrynnspaceCoreLibrary_d1b9e7a3-3e13-4a52-2369-fa81c6737b86.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000598,
+          "content_s": 0.069628,
+          "entries": 167
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00022,
+          "content_s": 0.035745,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000728,
+          "content_s": 0.059141,
+          "entries": 167
+        }
+      }
+    },
+    {
+      "pak": "KrynnspaceDeitiesAndPassives_656c71ee-e7a1-a922-a701-5bacf3da3f86.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.007376,
+          "content_s": 0.024254,
+          "entries": 911
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.001128,
+          "content_s": 0.008039,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001276,
+          "content_s": 0.019188,
+          "entries": 911
+        }
+      }
+    },
+    {
+      "pak": "KvCampEvents.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000541,
+          "content_s": 0.000258,
+          "entries": 46
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000254,
+          "content_s": 0.000237,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000992,
+          "content_s": 0.000281,
+          "entries": 46
+        }
+      }
+    },
+    {
+      "pak": "LIX_MoreNoblestalk_138e27e8-4385-e758-ad41-7bf24b4d6f06.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000235,
+          "content_s": 0.000286,
+          "entries": 6
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000105,
+          "content_s": 0.000189,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000226,
+          "content_s": 0.00028,
+          "entries": 6
+        }
+      }
+    },
+    {
+      "pak": "LargerPenisWithFloppingPhysics_5bea2ea2-d789-43f8-bdc7-226f61206574.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001101,
+          "content_s": 0.072222,
+          "entries": 378
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000747,
+          "content_s": 0.033722,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000428,
+          "content_s": 0.077745,
+          "entries": 378
+        }
+      }
+    },
+    {
+      "pak": "LewdHint.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000252,
+          "content_s": 9e-05,
+          "entries": 4
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.2e-05,
+          "content_s": 3.7e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001266,
+          "content_s": 7.7e-05,
+          "entries": 4
+        }
+      }
+    },
+    {
+      "pak": "Lightning Wolf.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000379,
+          "content_s": 0.027407,
+          "entries": 59
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000246,
+          "content_s": 0.017512,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000318,
+          "content_s": 0.027945,
+          "entries": 59
+        }
+      }
+    },
+    {
+      "pak": "MANTIS' ARCANE INSPIRED PRESETS - UT+ EOTB.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000439,
+          "content_s": 0.255151,
+          "entries": 96
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000144,
+          "content_s": 0.123562,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000506,
+          "content_s": 0.257193,
+          "entries": 96
+        }
+      }
+    },
+    {
+      "pak": "MANTIS' LE PRINTEMPS PRESETS - EOTB + UT.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000403,
+          "content_s": 0.225157,
+          "entries": 46
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000258,
+          "content_s": 0.095566,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.007633,
+          "content_s": 0.232748,
+          "entries": 46
+        }
+      }
+    },
+    {
+      "pak": "MANTIS' PRESET COLLECTION [VOL. II] - EOTB.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000466,
+          "content_s": 0.29491,
+          "entries": 116
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000266,
+          "content_s": 0.132307,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001876,
+          "content_s": 0.311618,
+          "entries": 116
+        }
+      }
+    },
+    {
+      "pak": "MANTIS' PRESET COLLECTION [VOL. I] - UNIQUE TAV.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000612,
+          "content_s": 0.227246,
+          "entries": 164
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000172,
+          "content_s": 0.093265,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002636,
+          "content_s": 0.237766,
+          "entries": 164
+        }
+      }
+    },
+    {
+      "pak": "MANTIS' TIEFLING DUO PRESETS - UNIQUE TAV + EOTB.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000307,
+          "content_s": 0.235564,
+          "entries": 42
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000242,
+          "content_s": 0.09856,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.003591,
+          "content_s": 0.210745,
+          "entries": 42
+        }
+      }
+    },
+    {
+      "pak": "MB0DOTG_c5a10546-e3b8-4433-be74-5bfd3fc806aa.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000738,
+          "content_s": 0.119956,
+          "entries": 138
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00031,
+          "content_s": 0.045321,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001596,
+          "content_s": 0.123438,
+          "entries": 138
+        }
+      }
+    },
+    {
+      "pak": "MB0KOTS_e41f19f9-2ef3-cfe5-be7a-f6e821b75e6a.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000568,
+          "content_s": 0.096495,
+          "entries": 150
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000192,
+          "content_s": 0.061494,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001833,
+          "content_s": 0.101337,
+          "entries": 150
+        }
+      }
+    },
+    {
+      "pak": "MB0LON_2bc561ff-d41b-fd80-a65d-3a5ea89870d8.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000758,
+          "content_s": 0.044822,
+          "entries": 153
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000364,
+          "content_s": 0.023815,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001332,
+          "content_s": 0.051351,
+          "entries": 153
+        }
+      }
+    },
+    {
+      "pak": "MB0POB_eb9422b5-2ae5-9a75-4534-dd37cbb9b0c4.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000533,
+          "content_s": 0.064564,
+          "entries": 116
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000158,
+          "content_s": 0.032899,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00068,
+          "content_s": 0.069647,
+          "entries": 116
+        }
+      }
+    },
+    {
+      "pak": "MB0SPW_48faceed-f373-376e-4a0d-46222de4085a.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000525,
+          "content_s": 0.113067,
+          "entries": 138
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000343,
+          "content_s": 0.058735,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001097,
+          "content_s": 0.120148,
+          "entries": 138
+        }
+      }
+    },
+    {
+      "pak": "MantisCollectionI_4253e2c0-a1e2-f8ce-92ce-f5365e8f4c61.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000682,
+          "content_s": 0.244709,
+          "entries": 193
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000419,
+          "content_s": 0.159437,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00125,
+          "content_s": 0.24764,
+          "entries": 193
+        }
+      }
+    },
+    {
+      "pak": "Mazzle_Lib.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001377,
+          "content_s": 0.001952,
+          "entries": 426
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000328,
+          "content_s": 0.00121,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00638,
+          "content_s": 0.002344,
+          "entries": 426
+        }
+      }
+    },
+    {
+      "pak": "Minimaps.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000572,
+          "content_s": 0.341106,
+          "entries": 109
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000163,
+          "content_s": 0.150392,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000377,
+          "content_s": 0.383364,
+          "entries": 109
+        }
+      }
+    },
+    {
+      "pak": "Missed-Connections-Shadowheart_e97c9aef-ee55-dfa2-5c9f-3e67cf99e9b2.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000274,
+          "content_s": 0.108156,
+          "entries": 10
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.0001,
+          "content_s": 0.057508,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.002937,
+          "content_s": 0.109985,
+          "entries": 10
+        }
+      }
+    },
+    {
+      "pak": "Mod Configuration Menu.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001075,
+          "content_s": 0.000993,
+          "entries": 242
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000236,
+          "content_s": 0.00041,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001571,
+          "content_s": 0.001195,
+          "entries": 242
+        }
+      }
+    },
+    {
+      "pak": "ModFixer.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000272,
+          "content_s": 3.4e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000104,
+          "content_s": 4e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000256,
+          "content_s": 2.9e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "MoreReactiveCompanions_Configurable.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000211,
+          "content_s": 5.1e-05,
+          "entries": 6
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000102,
+          "content_s": 1.6e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000168,
+          "content_s": 5.1e-05,
+          "entries": 6
+        }
+      }
+    },
+    {
+      "pak": "NF_GaleModsCore_a6f2fef6-5c49-b37b-8145-b84672e2d734.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000235,
+          "content_s": 0.001891,
+          "entries": 8
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000104,
+          "content_s": 0.00148,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000299,
+          "content_s": 0.002288,
+          "entries": 8
+        }
+      }
+    },
+    {
+      "pak": "NMCM_ca8bfe06-88ec-a4e7-b49e-44eb5658f434.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000276,
+          "content_s": 0.124271,
+          "entries": 45
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000128,
+          "content_s": 0.059826,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000282,
+          "content_s": 0.124398,
+          "entries": 45
+        }
+      }
+    },
+    {
+      "pak": "NR - Spell List Addon.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000219,
+          "content_s": 5.1e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.2e-05,
+          "content_s": 3e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001593,
+          "content_s": 6e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "NightOrchidGrace_850739a2-1ead-bd21-9f83-3144bba5a809.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000216,
+          "content_s": 0.125872,
+          "entries": 12
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000188,
+          "content_s": 0.060252,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000144,
+          "content_s": 0.101332,
+          "entries": 12
+        }
+      }
+    },
+    {
+      "pak": "NightPiercer.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000344,
+          "content_s": 0.028983,
+          "entries": 42
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000126,
+          "content_s": 0.03144,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001929,
+          "content_s": 0.031895,
+          "entries": 42
+        }
+      }
+    },
+    {
+      "pak": "NoIntro_7fa55404-7280-11ed-4c26-63116a161862.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000213,
+          "content_s": 3.4e-05,
+          "entries": 3
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000137,
+          "content_s": 8e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000288,
+          "content_s": 3.3e-05,
+          "entries": 3
+        }
+      }
+    },
+    {
+      "pak": "Noira_GalePiercings_26e2c4ac-b8b2-84e0-48fd-528088b32c6a.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00022,
+          "content_s": 0.002626,
+          "entries": 15
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000188,
+          "content_s": 0.002525,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000173,
+          "content_s": 0.00277,
+          "entries": 15
+        }
+      }
+    },
+    {
+      "pak": "Noira_Gale_Beard_Fix_ee18caf2-e482-e8de-4558-4e3c0230e7f8.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000197,
+          "content_s": 0.001698,
+          "entries": 11
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000116,
+          "content_s": 0.001101,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000283,
+          "content_s": 0.001969,
+          "entries": 11
+        }
+      }
+    },
+    {
+      "pak": "Noira_PhysicsPiercingImprovement_67cbbaaf-09a1-ef6e-662a-0925f44eb8a0.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000626,
+          "content_s": 0.002048,
+          "entries": 178
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000247,
+          "content_s": 0.000984,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000388,
+          "content_s": 0.002272,
+          "entries": 178
+        }
+      }
+    },
+    {
+      "pak": "NonLethalRangedAttacksandSpells.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.0002,
+          "content_s": 3.4e-05,
+          "entries": 3
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000128,
+          "content_s": 5e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000348,
+          "content_s": 3.4e-05,
+          "entries": 3
+        }
+      }
+    },
+    {
+      "pak": "OIOVerbose_8db5c70a-1794-aa4e-d499-2113acb6038c.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000232,
+          "content_s": 0.05538,
+          "entries": 18
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000114,
+          "content_s": 0.032782,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000264,
+          "content_s": 0.065676,
+          "entries": 18
+        }
+      }
+    },
+    {
+      "pak": "OathofRedemption.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000377,
+          "content_s": 0.039349,
+          "entries": 60
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00015,
+          "content_s": 0.021374,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001245,
+          "content_s": 0.04383,
+          "entries": 60
+        }
+      }
+    },
+    {
+      "pak": "OathoftheBleakWalkers.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00059,
+          "content_s": 0.045083,
+          "entries": 66
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000346,
+          "content_s": 0.036564,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000627,
+          "content_s": 0.048449,
+          "entries": 66
+        }
+      }
+    },
+    {
+      "pak": "OriginsArsenal_89689ba8-edaa-9d48-146a-caef1879bf54.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000257,
+          "content_s": 0.002484,
+          "entries": 24
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000123,
+          "content_s": 0.002169,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000668,
+          "content_s": 0.003295,
+          "entries": 24
+        }
+      }
+    },
+    {
+      "pak": "OverpoweredAylinAndIsobel.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000271,
+          "content_s": 0.004903,
+          "entries": 14
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000132,
+          "content_s": 0.004491,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000355,
+          "content_s": 0.007454,
+          "entries": 14
+        }
+      }
+    },
+    {
+      "pak": "PFInquisitor.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001464,
+          "content_s": 0.002154,
+          "entries": 510
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000696,
+          "content_s": 0.001095,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000416,
+          "content_s": 0.002237,
+          "entries": 510
+        }
+      }
+    },
+    {
+      "pak": "PathofNightmaresDice_2c7ce694-2d08-1cfc-3ee1-4aa94d7be731.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000344,
+          "content_s": 0.01747,
+          "entries": 30
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000194,
+          "content_s": 0.017033,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000391,
+          "content_s": 0.019252,
+          "entries": 30
+        }
+      }
+    },
+    {
+      "pak": "Permanent Detect Thoughts.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000213,
+          "content_s": 4.8e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00014,
+          "content_s": 8e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000907,
+          "content_s": 4.9e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "Permanent Enhance Jump.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000253,
+          "content_s": 5e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000128,
+          "content_s": 8e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000153,
+          "content_s": 3.4e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "Permanent Feather Fall.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000222,
+          "content_s": 3.9e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000253,
+          "content_s": 8e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000137,
+          "content_s": 3.2e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "Permanent Light and Daylight.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000163,
+          "content_s": 3.3e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000108,
+          "content_s": 1e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000128,
+          "content_s": 3.6e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "Permanent Longstrider.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000252,
+          "content_s": 5.7e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000131,
+          "content_s": 6e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000124,
+          "content_s": 2.9e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "Permanent Mage Armor.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000184,
+          "content_s": 3.5e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000188,
+          "content_s": 7e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000139,
+          "content_s": 2.9e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "Permanent Speak With Animals.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000221,
+          "content_s": 4.1e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.7e-05,
+          "content_s": 7e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00018,
+          "content_s": 4.1e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "PermanentSummonsFixes_d686a81d-f574-20e9-15ff-2a286fab9f15.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00027,
+          "content_s": 0.000198,
+          "entries": 5
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000107,
+          "content_s": 0.000166,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000221,
+          "content_s": 0.000211,
+          "entries": 5
+        }
+      }
+    },
+    {
+      "pak": "Randomized_Item_Framework_413ec483-da7b-faeb-ef42-b6b9fa7075fa.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000292,
+          "content_s": 0.117511,
+          "entries": 13
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000246,
+          "content_s": 0.057892,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000321,
+          "content_s": 0.132695,
+          "entries": 13
+        }
+      }
+    },
+    {
+      "pak": "Rebalance_Feats_ASI.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000199,
+          "content_s": 7.4e-05,
+          "entries": 7
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000112,
+          "content_s": 3.7e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001484,
+          "content_s": 8.1e-05,
+          "entries": 7
+        }
+      }
+    },
+    {
+      "pak": "Requiem_for_the_Absolute_f1f6fbec-f087-c70f-a28f-4437385f3433.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000952,
+          "content_s": 0.004069,
+          "entries": 363
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000406,
+          "content_s": 0.002069,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000312,
+          "content_s": 0.00457,
+          "entries": 363
+        }
+      }
+    },
+    {
+      "pak": "Scratch_And_Shovel_78753062-b430-4cbf-9e5a-4c3a87cf224a.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000329,
+          "content_s": 0.002293,
+          "entries": 31
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000107,
+          "content_s": 0.00118,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000452,
+          "content_s": 0.002512,
+          "entries": 31
+        }
+      }
+    },
+    {
+      "pak": "SecretScrolls.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001401,
+          "content_s": 0.014684,
+          "entries": 449
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.001045,
+          "content_s": 0.014073,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000492,
+          "content_s": 0.016363,
+          "entries": 449
+        }
+      }
+    },
+    {
+      "pak": "SecretScrolls5eSpells.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001407,
+          "content_s": 0.00453,
+          "entries": 421
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000388,
+          "content_s": 0.001747,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001197,
+          "content_s": 0.004661,
+          "entries": 421
+        }
+      }
+    },
+    {
+      "pak": "SecretScrolls5eSpellsExtended.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000311,
+          "content_s": 0.007136,
+          "entries": 47
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000134,
+          "content_s": 0.00589,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000578,
+          "content_s": 0.008777,
+          "entries": 47
+        }
+      }
+    },
+    {
+      "pak": "SecretScrolls5eSpellsUnlocked.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000307,
+          "content_s": 0.000217,
+          "entries": 51
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000127,
+          "content_s": 4.5e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000331,
+          "content_s": 0.000199,
+          "entries": 51
+        }
+      }
+    },
+    {
+      "pak": "SecretScrollsExtended.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.0004,
+          "content_s": 0.016258,
+          "entries": 64
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000133,
+          "content_s": 0.014501,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000244,
+          "content_s": 0.01571,
+          "entries": 64
+        }
+      }
+    },
+    {
+      "pak": "SecretScrollsUnlocked.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000775,
+          "content_s": 0.000805,
+          "entries": 188
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000266,
+          "content_s": 0.000587,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00048,
+          "content_s": 0.001159,
+          "entries": 188
+        }
+      }
+    },
+    {
+      "pak": "Shillelagh+.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000189,
+          "content_s": 3.1e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.4e-05,
+          "content_s": 5e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000195,
+          "content_s": 3.3e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "SpeakWithDeadRework_DamagedCorpses.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00018,
+          "content_s": 3.4e-05,
+          "entries": 3
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 7.2e-05,
+          "content_s": 4e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000174,
+          "content_s": 3.6e-05,
+          "entries": 3
+        }
+      }
+    },
+    {
+      "pak": "StarryEyes.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000251,
+          "content_s": 0.002618,
+          "entries": 7
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.1e-05,
+          "content_s": 0.001559,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00015,
+          "content_s": 0.002573,
+          "entries": 7
+        }
+      }
+    },
+    {
+      "pak": "Swarmkeeper.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000384,
+          "content_s": 0.005865,
+          "entries": 38
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000117,
+          "content_s": 0.003774,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00026,
+          "content_s": 0.007088,
+          "entries": 38
+        }
+      }
+    },
+    {
+      "pak": "Test_4b516620-9c56-aa18-96ae-a9ee4f57b515.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.003878,
+          "content_s": 0.002222,
+          "entries": 1451
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.001596,
+          "content_s": 0.000622,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000754,
+          "content_s": 0.002075,
+          "entries": 1451
+        }
+      }
+    },
+    {
+      "pak": "TheFirstVampire.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000434,
+          "content_s": 0.034284,
+          "entries": 48
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000125,
+          "content_s": 0.020761,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000662,
+          "content_s": 0.034896,
+          "entries": 48
+        }
+      }
+    },
+    {
+      "pak": "TradeWithAnyone_64e3f7e5-8157-e330-bf89-c97c52fd8894.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000257,
+          "content_s": 0.000349,
+          "entries": 9
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000257,
+          "content_s": 0.000558,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000729,
+          "content_s": 0.000318,
+          "entries": 9
+        }
+      }
+    },
+    {
+      "pak": "Traveling_Merchant_Fade_0217073e-3af7-f4a6-4c97-2161d17df1c6.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000339,
+          "content_s": 0.125586,
+          "entries": 21
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000148,
+          "content_s": 0.056891,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000204,
+          "content_s": 0.095048,
+          "entries": 21
+        }
+      }
+    },
+    {
+      "pak": "TutorialChestSummoning.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000209,
+          "content_s": 0.00026,
+          "entries": 13
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 9.8e-05,
+          "content_s": 0.000172,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001344,
+          "content_s": 0.000233,
+          "entries": 13
+        }
+      }
+    },
+    {
+      "pak": "TwoHandedSwordAnimations_44365294-0903-aed9-63aa-d1c5055191ea.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000304,
+          "content_s": 0.00893,
+          "entries": 21
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000105,
+          "content_s": 0.005165,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000195,
+          "content_s": 0.009231,
+          "entries": 21
+        }
+      }
+    },
+    {
+      "pak": "UnderdarkDice_d3c8e681-6abf-9476-25a1-909e9d403477.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000421,
+          "content_s": 0.022547,
+          "entries": 32
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000183,
+          "content_s": 0.019182,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000521,
+          "content_s": 0.023158,
+          "entries": 32
+        }
+      }
+    },
+    {
+      "pak": "Unlock Summon Skills.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000235,
+          "content_s": 6.4e-05,
+          "entries": 4
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000199,
+          "content_s": 1.8e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000961,
+          "content_s": 3.9e-05,
+          "entries": 4
+        }
+      }
+    },
+    {
+      "pak": "UnlockLevelCurve.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001129,
+          "content_s": 0.001426,
+          "entries": 76
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00024,
+          "content_s": 0.000451,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.0002,
+          "content_s": 0.000504,
+          "entries": 76
+        }
+      }
+    },
+    {
+      "pak": "UnlockLevelCurve_Patch_5eSpells_Improvement_Lv2.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000209,
+          "content_s": 0.000241,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000132,
+          "content_s": 0.000255,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000214,
+          "content_s": 0.000299,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "UnlockLevelCurve_a2ffd0e4-c407-8642-2611-c934ea0b0a77.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00067,
+          "content_s": 0.001967,
+          "entries": 75
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000142,
+          "content_s": 0.000692,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000248,
+          "content_s": 0.00132,
+          "entries": 75
+        }
+      }
+    },
+    {
+      "pak": "VFX_Library_SHV.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.006783,
+          "content_s": 0.011288,
+          "entries": 1760
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.002138,
+          "content_s": 0.005529,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00078,
+          "content_s": 0.011468,
+          "entries": 1760
+        }
+      }
+    },
+    {
+      "pak": "Vanilla_Colours_For_All_470714b1-7b5b-1866-4730-056ba9d258e8.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000439,
+          "content_s": 0.003475,
+          "entries": 6
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000102,
+          "content_s": 0.002485,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000957,
+          "content_s": 0.004297,
+          "entries": 6
+        }
+      }
+    },
+    {
+      "pak": "VestmentsOfTheFaithful_4176096c-ea85-4c61-a162-0f84409bd8db.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.002068,
+          "content_s": 0.009777,
+          "entries": 748
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000691,
+          "content_s": 0.002659,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000595,
+          "content_s": 0.008982,
+          "entries": 748
+        }
+      }
+    },
+    {
+      "pak": "VisibleShieldsU.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000263,
+          "content_s": 0.000238,
+          "entries": 8
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000123,
+          "content_s": 0.000203,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00053,
+          "content_s": 0.00024,
+          "entries": 8
+        }
+      }
+    },
+    {
+      "pak": "VividLandscapes_AllinOne.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001304,
+          "content_s": 0.100491,
+          "entries": 500
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000602,
+          "content_s": 0.043666,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000379,
+          "content_s": 0.098374,
+          "entries": 500
+        }
+      }
+    },
+    {
+      "pak": "VolitionCabinet.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000644,
+          "content_s": 0.000393,
+          "entries": 108
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000194,
+          "content_s": 3.7e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.003761,
+          "content_s": 0.000292,
+          "entries": 108
+        }
+      }
+    },
+    {
+      "pak": "WeightlessConsumables.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000218,
+          "content_s": 7.6e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000149,
+          "content_s": 7.4e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000203,
+          "content_s": 6.9e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "WeightlessConsumables_1d582ce5-a2e3-9938-d44d-e5f7256e9bbe.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000201,
+          "content_s": 0.000157,
+          "entries": 5
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00012,
+          "content_s": 0.000124,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000145,
+          "content_s": 0.000153,
+          "entries": 5
+        }
+      }
+    },
+    {
+      "pak": "WeightlessContainers.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000191,
+          "content_s": 3.4e-05,
+          "entries": 2
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.00012,
+          "content_s": 9e-06,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000195,
+          "content_s": 3.7e-05,
+          "entries": 2
+        }
+      }
+    },
+    {
+      "pak": "WeightlessGold_81117bd5-de2f-a13f-7efa-b99a146173dc.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000248,
+          "content_s": 0.000137,
+          "entries": 4
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 8.6e-05,
+          "content_s": 7.2e-05,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000136,
+          "content_s": 0.000111,
+          "entries": 4
+        }
+      }
+    },
+    {
+      "pak": "WhoIsMarcus.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000263,
+          "content_s": 0.012413,
+          "entries": 11
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000103,
+          "content_s": 0.008413,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000176,
+          "content_s": 0.013708,
+          "entries": 11
+        }
+      }
+    },
+    {
+      "pak": "WretchedBloodline.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000378,
+          "content_s": 0.04183,
+          "entries": 65
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000253,
+          "content_s": 0.031762,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000416,
+          "content_s": 0.044365,
+          "entries": 65
+        }
+      }
+    },
+    {
+      "pak": "[MANTIS' F&B] I. THE CONQUEST.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000449,
+          "content_s": 0.26953,
+          "entries": 60
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000172,
+          "content_s": 0.124488,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001108,
+          "content_s": 0.262529,
+          "entries": 60
+        }
+      }
+    },
+    {
+      "pak": "[MANTIS] FRANKENSTEIN COLLECTION - UT + EOTB.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000442,
+          "content_s": 0.349895,
+          "entries": 78
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000183,
+          "content_s": 0.17619,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001596,
+          "content_s": 0.350629,
+          "entries": 78
+        }
+      }
+    },
+    {
+      "pak": "bushykarlach_2cd3b2f5-1b2e-e69-feys.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000267,
+          "content_s": 0.001325,
+          "entries": 6
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000169,
+          "content_s": 0.001475,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001897,
+          "content_s": 0.001279,
+          "entries": 6
+        }
+      }
+    },
+    {
+      "pak": "featsextra.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00066,
+          "content_s": 0.001735,
+          "entries": 136
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000261,
+          "content_s": 0.000941,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000341,
+          "content_s": 0.001515,
+          "entries": 136
+        }
+      }
+    },
+    {
+      "pak": "unique_tav.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000334,
+          "content_s": 0.063551,
+          "entries": 37
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000108,
+          "content_s": 0.043885,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000243,
+          "content_s": 0.079005,
+          "entries": 37
+        }
+      }
+    },
+    {
+      "pak": "unique_tav_EotB_patch.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.00025,
+          "content_s": 0.011612,
+          "entries": 24
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.0001,
+          "content_s": 0.008141,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.00038,
+          "content_s": 0.013012,
+          "entries": 24
+        }
+      }
+    },
+    {
+      "pak": "wizardly_updo_longer_3a43c4e4-b85e-d0a4-3990-0ba61d0b4328.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.000258,
+          "content_s": 0.021352,
+          "entries": 9
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000106,
+          "content_s": 0.009783,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000185,
+          "content_s": 0.018829,
+          "entries": 9
+        }
+      }
+    },
+    {
+      "pak": "xFATE_fef3fbd7-4a38-01e2-d37c-14c217c4b31e.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.001853,
+          "content_s": 0.006052,
+          "entries": 693
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.000808,
+          "content_s": 0.002522,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.001192,
+          "content_s": 0.005671,
+          "entries": 693
+        }
+      }
+    },
+    {
+      "pak": "xFED_AIO_af330e86-7335-b20c-ce70-6df8539d4597.pak",
+      "dataset": "mods",
+      "tools": {
+        "python": {
+          "error": null,
+          "index_s": 0.004336,
+          "content_s": 0.009209,
+          "entries": 1322
+        },
+        "rust_native": {
+          "error": null,
+          "index_s": 0.001684,
+          "content_s": 0.004723,
+          "entries": 0
+        },
+        "rust_pipeline": {
+          "error": null,
+          "index_s": 0.000966,
+          "content_s": 0.008583,
+          "entries": 1322
+        }
+      }
+    }
+  ],
+  "divine_incomplete": {
+    "note": "La série 'Divine.exe' du dashboard vient de divine_data_report.json : run complet (mode per-file, un lancement Wine par .pak) sur les 48 fichiers du jeu de base, 42 réussis / 6 en échec — 3 timeouts (Materials.pak, Models.pak, SharedSounds.pak) et 3 crashs sans message exploitable (Gustav.pak, Textures.pak, VirtualTextures.pak, probablement OOM sur les plus gros fichiers/archives multi-parties). Les 205 .pak de mods n'ont PAS été passés par Divine.exe cette passe (mode per-file trop lent à l'échelle — ~15 min pour 48 fichiers déjà — et le mode batch natif de Divine.exe/LSLib plante systématiquement sur '-i pak', un bug upstream dans CommandLineArguments.GetResourceFormatByString qui ne gère pas ce format, pas corrigeable côté script). Une tentative antérieure sur 328 fichiers (divine_batch_report.json, 2026-09-10) avait échoué à 100% sur un bug de flag -u distinct (corrigé depuis, cf. commit dans scripts/compare_pak_reader.py) — listée ici pour traçabilité, pas mélangée aux chiffres de succès.",
+    "attempts": [
+      {
+        "file": "divine_batch_report.json",
+        "generated_at": "2026-09-10T22:52:57.195622+00:00",
+        "pak_count": 328,
+        "errors": 328,
+        "sample_error": "Échec Divine.exe : ntsync: up and running."
+      }
+    ]
+  },
+  "create_edit": {
+    "generated_at": "2026-09-15T17:10:55.054406+00:00",
+    "summary": [
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "n": 9,
+        "n_errors": 0,
+        "median_seconds": 0.005479,
+        "min_seconds": 0.00222,
+        "max_seconds": 0.407638,
+        "verify_ok_rate": 1.0
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "n": 9,
+        "n_errors": 0,
+        "median_seconds": 0.006437,
+        "min_seconds": 0.00231,
+        "max_seconds": 0.420113,
+        "verify_ok_rate": 1.0
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "n": 9,
+        "n_errors": 0,
+        "median_seconds": 0.017177,
+        "min_seconds": 0.004936,
+        "max_seconds": 0.457262,
+        "verify_ok_rate": 1.0
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "n": 9,
+        "n_errors": 0,
+        "median_seconds": 0.01953,
+        "min_seconds": 0.004615,
+        "max_seconds": 0.497458,
+        "verify_ok_rate": 1.0
+      }
+    ],
+    "runs": [
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "GamePlatform_run0.pak",
+        "total_seconds": 0.003132,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "PsoCache_run0.pak",
+        "total_seconds": 0.007711,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "LowTex_run0.pak",
+        "total_seconds": 0.397889,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "GamePlatform_batch_run0.pak",
+        "total_seconds": 0.002825,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "PsoCache_batch_run0.pak",
+        "total_seconds": 0.005479,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "LowTex_batch_run0.pak",
+        "total_seconds": 0.401804,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "GamePlatform_run1.pak",
+        "total_seconds": 0.00231,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "PsoCache_run1.pak",
+        "total_seconds": 0.006437,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "LowTex_run1.pak",
+        "total_seconds": 0.420113,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "GamePlatform_batch_run1.pak",
+        "total_seconds": 0.002307,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "PsoCache_batch_run1.pak",
+        "total_seconds": 0.006842,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "LowTex_batch_run1.pak",
+        "total_seconds": 0.398216,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "GamePlatform_run2.pak",
+        "total_seconds": 0.002824,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "PsoCache_run2.pak",
+        "total_seconds": 0.005939,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-single",
+        "label": "LowTex_run2.pak",
+        "total_seconds": 0.395021,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "GamePlatform_batch_run2.pak",
+        "total_seconds": 0.00222,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "PsoCache_batch_run2.pak",
+        "total_seconds": 0.005267,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "create-batch",
+        "label": "LowTex_batch_run2.pak",
+        "total_seconds": 0.407638,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "GamePlatform_edited_run0.pak",
+        "total_seconds": 0.004615,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "PsoCache_edited_run0.pak",
+        "total_seconds": 0.020619,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "LowTex_edited_run0.pak",
+        "total_seconds": 0.497458,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "GamePlatform_edited_batch_run0.pak",
+        "total_seconds": 0.005402,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "PsoCache_edited_batch_run0.pak",
+        "total_seconds": 0.01706,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "LowTex_edited_batch_run0.pak",
+        "total_seconds": 0.452776,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "GamePlatform_edited_run1.pak",
+        "total_seconds": 0.005158,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "PsoCache_edited_run1.pak",
+        "total_seconds": 0.019295,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "LowTex_edited_run1.pak",
+        "total_seconds": 0.447376,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "GamePlatform_edited_batch_run1.pak",
+        "total_seconds": 0.008299,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "PsoCache_edited_batch_run1.pak",
+        "total_seconds": 0.017177,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "LowTex_edited_batch_run1.pak",
+        "total_seconds": 0.454129,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "GamePlatform_edited_run2.pak",
+        "total_seconds": 0.005449,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "PsoCache_edited_run2.pak",
+        "total_seconds": 0.01953,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-single",
+        "label": "LowTex_edited_run2.pak",
+        "total_seconds": 0.461891,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "GamePlatform_edited_batch_run2.pak",
+        "total_seconds": 0.004936,
+        "file_count": 43,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "PsoCache_edited_batch_run2.pak",
+        "total_seconds": 0.019769,
+        "file_count": 1,
+        "verify_ok": true,
+        "error": null
+      },
+      {
+        "tool": "bg3rustpaklib",
+        "scenario": "edit-batch",
+        "label": "LowTex_edited_batch_run2.pak",
+        "total_seconds": 0.457262,
+        "file_count": 5991,
+        "verify_ok": true,
+        "error": null
+      }
+    ]
+  }
+}
+</script>
+<script>
+(function () {
+  "use strict";
+  var DATA = JSON.parse(document.getElementById("dashboard-data").textContent);
+  var tooltip = document.getElementById("tooltip");
+
+  function fmtS(v) {
+    if (v == null) return "—";
+    if (v < 0.01) return v.toFixed(4) + "s";
+    return v.toFixed(3) + "s";
+  }
+
+  function showTip(el, html) {
+    tooltip.innerHTML = html;
+    tooltip.classList.add("show");
+    var r = el.getBoundingClientRect();
+    var tw = 280;
+    var left = Math.min(Math.max(8, r.left), window.innerWidth - tw - 8);
+    tooltip.style.left = left + "px";
+    tooltip.style.top = (r.top - 8) + "px";
+    tooltip.style.transform = "translateY(-100%)";
+  }
+  function hideTip() { tooltip.classList.remove("show"); }
+
+  // ---- Read chart -------------------------------------------------------
+  var TOOL_COLOR = {
+    divine: "var(--s-divine)",
+    python: "var(--s-python)",
+    rust_native: "var(--s-rust-native)",
+    rust_pipeline: "var(--s-rust-pipeline)"
+  };
+  var TOOL_LABEL = {
+    divine: "Divine.exe (pipeline Wine/Proton)",
+    python: "bg3pythonpaklib (natif == pipeline)",
+    rust_native: "bg3rustpaklib (natif)",
+    rust_pipeline: "bg3rustpaklib (pipeline PyO3)"
+  };
+  var IDX_COLOR = "var(--s-divine)";
+  var CONTENT_COLOR = "var(--s-rust-pipeline)";
+
+  function renderReadCharts() {
+    var host = document.getElementById("read-charts");
+    var byMode = { data: [], mods: [] };
+    DATA.read_summary.forEach(function (s) { byMode[s.mode].push(s); });
+    var order = ["divine", "python", "rust_native", "rust_pipeline"];
+    var maxTotal = Math.max.apply(null, DATA.read_summary.map(function (s) { return s.total_seconds; }));
+
+    ["data", "mods"].forEach(function (mode) {
+      var rows = byMode[mode].slice().sort(function (a, b) {
+        return order.indexOf(a.tool) - order.indexOf(b.tool);
+      });
+      if (!rows.length) return;
+      var group = document.createElement("div");
+      group.className = "chart-group";
+      var title = document.createElement("div");
+      title.className = "facet-title";
+      title.textContent = (mode === "data" ? "Jeu de base — " : "Mods actifs — ") + rows[0].pak_count + (mode === "data" ? "" : "") + " fichiers";
+      group.appendChild(title);
+
+      rows.forEach(function (s) {
+        var row = document.createElement("div");
+        row.className = "bar-row";
+        var label = document.createElement("div");
+        label.className = "bar-label";
+        label.textContent = TOOL_LABEL[s.tool];
+        row.appendChild(label);
+
+        var track = document.createElement("div");
+        track.className = "bar-track";
+        var idxPct = (s.index_seconds / maxTotal) * 100;
+        var conPct = (s.content_seconds / maxTotal) * 100;
+        var idxSeg = document.createElement("div");
+        idxSeg.className = "bar-seg";
+        idxSeg.style.left = "0%";
+        idxSeg.style.width = Math.max(idxPct, 0.4) + "%";
+        idxSeg.style.background = IDX_COLOR;
+        var conSeg = document.createElement("div");
+        conSeg.className = "bar-seg";
+        conSeg.style.left = idxPct + "%";
+        conSeg.style.width = Math.max(conPct, 0.4) + "%";
+        conSeg.style.background = CONTENT_COLOR;
+        conSeg.style.borderTopRightRadius = "4px";
+        conSeg.style.borderBottomRightRadius = "4px";
+        idxSeg.style.borderTopLeftRadius = "4px";
+        idxSeg.style.borderBottomLeftRadius = "4px";
+        idxSeg.style.borderTopRightRadius = "0";
+        idxSeg.style.borderBottomRightRadius = "0";
+
+        var tipHtml = TOOL_LABEL[s.tool] + " — " + (mode === "data" ? "jeu de base" : "mods") +
+          "\n" + s.pak_count + " .pak, " + s.errors + " erreur(s)" +
+          "\nIndexation : " + fmtS(s.index_seconds) +
+          "\nContenu : " + fmtS(s.content_seconds) +
+          "\nTotal : " + fmtS(s.total_seconds);
+        [idxSeg, conSeg].forEach(function (seg) {
+          seg.addEventListener("mouseenter", function () { showTip(track, tipHtml.replace(/\n/g, "<br>")); });
+          seg.addEventListener("mouseleave", hideTip);
+        });
+
+        track.appendChild(idxSeg);
+        track.appendChild(conSeg);
+        row.appendChild(track);
+
+        var val = document.createElement("div");
+        val.className = "bar-value";
+        val.textContent = fmtS(s.total_seconds);
+        row.appendChild(val);
+
+        group.appendChild(row);
+      });
+      host.appendChild(group);
+    });
+  }
+
+  // ---- Create/edit chart -------------------------------------------------
+  var SCENARIO_LABEL = {
+    "create-single": "create single",
+    "create-batch": "create batch",
+    "edit-single": "edit single",
+    "edit-batch": "edit batch"
+  };
+  function renderCreateEdit() {
+    var host = document.getElementById("ce-chart");
+    var rows = DATA.create_edit.summary.slice();
+    var order = ["create-single", "create-batch", "edit-single", "edit-batch"];
+    rows.sort(function (a, b) { return order.indexOf(a.scenario) - order.indexOf(b.scenario); });
+    var maxV = Math.max.apply(null, rows.map(function (r) { return r.max_seconds; }));
+
+    rows.forEach(function (r) {
+      var col = document.createElement("div");
+      col.className = "ce-col";
+      var val = document.createElement("div");
+      val.className = "ce-val";
+      val.textContent = fmtS(r.median_seconds);
+      col.appendChild(val);
+
+      var wrap = document.createElement("div");
+      wrap.className = "ce-bar-wrap";
+      var barH = Math.max((r.median_seconds / maxV) * 100, 2);
+      var bar = document.createElement("div");
+      bar.className = "ce-bar";
+      bar.style.height = barH + "%";
+      var whisker = document.createElement("div");
+      whisker.className = "ce-whisker";
+      var minPct = (r.min_seconds / maxV) * 100;
+      var maxPct = (r.max_seconds / maxV) * 100;
+      whisker.style.bottom = minPct + "%";
+      whisker.style.height = Math.max(maxPct - minPct, 0.5) + "%";
+      wrap.appendChild(whisker);
+      wrap.appendChild(bar);
+
+      var tipHtml = "bg3rustpaklib — " + SCENARIO_LABEL[r.scenario] +
+        "\n" + r.n + " runs, " + r.n_errors + " échec(s)" +
+        "\nMédiane : " + fmtS(r.median_seconds) +
+        "\nMin–max : " + fmtS(r.min_seconds) + " – " + fmtS(r.max_seconds) +
+        "\nRound-trip OK : " + Math.round(r.verify_ok_rate * 100) + "%";
+      [bar, wrap].forEach(function (el) {
+        el.addEventListener("mouseenter", function () { showTip(wrap, tipHtml.replace(/\n/g, "<br>")); });
+        el.addEventListener("mouseleave", hideTip);
+      });
+
+      col.appendChild(wrap);
+      var label = document.createElement("div");
+      label.className = "ce-label";
+      label.textContent = SCENARIO_LABEL[r.scenario];
+      col.appendChild(label);
+      host.appendChild(col);
+    });
+
+    document.getElementById("ce-caption").textContent =
+      "Min correspond à GamePlatform (43 petits fichiers), max à LowTex (5991 fichiers, 64 Mo) — l'écart illustre le passage à l'échelle, pas une instabilité de mesure.";
+  }
+
+  // ---- Detail table -------------------------------------------------------
+  var currentFilter = "all";
+  var currentSearch = "";
+
+  function cellFor(entry) {
+    if (!entry) return '<span class="dash">—</span>';
+    if (entry.error) {
+      return '<span class="err-badge" title="' + entry.error.replace(/"/g, "&quot;") + '">échec</span>';
+    }
+    return '<span class="ok-badge">' + fmtS(entry.index_s + entry.content_s) + "</span>";
+  }
+
+  function renderDetailTable() {
+    var body = document.getElementById("detail-body");
+    body.innerHTML = "";
+    var rows = DATA.read_detail.filter(function (r) {
+      if (currentFilter !== "all" && r.dataset !== currentFilter) return false;
+      if (currentSearch && r.pak.toLowerCase().indexOf(currentSearch) === -1) return false;
+      return true;
+    });
+    var frag = document.createDocumentFragment();
+    rows.forEach(function (r) {
+      var tr = document.createElement("tr");
+      if (r.pak === "LowTex.pak") { tr.className = "highlight"; tr.id = "row-lowtex"; }
+      var t = r.tools;
+      tr.innerHTML =
+        "<td>" + r.pak + "</td>" +
+        "<td>" + (r.dataset === "data" ? "Jeu de base" : "Mods") + "</td>" +
+        '<td class="num">' + cellFor(t.rust_native) + "</td>" +
+        '<td class="num">' + cellFor(t.rust_pipeline) + "</td>" +
+        '<td class="num">' + cellFor(t.python) + "</td>" +
+        '<td class="num">' + cellFor(t.divine) + "</td>";
+      frag.appendChild(tr);
+    });
+    body.appendChild(frag);
+    document.getElementById("detail-count").textContent = rows.length + " / " + DATA.read_detail.length + " fichiers affichés";
+  }
+
+  document.getElementById("search").addEventListener("input", function (e) {
+    currentSearch = e.target.value.trim().toLowerCase();
+    renderDetailTable();
+  });
+  document.querySelectorAll(".chip[data-ds]").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.querySelectorAll(".chip[data-ds]").forEach(function (b) { b.setAttribute("aria-pressed", "false"); });
+      btn.setAttribute("aria-pressed", "true");
+      currentFilter = btn.getAttribute("data-ds");
+      renderDetailTable();
+    });
+  });
+  document.getElementById("lowtex-btn").addEventListener("click", function () {
+    document.getElementById("search").value = "LowTex";
+    currentSearch = "lowtex";
+    renderDetailTable();
+    var row = document.getElementById("row-lowtex");
+    if (row) row.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+
+  // ---- Divine incomplete note ----------------------------------------------
+  function renderDivineNote() {
+    var el = document.getElementById("divine-note");
+    var info = DATA.divine_incomplete;
+    var txt = info.note;
+    if (info.attempts && info.attempts.length) {
+      txt += " Tentative(s) en échec documentée(s) : " + info.attempts.map(function (a) {
+        return a.file + " (" + a.pak_count + " fichiers, " + a.errors + " erreurs)";
+      }).join(", ") + ".";
+    }
+    el.textContent = txt;
+  }
+
+  renderReadCharts();
+  renderCreateEdit();
+  renderDetailTable();
+  renderDivineNote();
+})();
+</script>
+
+</body></html>
