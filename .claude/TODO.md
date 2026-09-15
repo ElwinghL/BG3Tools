@@ -42,6 +42,13 @@ pas, même si elle semble terminée.
   le patch Absolute Defeat (déjà mergé), sur Visible Shields - Universal
   (`enum` + `slider_int`) — premier patch à gérer un type `enum` côté NMCM
   (dropdown natif). Statut : en cours, non mergé.
+- `chore/TestCoverageExpansion` (dépôt principal, worktree
+  `.claude/worktrees/agent-a48c232636dedc09e`) — remontée de la couverture
+  globale (~48% avant, seuil CI 75% posé par `chore/CoverageThresholdPolicy`)
+  via ajout de tests unitaires sur les modules les moins couverts
+  (`native_mods.py`, `tools_manager.py`, `terminal_launcher.py`,
+  `platform_utils.py`, `launcher.py`, `linking.py`, `wineprefix.py`,
+  `downloader.py`, `screens/actions.py`, etc.). Statut : en cours, non mergé.
 
 **Disponible ensuite (P2/P3, non pris)**
 
