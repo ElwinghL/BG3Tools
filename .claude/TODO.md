@@ -23,15 +23,23 @@ pas, même si elle semble terminée.
     ci-dessous.
   - `fix/AbseilLinkMissing` (sous-module `ElwinghL/bg3se`, **indépendante**,
     base commune `main`) — protobuf v36.1 requiert de lier explicitement les
-    bibliothèques Abseil (log/strings/status/...), absentes de
-    `BG3Extender.vcxproj` : ~190 `LNK2001` sur TOUT build actuel de ce fork,
-    pas seulement RemoteConsole. Fix en cours de validation CI ; une fois
-    vert → merge dans `main` du fork, puis `main` fusionné dans
+    bibliothèques Abseil (log/strings/status/...) ET `third_party/utf8_range`
+    (`libutf8_validity.lib`), absentes de `BG3Extender.vcxproj` : ~190
+    `LNK2001` sur TOUT build actuel de ce fork, pas seulement RemoteConsole.
+    Les deux fixes poussés (commits `7d38d5e`, `e6a8e3d`), plus un ciblage CI
+    `/t:BG3Extender` (`66ab2cf`, au lieu de `/t:Build` sur toute la `.sln`)
+    pour éviter deux échecs sans rapport sur d'autres projets de la solution
+    (`LuaDebugger.csproj` : restore NuGet Google.Protobuf absent en CI ;
+    `BG3Updater`/`TinyCrypt` : `PostBuildEvent` copiant vers un chemin
+    Windows local d'Elwingh inexistant sur le runner —
+    `PostBuildEventUseInBuild=false` ajouté). CI en cours de validation ;
+    une fois vert → merge dans `main` du fork, puis `main` fusionné dans
     `feat/RemoteConsoleTCPBridge`.
   - `feat/BG3SERemoteConsoleBridge` (dépôt principal) — côté `bg3_mod_tui/` :
     champs hôte/port de l'onglet "Console BG3SE" rendus éditables (avant,
-    figés sur `bg3modtools.toml`), 2 tests widget ajoutés. En attente que le
-    pont TCP soit confirmé buildable avant merge.
+    figés sur `bg3modtools.toml`), 6 tests widget ajoutés (champs éditables,
+    échec de connexion, déconnexion, complétion Tab candidat unique/ambigu).
+    En attente que le pont TCP soit confirmé buildable avant merge.
   - Reste ouvert après ces 3 merges : test en conditions réelles contre un
     vrai `bg3.exe` (build Windows requis, aucun toolchain local).
 - `fix/PakEntrySizeZeroBug` (dépôt principal) — bug des entrées `.pak`
@@ -42,6 +50,28 @@ pas, même si elle semble terminée.
   le patch Absolute Defeat (déjà mergé), sur Visible Shields - Universal
   (`enum` + `slider_int`) — premier patch à gérer un type `enum` côté NMCM
   (dropdown natif). Statut : en cours, non mergé.
+- `chore/TestCoverageExpansion` (dépôt principal, sous-agent) — la
+  couverture globale (`pytest --cov`) est à ~48%, sous le seuil `fail_under
+  = 75` désormais imposé (voir "Terminé récemment" ci-dessous). Sous-agent
+  chargé d'ajouter des tests réels (pas de tests creux/assertions triviales
+  juste pour faire monter le pourcentage) en priorisant les fichiers les
+  moins couverts (`native_mods.py`, `tools_manager.py`,
+  `terminal_launcher.py`, `platform_utils.py`, `screens/actions.py`, ...).
+  Statut : en cours, non mergé — qualité des tests à revérifier un par un
+  avant merge, pas seulement le pourcentage final.
+
+**Terminé récemment**
+
+- `chore/ProjectCleanupAndQualityTooling` — fusion de
+  `.claude/AGENTS_IN_PROGRESS.md` dans cette section, ajout de `ruff` +
+  `pytest-cov`, `docs/forks.md`, `.claude/CLAUDE.md`. Mergé dans `main`
+  (`3e0cd56`).
+- `chore/CoverageThresholdPolicy` — `fail_under = 75` dans
+  `[tool.coverage.report]` (`pyproject.toml`) + consigne dans
+  `.claude/CLAUDE.md` demandant explicitement 75% par fichier modifié, pas
+  seulement sur la moyenne globale. Mergé dans `main`. Couverture globale
+  au moment du merge : ~48% (CI rouge assumée jusqu'à
+  `chore/TestCoverageExpansion` ci-dessus).
 
 **Disponible ensuite (P2/P3, non pris)**
 
