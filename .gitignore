@@ -7,6 +7,15 @@
 /native_mods_manifest.json
 /BG3_Managed/
 
+# Chemin réel d'installation du jeu (pas le lien BG3_Managed/Installation
+# BG3) : contient notamment bin/YABG3ML-Autostart/, déployé par hardlink
+# via native_mods_manifest.json (voir Tools/TOOLS.md, "Yet Another BG3
+# Native Mod Loader — contrainte registre Proton"). Ne JAMAIS déplacer son
+# contenu ici (bg3_autostart.exe/loader.dll) sans lancer uninstall.bat
+# d'abord — le registre Proton pointe vers son chemin exact au moment de
+# l'installation.
+/Installation BG3/
+
 # Journal de plantages écrit par bg3_mod_tui/crash_log.py (un timestamp +
 # traceback par entrée) — spécifique à la machine/session de l'utilisateur,
 # jamais à committer.
