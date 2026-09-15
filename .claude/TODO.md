@@ -73,7 +73,6 @@ pas, même si elle semble terminée.
   seulement sur la moyenne globale. Mergé dans `main`. Couverture globale
   au moment du merge : ~48% (CI rouge assumée jusqu'à
   `chore/TestCoverageExpansion` ci-dessus).
->>>>>>> origin/main
 
 **Disponible ensuite (P2/P3, non pris)**
 
