@@ -488,6 +488,21 @@ sacrifié pour y arriver, tant pis.
   que le harnais liste à tort comme des `.pak` indépendants ; annoté dans
   le rapport plutôt que corrigé, périmètre séparé). Rapport
   `docs/pak-tools-benchmark/` régénéré avec ces vrais chiffres.
+- ~~**22c.** Création/édition mesurées sur du vrai contenu (pas seulement
+  synthétique)~~ — fait : `scripts/pak_bench_cli.py create`/`edit`
+  attendent des dossiers source réels (pas des `.pak`, ils n'éditent pas
+  un `.pak` existant, ils en créent un puis le modifient) — contenu réel
+  obtenu en extrayant trois vrais `.pak` du jeu de base
+  (`GamePlatform.pak` 43 fichiers/468 Ko, `PsoCache.pak` 1 fichier/3,1 Mo,
+  `LowTex.pak` 5991 fichiers/64 Mo — la même archive solide que §22b) via
+  un exemple Rust jetable (`Package::extract_all`, supprimé après usage).
+  9 runs create + 9 edit (single/batch confondus), 0 échec, 100%
+  round-trip. Divine.exe toujours non exercé sur création/édition (pas de
+  binaire Wine dans cet environnement). Rapport `docs/pak-tools-benchmark/`
+  régénéré une nouvelle fois avec ces chiffres (remplace les chiffres
+  synthétiques précédents dans le tableau création/édition ; les fixtures
+  synthétiques restent disponibles via `--synthetic` pour des profils de
+  taille contrôlés).
 
 ### 12. Release standalone
 

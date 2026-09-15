@@ -34,12 +34,24 @@ harnais (`--dir`, glob `*.pak`) les liste comme des archives indépendantes
 
 ## Création / édition (single + batch)
 
+Sources réelles : contenu extrait de trois vrais `.pak` du jeu de base
+(`GamePlatform.pak`, 43 fichiers/468 Ko ; `PsoCache.pak`, 1 fichier/3,1 Mo ;
+`LowTex.pak`, 5991 fichiers/64 Mo décompressés — la même archive solide
+que le fix ci-dessous), pas des fixtures synthétiques.
+
 | Outil | Scénario | Runs | Échecs | Médiane (s) | Min (s) | Max (s) | Round-trip OK |
 |---|---|---:|---:|---:|---:|---:|---:|
-| bg3rustpaklib | create-batch | 9 | 0 | 0.0055 | 0.0044 | 0.0124 | 100% |
-| bg3rustpaklib | create-single | 9 | 0 | 0.0071 | 0.0044 | 0.0172 | 100% |
-| bg3rustpaklib | edit-batch | 6 | 0 | 0.0135 | 0.0095 | 0.0192 | 100% |
-| bg3rustpaklib | edit-single | 6 | 0 | 0.0143 | 0.0100 | 0.0191 | 100% |
+| bg3rustpaklib | create-batch | 9 | 0 | 0.0055 | 0.0022 | 0.4076 | 100% |
+| bg3rustpaklib | create-single | 9 | 0 | 0.0064 | 0.0023 | 0.4201 | 100% |
+| bg3rustpaklib | edit-batch | 9 | 0 | 0.0172 | 0.0049 | 0.4573 | 100% |
+| bg3rustpaklib | edit-single | 9 | 0 | 0.0195 | 0.0046 | 0.4975 | 100% |
+
+Le min correspond à `GamePlatform` (43 petits fichiers), le max à
+`LowTex` (5991 fichiers, 64 Mo) — l'écart illustre le passage à l'échelle
+plutôt qu'une instabilité de mesure. Divine.exe non exercé sur ces
+sources réelles (`--skip-divine` — pas de binaire Wine disponible dans
+cet environnement) ; le code d'invocation existe et suit le pattern déjà
+en prod, mais reste non testé en exécution.
 
 bg3pythonpaklib n'apparaît pas ci-dessus : lecture seule (cf. `.claude/TODO.md` §1f-1i), pas de scénario création/édition mesurable.
 
@@ -69,6 +81,6 @@ correctement (0 erreur) ; les chiffres ci-dessus l'incluent déjà.
 
 ## Limitations de cette passe
 
-- **Création/édition mesurées uniquement sur fixtures synthétiques** (`scripts/pak_bench/synthetic.py`, décision explicite — voir le spec) : pas encore de chiffres création/édition sur de vraies archives BG3. La **lecture**, elle, est déjà mesurée sur les vrais `.pak` du jeu (tableau ci-dessus).
-- Divine.exe sous Linux passe par Wine/Proton — non représentatif du natif Windows (gap déjà documenté dans les README de bg3pythonpaklib/bg3rustpaklib).
+- **Divine.exe non exercé** sur les scénarios création/édition (`--skip-divine`, pas de binaire Wine disponible dans cet environnement) — seul `bg3rustpaklib` a des chiffres création/édition pour l'instant, sur sources réelles comme sur synthétiques (`scripts/pak_bench/synthetic.py`, toujours disponible via `--synthetic` pour des profils de taille contrôlés).
+- Divine.exe sous Linux passe par Wine/Proton pour la lecture — non représentatif du natif Windows (gap déjà documenté dans les README de bg3pythonpaklib/bg3rustpaklib).
 
