@@ -28,10 +28,11 @@ __pycache__/
 /dist/
 .vscode/
 
-# Tout .claude/ est local (état d'agents, settings...) sauf TODO.md,
-# volontairement suivi et partagé entre sessions/collaborateurs.
+# Tout .claude/ est local (état d'agents, settings...) sauf TODO.md et
+# CLAUDE.md, volontairement suivis et partagés entre sessions/collaborateurs.
 .claude/*
 !.claude/TODO.md
+!.claude/CLAUDE.md
 
 # Outils GitHub de TOOLS.md : suivis comme sous-modules git de BG3Tools
 # (voir tools_manager.py, _add_or_update_git_submodule) — un vrai dépôt

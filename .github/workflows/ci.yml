@@ -23,5 +23,8 @@ jobs:
       - name: Installer les dépendances
         run: uv sync --extra dev
 
-      - name: Lancer pytest
-        run: uv run pytest -q
+      - name: Lancer ruff (lint)
+        run: uv run ruff check .
+
+      - name: Lancer pytest avec couverture
+        run: uv run pytest -q --cov --cov-report=term-missing
