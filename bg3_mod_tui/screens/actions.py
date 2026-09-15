@@ -29,7 +29,11 @@ from textual.widgets import (
 from textual.worker import Worker, WorkerState
 
 from bg3_mod_tui.class_builder import DEFAULT_HTML_FILENAME, write_html
-from bg3_mod_tui.compat_audit import CompatAuditResult, audit_installed_mods, write_compat_audit_markdown
+from bg3_mod_tui.compat_audit import (
+    CompatAuditResult,
+    audit_installed_mods,
+    write_compat_audit_markdown,
+)
 from bg3_mod_tui.compat_framework import (
     CompatibilityFrameworkError,
     build_pak as build_compat_framework_pak,
@@ -50,13 +54,18 @@ from bg3_mod_tui.log_format import fmt_http_log_line
 from bg3_mod_tui.linking import LinkingError, setup_links
 from bg3_mod_tui.mod_dependencies import count_dependency_declarations, find_missing_dependencies
 from bg3_mod_tui.mod_fixer_fork import ModFixerForkError, build_fork as build_mod_fixer_fork
+from bg3_mod_tui.nmcm_bridges import deploy_nmcm_bridges
 from bg3_mod_tui.native_mods import (
     NativeModsManifestError,
     deploy_native_mods_from_manifest,
     load_manifest as load_native_mods_manifest,
 )
 from bg3_mod_tui.nexus_variant_selection import infer_ut_eotb_preselection
-from bg3_mod_tui.pak_metadata import archive_pak_identities, build_deployed_uuid_index, build_module_metadata_index
+from bg3_mod_tui.pak_metadata import (
+    archive_pak_identities,
+    build_deployed_uuid_index,
+    build_module_metadata_index,
+)
 from bg3_mod_tui.pak_validator import validate_paks
 from bg3_mod_tui.pak_origin import (
     find_orphaned_paks,
@@ -96,7 +105,12 @@ from bg3_mod_tui.mod_pipeline import (
 )
 from bg3_mod_tui.providers.modio import ModIOAPIError, ModIOClient
 from bg3_mod_tui.providers.nexus import NexusAPIError, NexusClient
-from bg3_mod_tui.tools_manager import ToolsError, download_and_extract_tool, find_executables, parse_tools_table
+from bg3_mod_tui.tools_manager import (
+    ToolsError,
+    download_and_extract_tool,
+    find_executables,
+    parse_tools_table,
+)
 from bg3_mod_tui.usage_stats import increment_usage_stat, load_usage_stats, top_actions
 from bg3_mod_tui.widgets.bg3se_console import BG3SEConsole
 from bg3_mod_tui.widgets.console_log import ConsoleLog
@@ -132,6 +146,7 @@ def _orphan_report_row(archive: dict, statut: str) -> str:
         f"| {archive['file']} | {_human_size(archive['size_bytes'])} | "
         f"{origin} | {archive['modified'][:10]} | {statut} |"
     )
+
 
 # Contraste renforcé pour les cases à cocher des `SelectionList` (utilisée
 # par `NexusFileSelectionScreen` et `NexusBlacklistScreen`) : le style par
@@ -258,9 +273,7 @@ class ToolPickerScreen(ModalScreen[Path | None]):
             with VerticalScroll(id="tool-groups"):
                 for group_name in sorted(groups, key=self._group_sort_key):
                     yield Label(group_name, classes="tool-group-header")
-                    yield ListView(
-                        *[_ToolListItem(exe) for exe in sorted(groups[group_name])]
-                    )
+                    yield ListView(*[_ToolListItem(exe) for exe in sorted(groups[group_name])])
 
             with Horizontal(id="tool-picker-buttons"):
                 yield Button("Lancer", id="tool-picker-launch", variant="primary")
@@ -303,7 +316,9 @@ class NexusFileSelectionScreen(ModalScreen[list[int]]):
 
     BINDINGS = [Binding("enter", "confirm", "Valider", priority=True)]
 
-    CSS = _SELECTION_LIST_CSS + """
+    CSS = (
+        _SELECTION_LIST_CSS
+        + """
     NexusFileSelectionScreen {
         align: center middle;
     }
@@ -328,6 +343,7 @@ class NexusFileSelectionScreen(ModalScreen[list[int]]):
         color: $text-muted;
     }
     """
+    )
 
     def __init__(self, mod_id: int, mod_name: str, candidates: list[tuple[int, str]]) -> None:
         super().__init__()
@@ -339,7 +355,9 @@ class NexusFileSelectionScreen(ModalScreen[list[int]]):
     def compose(self) -> ComposeResult:
         preselected = infer_ut_eotb_preselection(self._candidates)
         with Vertical(id="file-selection-box"):
-            yield Label(f"Plusieurs fichiers pour « {self._mod_name} » (#{self._mod_id})", classes="title")
+            yield Label(
+                f"Plusieurs fichiers pour « {self._mod_name} » (#{self._mod_id})", classes="title"
+            )
             yield Label(
                 "Espace : cocher/décocher ceux à garder. Entrée : valider — "
                 "les fichiers décochés ne seront plus proposés."
@@ -404,7 +422,9 @@ class NestedArchiveSelectionScreen(ModalScreen[list[Path]]):
 
     BINDINGS = [Binding("enter", "confirm", "Valider", priority=True)]
 
-    CSS = _SELECTION_LIST_CSS + """
+    CSS = (
+        _SELECTION_LIST_CSS
+        + """
     NestedArchiveSelectionScreen {
         align: center middle;
     }
@@ -425,6 +445,7 @@ class NestedArchiveSelectionScreen(ModalScreen[list[Path]]):
         margin-top: 1;
     }
     """
+    )
 
     def __init__(self, archive_name: str, candidates: list[Path]) -> None:
         super().__init__()
@@ -469,7 +490,9 @@ class NexusBlacklistScreen(ModalScreen[list[tuple[int, int]] | None]):
         Binding("o", "open_url", "Ouvrir Nexus"),
     ]
 
-    CSS = _SELECTION_LIST_CSS + """
+    CSS = (
+        _SELECTION_LIST_CSS
+        + """
     NexusBlacklistScreen {
         align: center middle;
     }
@@ -497,6 +520,7 @@ class NexusBlacklistScreen(ModalScreen[list[tuple[int, int]] | None]):
         margin-right: 1;
     }
     """
+    )
 
     def __init__(self, blacklist: dict[int, dict[int, str]]) -> None:
         super().__init__()
@@ -594,7 +618,9 @@ class NexusOutdatedModsScreen(ModalScreen[list[int] | None]):
         Binding("o", "open_url", "Ouvrir Nexus"),
     ]
 
-    CSS = _SELECTION_LIST_CSS + """
+    CSS = (
+        _SELECTION_LIST_CSS
+        + """
     NexusOutdatedModsScreen {
         align: center middle;
     }
@@ -622,6 +648,7 @@ class NexusOutdatedModsScreen(ModalScreen[list[int] | None]):
         margin-right: 1;
     }
     """
+    )
 
     def __init__(self, outdated: list[dict]) -> None:
         super().__init__()
@@ -653,7 +680,9 @@ class NexusOutdatedModsScreen(ModalScreen[list[int] | None]):
             with Horizontal(id="outdated-buttons"):
                 if has_graphical_display():
                     yield Button("Ouvrir la page Nexus", id="outdated-open-url")
-                yield Button("Re-télécharger la sélection", id="outdated-confirm", variant="primary")
+                yield Button(
+                    "Re-télécharger la sélection", id="outdated-confirm", variant="primary"
+                )
                 yield Button("Fermer", id="outdated-cancel")
 
     def on_mount(self) -> None:
@@ -737,8 +766,7 @@ class ProfileNamePromptScreen(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#profile-name-confirm")
     def handle_confirm(self) -> None:
-        self.dismiss(self.query_one(
-            "#profile-name-input", Input).value.strip() or None)
+        self.dismiss(self.query_one("#profile-name-input", Input).value.strip() or None)
 
     @on(Button.Pressed, "#profile-name-cancel")
     def handle_cancel(self) -> None:
@@ -821,7 +849,9 @@ class ImportArchivePromptScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="import-archive-box"):
             yield Label("Chemin de l'archive de profil à importer", classes="title")
-            yield Input(placeholder="ex: /home/.../MonProfil.bg3profile.tar.zst", id="import-archive-input")
+            yield Input(
+                placeholder="ex: /home/.../MonProfil.bg3profile.tar.zst", id="import-archive-input"
+            )
             with Horizontal(id="import-archive-buttons"):
                 yield Button("Importer", id="import-archive-confirm", variant="primary")
                 yield Button("Annuler", id="import-archive-cancel")
@@ -835,8 +865,7 @@ class ImportArchivePromptScreen(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#import-archive-confirm")
     def handle_confirm(self) -> None:
-        self.dismiss(self.query_one(
-            "#import-archive-input", Input).value.strip() or None)
+        self.dismiss(self.query_one("#import-archive-input", Input).value.strip() or None)
 
     @on(Button.Pressed, "#import-archive-cancel")
     def handle_cancel(self) -> None:
@@ -896,8 +925,7 @@ class ManualPakOriginPromptScreen(ModalScreen[str | None]):
 
     @on(Button.Pressed, "#manual-origin-confirm")
     def handle_confirm(self) -> None:
-        self.dismiss(self.query_one(
-            "#manual-origin-input", Input).value.strip() or None)
+        self.dismiss(self.query_one("#manual-origin-input", Input).value.strip() or None)
 
     @on(Button.Pressed, "#manual-origin-cancel")
     def handle_cancel(self) -> None:
@@ -1127,8 +1155,7 @@ class ActionsScreen(Screen):
 
     def _profile_select_options(self) -> list[tuple[str, str]]:
         ensure_default_profile(self._config.profiles_dir)
-        options = [(name, name)
-                   for name in list_profiles(self._config.profiles_dir)]
+        options = [(name, name) for name in list_profiles(self._config.profiles_dir)]
         options.append(("+ Nouveau profil...", NEW_PROFILE_OPTION))
         return options
 
@@ -1137,7 +1164,11 @@ class ActionsScreen(Screen):
             yield Label("Profil :")
             ensure_default_profile(self._config.profiles_dir)
             profiles = list_profiles(self._config.profiles_dir)
-            active = self._config.active_profile if self._config.active_profile in profiles else Select.NULL
+            active = (
+                self._config.active_profile
+                if self._config.active_profile in profiles
+                else Select.NULL
+            )
             yield Select(
                 self._profile_select_options(),
                 value=active,
@@ -1190,7 +1221,7 @@ class ActionsScreen(Screen):
                         id="action-extract",
                         tooltip=(
                             "Traite les archives téléchargées : les .pak trouvés sont "
-                            "copiés dans Mods/ ; les mods \"loose files\" (dossier "
+                            'copiés dans Mods/ ; les mods "loose files" (dossier '
                             "Generated/, Public/, ... sans .pak) sont fusionnés dans "
                             "DataMods/ puis reliés par hardlink dans Data/ du jeu ; le "
                             "reste est mis de côté pour examen manuel."
@@ -1374,7 +1405,9 @@ class ActionsScreen(Screen):
                 with Horizontal(id="logs-top"):
                     with TabbedContent(id="tasks-tabs"):
                         with TabPane("Tâches", id="actions-log-tab"):
-                            yield ConsoleLog(id="actions-log", wrap=True, highlight=True, markup=True)
+                            yield ConsoleLog(
+                                id="actions-log", wrap=True, highlight=True, markup=True
+                            )
                         with TabPane("Téléchargements", id="downloads-log-tab"):
                             yield DownloadProgressConsole(id="downloads-progress")
                     yield ConsoleLog(id="web-console-log", wrap=True, highlight=True, markup=True)
@@ -1490,6 +1523,7 @@ class ActionsScreen(Screen):
         main_tab_id, main_write = self._main_console_for_pool(pool)
         active_in_pool = [task for task in self._active_tasks.values() if task.pool == pool]
         if not active_in_pool:
+
             def write_main(message: str) -> None:
                 try:
                     main_write(message)
@@ -1673,13 +1707,15 @@ class ActionsScreen(Screen):
 
         if not button_id.startswith("action-") or button_id == self._UNTRACKED_ACTION_ID:
             return
-        increment_usage_stat(
-            self._config.profiles_dir, self._config.active_profile, button_id
+        increment_usage_stat(self._config.profiles_dir, self._config.active_profile, button_id)
+        self.run_worker(
+            self._refresh_quick_actions(), exclusive=True, group="refresh-quick-actions"
         )
-        self.run_worker(self._refresh_quick_actions(), exclusive=True, group="refresh-quick-actions")
 
     def on_mount(self) -> None:
-        self.run_worker(self._refresh_quick_actions(), exclusive=True, group="refresh-quick-actions")
+        self.run_worker(
+            self._refresh_quick_actions(), exclusive=True, group="refresh-quick-actions"
+        )
 
     def _action_button_lookup(self) -> dict[str, Button]:
         """Ids -> bouton d'action original (`action-*`, hors
@@ -1689,7 +1725,9 @@ class ActionsScreen(Screen):
         return {
             button.id: button
             for button in self.query("#menu-buttons Button")
-            if button.id and button.id.startswith("action-") and button.id != self._UNTRACKED_ACTION_ID
+            if button.id
+            and button.id.startswith("action-")
+            and button.id != self._UNTRACKED_ACTION_ID
         }
 
     async def _refresh_quick_actions(self) -> None:
@@ -1754,6 +1792,7 @@ class ActionsScreen(Screen):
             def on_result(chosen: list[int]) -> None:
                 result.extend(chosen)
                 done.set()
+
             self.app.push_screen(NexusFileSelectionScreen(mod_id, mod_name, candidates), on_result)
 
         self.app.call_from_thread(show_screen)
@@ -1789,6 +1828,7 @@ class ActionsScreen(Screen):
             def on_result(chosen: list[Path]) -> None:
                 result.extend(chosen)
                 done.set()
+
             self.app.push_screen(NestedArchiveSelectionScreen(archive_name, candidates), on_result)
 
         self.app.call_from_thread(show_screen)
@@ -2003,14 +2043,11 @@ class ActionsScreen(Screen):
             return False
         try:
             for entry in entries:
-                download_and_extract_tool(
-                    entry, self._config.project_root, log=log)
+                download_and_extract_tool(entry, self._config.project_root, log=log)
 
             log("--- Déploiement des DLL dans le jeu (bin/) ---")
-            deploy_native_mod_loader(
-                self._config.tools_dir, self._config.game_bin_dir, log=log)
-            deploy_script_extender(self._config.tools_dir,
-                                   self._config.game_bin_dir, log=log)
+            deploy_native_mod_loader(self._config.tools_dir, self._config.game_bin_dir, log=log)
+            deploy_script_extender(self._config.tools_dir, self._config.game_bin_dir, log=log)
         except Exception as exc:
             log(f"[#C46F6F]Erreur inattendue : {exc}[/#C46F6F]")
             return False
@@ -2057,15 +2094,36 @@ class ActionsScreen(Screen):
             return False
         return True
 
+    def _deploy_nmcm_bridges_task(self, log: Callable[[str], None]) -> bool:
+        """Corps effectif du déploiement des ponts NMCM — factorisé pour
+        être appelé par `run_update_all` (4ème et dernière étape de la
+        séquence unifiée). Relie par hardlink chaque .pak découvert sous
+        `Tools/nmcm_patches/*/dist/*.pak` (voir `nmcm_bridges.py` :
+        purement une recherche sur le système de fichiers, tout nouveau
+        pont y est pris en compte sans changement de code). Retourne
+        `True`/`False` selon le succès (voir `_download_tools_task`)."""
+        log("=== Déploiement des ponts NMCM (hardlink) ===")
+        try:
+            deploy_nmcm_bridges(
+                self._config.managed_mods_link,
+                self._config.tools_dir,
+                log=log,
+            )
+        except OSError as exc:
+            log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
+            return False
+        return True
+
     @on(Button.Pressed, "#action-update-all")
     def handle_update_all(self) -> None:
-        # Enchaîne les 3 étapes ci-dessus dans l'ordre (MAJ des outils ->
-        # Compat. Framework -> Mod Fixer Fork) : mêmes ressources qu'elles
-        # cumulent toutes les 3, pour que le verrouillage empêche aussi bien
-        # une des 3 actions individuelles qu'une autre exécution de la
-        # séquence complète de démarrer en même temps.
+        # Enchaîne les 4 étapes ci-dessus dans l'ordre (MAJ des outils ->
+        # Compat. Framework -> Mod Fixer Fork -> ponts NMCM) : mêmes
+        # ressources qu'elles cumulent toutes les 4, pour que le
+        # verrouillage empêche aussi bien une des 4 actions individuelles
+        # qu'une autre exécution de la séquence complète de démarrer en
+        # même temps.
         self._start_task(
-            title="Tout mettre à jour (outils + Compat Framework + Mod Fixer)",
+            title="Tout mettre à jour (outils + Compat Framework + Mod Fixer + NMCM)",
             resource_tags=frozenset({"tools-dir", "game-bin-dir", "mods-dir"}),
             launch=self.run_update_all,
             pool="tools",
@@ -2073,18 +2131,19 @@ class ActionsScreen(Screen):
 
     @work(exclusive=True, thread=True, group="run_update_all", exit_on_error=False)
     def run_update_all(self, log: Callable[[str], None]) -> None:
-        """Enchaîne dans l'ordre les 3 étapes "MAJ des outils" -> "Compiler
-        Compat. Framework" -> "Forker Mod Fixer", en réutilisant leurs
-        méthodes `_*_task` déjà factorisées (aucune logique dupliquée). La
-        progression "[i/3]" et l'arrêt à la première étape en échec sont
-        délégués à `_run_task_sequence` (fonction module-level, voir son
-        docstring pour le choix de s'arrêter plutôt que d'enchaîner coûte
-        que coûte — les étapes 2 et 3 dépendent explicitement de Divine.exe
-        téléchargé par la 1ère)."""
+        """Enchaîne dans l'ordre les 4 étapes "MAJ des outils" -> "Compiler
+        Compat. Framework" -> "Forker Mod Fixer" -> "Déployer les ponts
+        NMCM", en réutilisant leurs méthodes `_*_task` déjà factorisées
+        (aucune logique dupliquée). La progression "[i/4]" et l'arrêt à la
+        première étape en échec sont délégués à `_run_task_sequence`
+        (fonction module-level, voir son docstring pour le choix de
+        s'arrêter plutôt que d'enchaîner coûte que coûte — les étapes 2 et
+        3 dépendent explicitement de Divine.exe téléchargé par la 1ère)."""
         steps: list[tuple[str, Callable[[Callable[[str], None]], bool]]] = [
             ("MAJ des outils", self._download_tools_task),
             ("Compiler Compat. Framework", self._build_compat_framework_task),
             ("Forker Mod Fixer", self._build_mod_fixer_fork_task),
+            ("Déployer les ponts NMCM", self._deploy_nmcm_bridges_task),
         ]
         _run_task_sequence(steps, log)
 
@@ -2092,8 +2151,7 @@ class ActionsScreen(Screen):
     def handle_launch_tool(self) -> None:
         executables = find_executables(self._config.tools_dir)
         if not executables:
-            self._tool_log(
-                "[#D8C091]Aucun exécutable trouvé sous Tools/.[/#D8C091]")
+            self._tool_log("[#D8C091]Aucun exécutable trouvé sous Tools/.[/#D8C091]")
             return
 
         def on_picked(exe_path: Path | None) -> None:
@@ -2112,16 +2170,16 @@ class ActionsScreen(Screen):
                 pool="tools",
             )
 
-        self.app.push_screen(ToolPickerScreen(
-            executables, self._config.project_root), on_picked)
+        self.app.push_screen(ToolPickerScreen(executables, self._config.project_root), on_picked)
 
     @work(exclusive=False, thread=True, exit_on_error=False)
     def run_launch_tool(self, exe_path: Path, log: Callable[[str], None]) -> None:
         log_dir = self._config.logs_dir
         try:
-            launch_tool(
-                exe_path, reference_path=self._config.appdata_path, log_dir=log_dir)
-            log(f"Lancé : {exe_path.name} (sortie journalisée dans {log_dir / (exe_path.stem + '.log')})")
+            launch_tool(exe_path, reference_path=self._config.appdata_path, log_dir=log_dir)
+            log(
+                f"Lancé : {exe_path.name} (sortie journalisée dans {log_dir / (exe_path.stem + '.log')})"
+            )
         except LauncherError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
@@ -2164,7 +2222,8 @@ class ActionsScreen(Screen):
         try:
             open_protontricks(self._config.appdata_path, log_dir=log_dir)
             log(
-                f"protontricks ouvert (préfixe BG3, sortie journalisée dans {log_dir / 'protontricks.log'}).")
+                f"protontricks ouvert (préfixe BG3, sortie journalisée dans {log_dir / 'protontricks.log'})."
+            )
         except LauncherError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
@@ -2237,7 +2296,9 @@ class ActionsScreen(Screen):
 
         candidates = find_orphaned_archives(inventory, native_manifest)
         if not candidates:
-            log("Aucune archive orpheline : chaque archive de _installees correspond à un .pak/DLL actuellement déployé.")
+            log(
+                "Aucune archive orpheline : chaque archive de _installees correspond à un .pak/DLL actuellement déployé."
+            )
             return
 
         divine_exe = find_divine_exe(self._config.tools_dir)
@@ -2305,9 +2366,7 @@ class ActionsScreen(Screen):
             # gros lot peut prendre plusieurs minutes — une interruption en
             # cours de route (fermeture de l'app, crash) laisse ainsi un
             # rapport partiel avec les décisions déjà prises, au lieu de rien.
-            self._flush_orphans_progress(
-                report_path, processed, done=index, total=total_candidates
-            )
+            self._flush_orphans_progress(report_path, processed, done=index, total=total_candidates)
 
         discarded = len(candidates) - len(confirmed) - len(unverifiable)
         log(
@@ -2404,7 +2463,7 @@ class ActionsScreen(Screen):
             lines += [
                 "\n## Non vérifiables (pas de .pak dans l'archive)\n",
                 (
-                    "Mods \"loose files\" ou mods natifs sans entrée dans "
+                    'Mods "loose files" ou mods natifs sans entrée dans '
                     "`native_mods_manifest.json` — la vérification par UUID ne "
                     "s'applique qu'aux .pak, à vérifier manuellement.\n"
                 ),
@@ -2521,6 +2580,7 @@ class ActionsScreen(Screen):
         """Demande, l'un après l'autre (modal), un lien Nexus/mod.io pour
         chaque .pak de `paks` — étape 3 de `run_resolve_pak_origins`,
         appelée sur le thread UI (poussée d'écran modale)."""
+
         def prompt_next(index: int) -> None:
             if index >= len(paks):
                 return
@@ -2556,7 +2616,10 @@ class ActionsScreen(Screen):
         `pak_validator`, docstring du module) : n'écrit rien d'autre que le
         rapport `pak_validation.md`, ne régénère pas modsettings.lsx et ne
         lance pas le jeu."""
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+
+        def log(msg):
+            return self.app.call_from_thread(self._log, msg)
+
         log("=== Validation des .pak déployés (check structurel natif) ===")
 
         pak_paths = sorted(self._config.managed_mods_link.glob("*.pak"))
@@ -2564,12 +2627,15 @@ class ActionsScreen(Screen):
             log("Aucun .pak actuellement déployé dans Mods/.")
             return
 
-        log(f"{len(pak_paths)} .pak à valider (échantillonnage sur les gros .pak, voir pak_validator)...")
+        log(
+            f"{len(pak_paths)} .pak à valider (échantillonnage sur les gros .pak, voir pak_validator)..."
+        )
         report = validate_paks(pak_paths)
         self._write_pak_validation_report(report)
 
     def _write_pak_validation_report(self, report: dict[str, list]) -> None:
-        def log(msg): return self.app.call_from_thread(self._log, msg)
+        def log(msg):
+            return self.app.call_from_thread(self._log, msg)
 
         invalid = report["invalid"]
         valid = report["valid"]
@@ -2585,18 +2651,24 @@ class ActionsScreen(Screen):
             "`pak_validator.py` pour les limites détaillées.\n"
         )
         if invalid:
-            lines.append(f"{len(invalid)} .pak invalide(s) sur {len(report['valid']) + len(invalid)} :\n")
+            lines.append(
+                f"{len(invalid)} .pak invalide(s) sur {len(report['valid']) + len(invalid)} :\n"
+            )
             for result in sorted(invalid, key=lambda r: r.path.name):
                 lines.append(f"## {result.path.name}\n")
                 for error in result.errors:
                     lines.append(f"- {error}")
                 lines.append("")
         else:
-            lines.append(f"Les {len(valid)} .pak déployé(s) sont structurellement valides (échantillon vérifié).")
+            lines.append(
+                f"Les {len(valid)} .pak déployé(s) sont structurellement valides (échantillon vérifié)."
+            )
 
         report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         if invalid:
-            log(f"[#C46F6F]{len(invalid)} .pak invalide(s)[/#C46F6F] sur {len(valid) + len(invalid)} -> {report_path}")
+            log(
+                f"[#C46F6F]{len(invalid)} .pak invalide(s)[/#C46F6F] sur {len(valid) + len(invalid)} -> {report_path}"
+            )
         else:
             log(f"{len(valid)} .pak valide(s) -> {report_path}")
 
@@ -2676,7 +2748,9 @@ class ActionsScreen(Screen):
             "davantage attention.\n"
         )
         if missing:
-            lines.append(f"{len(missing)} mod(s) sur {total_checked} avec au moins une dépendance manquante :\n")
+            lines.append(
+                f"{len(missing)} mod(s) sur {total_checked} avec au moins une dépendance manquante :\n"
+            )
             for mod_name in sorted(missing):
                 lines.append(f"## {mod_name}\n")
                 for dep_uuid, dep_name in missing[mod_name]:
@@ -2685,11 +2759,15 @@ class ActionsScreen(Screen):
                     lines.append(f"- {label} (`{dep_uuid}`) — vu chez {count} mod(s)")
                 lines.append("")
         else:
-            lines.append(f"Les {total_checked} mod(s) vérifié(s) ont toutes leurs dépendances déclarées satisfaites.")
+            lines.append(
+                f"Les {total_checked} mod(s) vérifié(s) ont toutes leurs dépendances déclarées satisfaites."
+            )
 
         report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         if missing:
-            log(f"[#C46F6F]{len(missing)} mod(s) avec dépendance(s) manquante(s)[/#C46F6F] sur {total_checked} -> {report_path}")
+            log(
+                f"[#C46F6F]{len(missing)} mod(s) avec dépendance(s) manquante(s)[/#C46F6F] sur {total_checked} -> {report_path}"
+            )
         else:
             log(f"{total_checked} mod(s) vérifié(s), aucune dépendance manquante -> {report_path}")
 
@@ -2746,7 +2824,9 @@ class ActionsScreen(Screen):
                 f"sur {len(applicable)} concerné(s) -> {report_path}"
             )
         else:
-            log(f"{len(applicable)} mod(s) concerné(s) par le Compatibility Framework, aucun problème détecté -> {report_path}")
+            log(
+                f"{len(applicable)} mod(s) concerné(s) par le Compatibility Framework, aucun problème détecté -> {report_path}"
+            )
 
     @on(Button.Pressed, "#action-nexus-updates")
     def handle_nexus_updates(self) -> None:
@@ -2780,7 +2860,9 @@ class ActionsScreen(Screen):
 
         known = [a for a in archives if a.nexus_mod_id is not None]
         if not known:
-            log("Aucune archive Nexus reconnue localement (aucun ID Nexus retrouvé dans les noms de fichiers).")
+            log(
+                "Aucune archive Nexus reconnue localement (aucun ID Nexus retrouvé dans les noms de fichiers)."
+            )
             return
 
         try:
@@ -2895,7 +2977,9 @@ class ActionsScreen(Screen):
                 f"sont à jour par rapport à Nexus."
             )
         if report["failed"]:
-            lines.append(f"\n{len(report['failed'])} mod(s) non vérifiable(s) (erreur API, voir logs).")
+            lines.append(
+                f"\n{len(report['failed'])} mod(s) non vérifiable(s) (erreur API, voir logs)."
+            )
 
         report_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         log(f"{len(outdated)} mod(s) obsolète(s) -> {report_path}")
@@ -2912,7 +2996,9 @@ class ActionsScreen(Screen):
                 return
             for mod_id, file_id in chosen:
                 blacklist.get(mod_id, {}).pop(file_id, None)
-            save_blacklisted_files(self._config.profiles_dir, self._config.active_profile, blacklist)
+            save_blacklisted_files(
+                self._config.profiles_dir, self._config.active_profile, blacklist
+            )
             self._log(
                 f"{len(chosen)} fichier(s) Nexus retiré(s) de la blacklist — "
                 "seront reproposés au prochain téléchargement."
@@ -2941,6 +3027,7 @@ class ActionsScreen(Screen):
             return
 
         if value == NEW_PROFILE_OPTION:
+
             def on_name(name: str | None) -> None:
                 if name:
                     self._start_task(
@@ -3022,7 +3109,9 @@ class ActionsScreen(Screen):
                     f"[#D8C091]{len(report.native_mods_extra)} mod(s) DLL présent(s) dans "
                     f"bin/NativeMods/ mais absent(s) du profil : {', '.join(report.native_mods_extra)}[/#D8C091]"
                 )
-            log(f"Profil « {name} » restauré ({report.loose_files_linked} fichier(s) loose reliés).")
+            log(
+                f"Profil « {name} » restauré ({report.loose_files_linked} fichier(s) loose reliés)."
+            )
         except ProfileError as exc:
             log(f"[#C46F6F]Erreur : {exc}[/#C46F6F]")
 
@@ -3074,8 +3163,7 @@ class ActionsScreen(Screen):
             # dans le dossier du projet — nom déterministe (slug du profil,
             # sans horodatage) : un nouvel export du même profil remplace
             # l'ancien plutôt que de s'accumuler à côté.
-            dest_path = self._config.web_root_dir / \
-                f"{slugify_profile_name(name)}{ARCHIVE_SUFFIX}"
+            dest_path = self._config.web_root_dir / f"{slugify_profile_name(name)}{ARCHIVE_SUFFIX}"
             export_profile_archive(
                 name,
                 profiles_dir=self._config.profiles_dir,
@@ -3221,7 +3309,8 @@ class ActionsScreen(Screen):
                 web_root,
                 self._config.public_port,
                 on_line=lambda line: self.app.call_from_thread(
-                    self._web_log, fmt_http_log_line(line)),
+                    self._web_log, fmt_http_log_line(line)
+                ),
             )
         except (ValueError, OSError) as exc:
             self._web_log(f"[#C46F6F]Échec du démarrage du serveur : {exc}[/#C46F6F]")
