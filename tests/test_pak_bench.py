@@ -18,10 +18,12 @@ from scripts.pak_bench.common import (
     ScenarioResult,
     _pick_sample_names,
     _write_report,
+    load_merged_tool_report,
     load_scenario_report,
     median,
     write_scenario_report,
 )
+from scripts.pak_bench.export_dashboard_data import _discover_read_reports, update_html_dashboard
 from scripts.pak_bench.report import (
     render_markdown,
     summarize_create_edit,
@@ -195,3 +197,74 @@ def test_generate_overlay_tree_subset_of_source(tmp_path):
     for f in overlay_files:
         rel = f.relative_to(overlay)
         assert (root / rel).is_file()
+
+
+# -- automatisation du dashboard (regression du bug du 2026-09-15) ----------
+
+
+def _write_read_report(path: Path, paks: dict) -> None:
+    path.write_text(
+        json.dumps({"tool": "x", "generated_at": "t", "sample_cap": 60, "paks": paks}),
+        encoding="utf-8",
+    )
+
+
+def test_load_merged_tool_report_combines_canonical_and_split_files(tmp_path):
+    _write_read_report(tmp_path / "rust-native_data_report.json", {"A.pak": {"error": None}})
+    _write_read_report(tmp_path / "rust-native_mods_report.json", {"B.pak": {"error": "x"}})
+    merged = load_merged_tool_report("rust-native", tmp_path)
+    assert merged is not None
+    assert set(merged["paks"]) == {"A.pak", "B.pak"}
+
+
+def test_load_merged_tool_report_missing_tool_returns_none(tmp_path):
+    assert load_merged_tool_report("divine", tmp_path) is None
+
+
+def test_discover_read_reports_ignores_unrelated_and_failed_files(tmp_path):
+    _write_read_report(tmp_path / "rust-native_data_report.json", {})
+    _write_read_report(tmp_path / "rust_mods_report.json", {})
+    _write_read_report(tmp_path / "divine_batch_FAILED_attempt.json", {})
+    (tmp_path / "coverage.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "ruff_report.json").write_text("{}", encoding="utf-8")
+
+    found = _discover_read_reports(tmp_path)
+    keys = {(tool, mode) for _path, tool, _label, mode in found}
+    assert ("rust_native", "data") in keys
+    assert ("rust_pipeline", "mods") in keys
+    assert not any(path.name == "divine_batch_FAILED_attempt.json" for path, *_ in found)
+    assert len(found) == 2  # ni coverage.json ni ruff_report.json (préfixe outil inconnu)
+
+
+def test_update_html_dashboard_replaces_only_data_block(tmp_path):
+    html = (
+        "<html><body>keep-me"
+        '<script id="dashboard-data" type="application/json">{"old": true}</script>'
+        "keep-me-too</body></html>"
+    )
+    path = tmp_path / "dashboard.html"
+    path.write_text(html, encoding="utf-8")
+
+    update_html_dashboard(path, {"new": [1, 2, 3]})
+
+    result = path.read_text(encoding="utf-8")
+    assert "keep-me" in result
+    assert "keep-me-too" in result
+    assert '"old": true' not in result
+    assert '"new"' in result
+    payload = json.loads(
+        result.split('<script id="dashboard-data" type="application/json">')[1].split("</script>")[
+            0
+        ]
+    )
+    assert payload == {"new": [1, 2, 3]}
+
+
+def test_update_html_dashboard_missing_marker_raises(tmp_path):
+    path = tmp_path / "dashboard.html"
+    path.write_text("<html><body>no data block here</body></html>", encoding="utf-8")
+    try:
+        update_html_dashboard(path, {})
+        raise AssertionError("devrait lever ValueError")
+    except ValueError:
+        pass

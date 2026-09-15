@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.pak_bench import strings
-from scripts.pak_bench.common import REPORTS_DIR, median
+from scripts.pak_bench.common import REPORTS_DIR, load_merged_tool_report, median
 
 TOOL_COLORS = {
     "python": "#4C72B0",
@@ -44,10 +44,15 @@ def _load_json(path: Path) -> dict[str, Any] | None:
 
 
 def load_read_reports(reports_dir: Path = REPORTS_DIR) -> dict[str, dict[str, Any]]:
+    """Un outil peut avoir plusieurs rapports (un par dossier/sous-ensemble
+    mesuré, ex. `rust-native_data_report.json` + `rust-native_mods_report.json`
+    en plus du fichier canonique `rust-native_report.json`) — tous fusionnés
+    automatiquement par `load_merged_tool_report`, pas besoin de les
+    combiner à la main après un batch portant sur plusieurs dossiers."""
     tools = ["python", "rust", "rust-native", "divine"]
     out = {}
     for t in tools:
-        data = _load_json(reports_dir / f"{t}_report.json")
+        data = load_merged_tool_report(t, reports_dir)
         if data is not None:
             out[t] = data
     return out
@@ -110,10 +115,22 @@ def render_markdown(
     *,
     capability_matrix: str = strings.CAPABILITY_MATRIX_MD,
 ) -> str:
+    """Les sections "narratives" (fix archive solide, bug Divine.exe batch,
+    lien dashboard) sont des faits stables sur ce chantier plutôt que des
+    annotations manuelles perdues à chaque régénération — les compteurs
+    qu'elles citent (erreurs, .pak couverts) restent calculés depuis les
+    rapports plutôt que figés en dur, pour ne pas devenir faux si le
+    périmètre mesuré change."""
+    read_summaries = {tool: summarize_read_report(r) for tool, r in read_reports.items()}
+    pak_counts = {s["pak_count"] for s in read_summaries.values() if s["pak_count"] > 0}
+    max_pak_count = max(pak_counts) if pak_counts else 0
+
     lines: list[str] = []
     lines.append(strings.REPORT_TITLE)
     lines.append("")
     lines.append(strings.REPORT_INTRO)
+    lines.append("")
+    lines.append(strings.DASHBOARD_LINK_LINE)
     lines.append("")
     lines.append(strings.SECTION_CAPABILITY_MATRIX)
     lines.append("")
@@ -127,14 +144,51 @@ def render_markdown(
     else:
         lines.append(strings.READ_TABLE_HEADER)
         lines.append(strings.READ_TABLE_SEP)
-        for tool, report in read_reports.items():
+        for tool in read_reports:
             label, mode = strings.READ_MODE_LABELS.get(tool, (tool, tool))
-            s = summarize_read_report(report)
+            s = read_summaries[tool]
+            footnotes = ""
+            if tool in ("python", "rust", "rust-native"):
+                footnotes += "¹"
+                if tool == "rust":
+                    footnotes += "²"
+            elif tool == "divine":
+                if s["pak_count"] and s["pak_count"] < max_pak_count:
+                    footnotes += "³"
+                if s["errors"]:
+                    footnotes += "⁴"
             lines.append(
-                f"| {label} | {mode} | {s['pak_count']:.0f} | {s['errors']:.0f} | "
+                f"| {label} | {mode} | {s['pak_count']:.0f} | {s['errors']:.0f}{footnotes} | "
                 f"{s['index_seconds']:.3f} | {s['content_seconds']:.3f} | "
                 f"{s['total_seconds']:.3f} |"
             )
+        lines.append("")
+        if "python" in read_summaries or "rust-native" in read_summaries:
+            n_continuation = read_summaries.get(
+                "rust-native", read_summaries.get("python", {})
+            ).get("errors", 0)
+            lines.append(strings.READ_FOOTNOTE_CONTINUATION_FILES.format(n=int(n_continuation)))
+        if "rust" in read_summaries and "rust-native" in read_summaries:
+            n_extra = read_summaries["rust"]["errors"] - read_summaries["rust-native"]["errors"]
+            if n_extra > 0:
+                lines.append("")
+                lines.append(strings.READ_FOOTNOTE_LOWTEX_PIPELINE.format(n_extra=int(n_extra)))
+        if "divine" in read_summaries:
+            ds = read_summaries["divine"]
+            if ds["pak_count"] and ds["pak_count"] < max_pak_count:
+                lines.append("")
+                lines.append(
+                    strings.READ_FOOTNOTE_DIVINE_SCOPE.format(
+                        pak_count=int(ds["pak_count"]), other_count=int(max_pak_count)
+                    )
+                )
+            if ds["errors"]:
+                lines.append("")
+                lines.append(
+                    strings.READ_FOOTNOTE_DIVINE_ERRORS.format(
+                        n_errors=int(ds["errors"]), pak_count=int(ds["pak_count"])
+                    )
+                )
     lines.append("")
 
     lines.append(strings.SECTION_CREATE_EDIT)
@@ -155,9 +209,30 @@ def render_markdown(
         lines.append(strings.CREATE_EDIT_PYTHONPAKLIB_NOTE)
     lines.append("")
 
+    if "rust-native" in read_summaries:
+        lines.append(strings.SECTION_SOLID_ARCHIVE_FIX)
+        lines.append("")
+        lines.append(strings.SOLID_ARCHIVE_FIX_BODY)
+        lines.append("")
+
+    if "divine" in read_summaries:
+        lines.append(strings.SECTION_DIVINE_BATCH_BUG)
+        lines.append("")
+        lines.append(strings.DIVINE_BATCH_BUG_BODY)
+        lines.append("")
+
     lines.append(strings.SECTION_LIMITATIONS)
     lines.append("")
-    lines.append(f"- {strings.LIMITATION_NO_REAL_PAK}")
+    if create_edit_results:
+        lines.append(f"- {strings.LIMITATION_CREATE_EDIT_DIVINE_SKIPPED}")
+    if "divine" in read_summaries and read_summaries["divine"]["pak_count"] < max_pak_count:
+        lines.append(
+            "- "
+            + strings.LIMITATION_DIVINE_SCOPE_TEMPLATE.format(
+                pak_count=int(read_summaries["divine"]["pak_count"]),
+                other_count=int(max_pak_count),
+            )
+        )
     lines.append(f"- {strings.LIMITATION_DIVINE_WINE}")
     lines.append("")
     return "\n".join(lines) + "\n"

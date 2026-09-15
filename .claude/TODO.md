@@ -567,16 +567,63 @@ sacrifié pour y arriver, tant pis.
     (au lieu de l'ancien run partiel à 5 fichiers).
   - `docs/pak-tools-benchmark/pak_tools_benchmark.md` réécrit avec ces
     chiffres complets (253 partout en lecture, Divine.exe 48/253 annoté
-    comme tel) — **attention** : `pak_bench_cli.py report` régénère ce
-    fichier from scratch à chaque fois et écrase toute annotation
-    manuelle (lien dashboard, sections fix/bug) ; un futur regen doit
-    réappliquer ces sections, pas juste `cp` le fichier généré par-dessus
-    `docs/`.
+    comme tel). **Le point d'attention noté ici a été résolu en 22f
+    ci-dessous** (les sections manuelles sont maintenant générées, pas
+    perdues à chaque regen).
   - Dashboard (§22d) republié à la même URL avec les données complètes
     (`scripts/pak_bench/export_dashboard_data.py` : texte de la note
     `divine_incomplete` aussi corrigé, il décrivait encore un run "peut
     être encore partiel" alors qu'il est maintenant terminé et complet
     sur son périmètre réel).
+- ~~**22f.** Automatisation complète rapport + dashboard à chaque run du
+  batch (demandé par Elwingh, suite aux deux points d'attention notés en
+  22e)~~ — fait :
+  - **Fusion automatique des rapports multi-dossiers** :
+    `common.load_merged_tool_report(tool, reports_dir)` fusionne
+    désormais TOUS les `reports/{tool}_report.json` ET
+    `reports/{tool}_*_report.json` (glob, pas une liste figée) par nom de
+    `.pak` — `report.py::load_read_reports` l'utilise. Plus besoin de
+    fusionner à la main après un run sur plusieurs dossiers (root cause
+    du bug de 22e). Attention aux faux positifs : `reports/` contenait
+    déjà `rust_debug_report.json`/`rust_release_report.json` (vieille
+    comparaison debug/release non liée, §17a, déjà documentée dans
+    `Tools/bg3rustpaklib/README.md`) qui auraient été aspirés par erreur
+    dans l'agrégat "rust" — supprimés (finding déjà préservé ailleurs).
+    Même souci avec `divine_batch_report.json` (tentative à 328 fichiers
+    100% échec) qui matchait aussi le glob `divine_*_report.json` —
+    renommé en `divine_batch_FAILED_attempt.json` (suffixe qui ne matche
+    plus aucun glob `*_report.json`) pour ne plus jamais polluer un
+    futur agrégat automatique.
+  - **`export_dashboard_data.py` découvre aussi dynamiquement** ses
+    fichiers (`_discover_read_reports`, même logique de préfixe outil +
+    segment de mode déduit du nom de fichier) au lieu d'une liste
+    `READ_REPORTS` figée à modifier à la main pour chaque nouveau
+    dataset. La note `divine_incomplete` calcule maintenant ses chiffres
+    (nb fichiers, erreurs, datasets manquants) depuis les rapports
+    réels au lieu d'une chaîne figée décrivant un run passé.
+  - **`docs/pak-tools-benchmark/pak_tools_benchmark.md` : sections
+    manuelles génèrées, plus perdues au regen**. `strings.py` porte
+    désormais le lien dashboard, les notes de bas de page (dynamiques :
+    comptes d'erreurs recalculés depuis les données) et les sections "Fix
+    archive solide"/"Bug Divine.exe batch" (texte narratif stable,
+    affiché seulement si les données correspondantes sont présentes) —
+    `report.py::render_markdown` les assemble à chaque appel. Un
+    `pak_bench_cli.py report` nu régénère maintenant un rapport complet
+    et cohérent, pas juste les tableaux.
+  - **Nouvelle commande `pak_bench_cli.py report --update-dashboard`** :
+    copie le rapport+PNG vers `docs/pak-tools-benchmark/`, régénère
+    `reports/dashboard_data.json`, et réinjecte les données dans
+    `docs/pak-tools-benchmark/dashboard.html` (nouvelle fonction
+    `export_dashboard_data.update_html_dashboard`, remplace uniquement
+    le bloc `<script id="dashboard-data">`, laisse le reste de la page
+    intact — plus besoin du script Python jetable utilisé pour la
+    première republication). Testé de bout en bout : chiffres identiques
+    à la version écrite à la main précédente.
+  - 5 nouveaux tests (`tests/test_pak_bench.py`, 18 au total) :
+    fusion multi-fichiers, exclusion des fichiers non pertinents/en
+    échec connu, injection HTML (remplace uniquement le bon bloc, lève
+    `ValueError` si le gabarit ne correspond pas). `ruff check`/`format`
+    clean, 313/313 tests du projet toujours verts.
 
 ### 12. Release standalone
 
