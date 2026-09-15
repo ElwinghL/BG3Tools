@@ -29,3 +29,16 @@ Objectif : que `.claude/TODO.md` reste la source de vérité unique et fiable
 de l'avancement du projet, exploitable par n'importe quelle session/agent
 sans avoir à reconstituer l'état réel depuis l'historique git ou une
 conversation précédente.
+
+## Couverture de tests
+
+La CI n'impose qu'un seuil **global** de 75% (`fail_under` dans
+`[tool.coverage.report]`, `pyproject.toml` — `coverage.py`/`pytest-cov` n'a
+pas de notion de seuil par fichier nativement). Au-delà de ce plancher
+imposé, tout agent ajoutant ou modifiant un fichier Python dans
+`bg3_mod_tui/` doit viser **75% de couverture sur ce fichier lui-même**, pas
+seulement sur la moyenne globale du projet — un fichier neuf à 30% qui
+"passe" seulement parce que d'autres fichiers compensent n'est pas
+acceptable. Vérifier avec `uv run pytest --cov=bg3_mod_tui
+--cov-report=term-missing` et regarder la ligne du fichier concerné avant
+de considérer une tâche terminée.
