@@ -1,5 +1,84 @@
 # BG3Tools — Todo List
 
+## Coordination — chantiers en cours (sous-agents)
+
+Registre de coordination — évite qu'une autre instance Claude ne reprenne un
+chantier déjà pris. Avant de démarrer une tâche ci-dessous, vérifie qu'elle
+n'est pas déjà "EN COURS" ; si tu en démarres une nouvelle, ajoute une entrée
+ici (avec ta branche/worktree) puis retire-la (ou passe-la en "Terminé" plus
+bas dans cette même section) une fois mergée.
+
+Contrôle git : le merge de chaque branche vers `main` reste réservé à la
+session orchestratrice (celle qui a lancé les sous-agents, actuellement une
+session côté Elwingh) — ne merge pas toi-même une branche que tu ne pilotes
+pas, même si elle semble terminée.
+
+**EN COURS**
+
+- Console BG3SE distante (§11b/11c) — trois branches liées, aucune mergée :
+  - `feat/RemoteConsoleTCPBridge` (sous-module `ElwinghL/bg3se`) — pont TCP
+    `RemoteConsole` réellement implémenté (pas juste conçu) : **compile sans
+    erreur** (confirmé par CI GitHub Actions, voir `.github/workflows/build.yml`
+    sur cette branche), reste bloqué au lien final par le problème Abseil
+    ci-dessous.
+  - `fix/AbseilLinkMissing` (sous-module `ElwinghL/bg3se`, **indépendante**,
+    base commune `main`) — protobuf v36.1 requiert de lier explicitement les
+    bibliothèques Abseil (log/strings/status/...), absentes de
+    `BG3Extender.vcxproj` : ~190 `LNK2001` sur TOUT build actuel de ce fork,
+    pas seulement RemoteConsole. Fix en cours de validation CI ; une fois
+    vert → merge dans `main` du fork, puis `main` fusionné dans
+    `feat/RemoteConsoleTCPBridge`.
+  - `feat/BG3SERemoteConsoleBridge` (dépôt principal) — côté `bg3_mod_tui/` :
+    champs hôte/port de l'onglet "Console BG3SE" rendus éditables (avant,
+    figés sur `bg3modtools.toml`), 2 tests widget ajoutés. En attente que le
+    pont TCP soit confirmé buildable avant merge.
+  - Reste ouvert après ces 3 merges : test en conditions réelles contre un
+    vrai `bg3.exe` (build Windows requis, aucun toolchain local).
+- `fix/PakEntrySizeZeroBug` (dépôt principal) — bug des entrées `.pak`
+  rapportant une taille de **0** au lieu de la vraie valeur : **corrigé**.
+  Statut : fait, en attente de validation/merge par Elwingh — voir détail §1
+  ci-dessous.
+- `feat/NMCM-VisibleShields-Patch` (§20b, 2e patch pilote) — même pattern que
+  le patch Absolute Defeat (déjà mergé), sur Visible Shields - Universal
+  (`enum` + `slider_int`) — premier patch à gérer un type `enum` côté NMCM
+  (dropdown natif). Statut : en cours, non mergé.
+
+**Disponible ensuite (P2/P3, non pris)**
+
+- **P1 §4a/4b** — priorisation Nexus/Mod.io : **bloqué**, pas de mapping
+  fiable Nexus↔mod.io identifié — ne pas attaquer sans lever ce blocage
+  d'abord (décision humaine requise sur l'heuristique).
+- **P2 §11b/11c** — voir ci-dessus (EN COURS).
+- **P2 §20b** — portage de mods MCM vers NMCM (spéculatif, pas de mod cible
+  identifié à ce jour — clarifier avec Elwingh avant de démarrer).
+- **P2/P3 §12a-c** — packaging wheel Python indépendant / GUI cross-platform /
+  alternative serveur web local.
+- **P3 §14a** — renommer les anciens merges de branches pour respecter la
+  convention `<type>/Contexte`.
+- **P2 §19c** — bascule du sous-module `Tools/ExportTools` (Norbyte/lslib)
+  vers `ElwinghL/lslib` — la branche `fix/LinuxBuildPakOnlyScope` est
+  **poussée** sur le fork (2026-09-13,
+  https://github.com/ElwinghL/lslib/pull/new/fix/LinuxBuildPakOnlyScope, PR
+  pas ouverte) mais pas encore mergée sur `main` du fork (à faire/relire par
+  Elwingh côté fork avant de basculer le sous-module). Une fois mergée :
+  mettre à jour `Tools/TOOLS.md`, re-épingler le commit, relancer
+  `scripts/compare_pak_reader.py --divine-mode batch`.
+
+**Terminé récemment** (chantiers de sous-agents, hors historique déjà repris
+dans les sections TODO ci-dessous)
+
+- `feat/PythonWheelPackaging` (§12a) — `bg3_mod_tui` installable comme
+  package Python indépendant (`pip install .`). Mergé dans `main`
+  (2026-09-14, 268 tests verts). Publication PyPI non demandée, hors scope.
+- `feat/DataExtractorModDocs` (§16a) — mergé dans `main` (commit `74169cd`,
+  2026-09-13). 16b/16c restent ouverts (voir §16 ci-dessous).
+- `feat/CompatFrameworkAudit` (§18a-c) — mergé dans `main` (2026-09-13), 29
+  tests, suite complète (248 tests) verte après intégration avec 16a.
+- `feat/NMCM-AbsoluteDefeat-Patch` (§20b, patch pilote) — mergé dans `main`
+  (2026-09-13, 255 tests verts). Voir détail §20b ci-dessous.
+- `fix/LSLibForkBuildLinux` (§19b) — mergé dans `main` (2026-09-13). Voir
+  détail §19 ci-dessous.
+
 ## TODO - Categorie human user
 
 Les points de cette categories sont a trier, reformuler et classer par les agents competents. Cette categorie ne doit pas etre supprimee, elle peut rester vide, accompagne de ce petit texte d'explication.
@@ -40,7 +119,7 @@ mais les causes racines ne sont pas corrigées :
 ### 1. Lecteur natif `.pak` (remplacer Divine.exe)
 
 - ~~**1a-1e.**~~ — fait : `bg3_mod_tui/pak_reader.py` (mmap, header LSPK v15/16/18, index LZ4), parsing meta.lsx/meta.lsf, intégré dans `pak_metadata.read_pak_identity` (le point d'usage réel de Divine.exe — `inventory._match_pak_to_archive` ne lit aucun .pak, seulement les noms de fichiers), avec repli automatique sur Divine.exe y compris sur exception imprévue (`1e`)
-  - ⚠️ **validé depuis contre de vrais `.pak` BG3** via `scripts/compare_pak_reader.py` (croisement Python/Rust/Divine.exe) : identité, table de fichiers et hash de contenu décompressé corrects, MAIS un vrai bug détecté — certaines entrées rapportent une taille de **0** au lieu de la vraie valeur (confirmée par Rust et Divine.exe), cause non encore identifiée — voir `Tools/bg3pythonpaklib/README.md#comparisons`. Impact limité en pratique : sert à la détection d'archives orphelines, qui ne fait que produire un rapport, jamais de suppression automatique — mais le bug de taille reste à corriger avant d'étendre l'usage de ce lecteur (ex: 16b)
+  - ~~⚠️ **bug de taille 0 sur certaines entrées**~~ — fait (`fix/PakEntrySizeZeroBug`, en attente de merge) : cause racine identifiée — LSLib écrit délibérément `UncompressedSize=0` pour toute entrée **non compressée** (`compression_method=0`), la vraie taille dans ce cas est `SizeOnDisk` ; `pak_reader.py::_parse_file_entry` utilisait `UncompressedSize` tel quel sans ce repli. Reproduit contre 4 vrais `.pak` du jeu (15 480 divergences avant fix, 0 après, croisé avec le lecteur Rust indépendant `bg3rustpaklib`). Corrigé + 2 tests de régression (dont la contrepreuve "fichier vide légitime"), 279/279 tests verts. **`Tools/bg3pythonpaklib` (dépôt séparé) documente probablement le même bug** — pas corrigé ici (hors périmètre de ce commit), à planifier séparément.
 
 ### 2. Archives orphelines — écriture incrémentale du rapport
 
@@ -262,13 +341,13 @@ sacrifié pour y arriver, tant pis.
 
 ### 11. Console extender intercepter/flux
 
-- **11a.** ~~Outil interceptant la console du script extender (Proton lag) → rapport dans un terminal TUI lisible~~ **reformulé par Elwingh** : le besoin réel n'est PAS de lire les logs (`*.log` sous `LogDirectory`) mais d'intercepter les vrais flux I/O de la console interactive BG3SE (un REPL Lua, `AllocConsole()`/`ReadConsoleW` dans `CoreLib/Console.cpp` et `BG3Extender/Extender/Shared/Console.cpp`, upstream Norbyte/bg3se) pour pouvoir taper des commandes Lua depuis un terminal Linux classique plutôt que la console Win32 native (laggy sous le rendu GUI de Wine/Proton). Première implémentation (tail de logs, lecture seule) reconnue insuffisante et **revert** de `main`.
-- **11b/11c.** ~~Transmission bidirectionnelle + auto-complétion~~ — **design + code écrits (branche `feat/BG3SEBidirectionalConsole`), build C++ bloqué** :
+- **11a.** ~~Outil interceptant la console du script extender (Proton lag) → rapport dans un terminal TUI lisible~~ **reformulé par Elwingh** : le besoin réel n'est PAS de lire les logs (`*.log` sous `LogDirectory`) mais d'intercepter les vrais flux I/O de la console interactive BG3SE (un REPL Lua, `AllocConsole()`/`ReadConsoleW` dans `CoreLib/Console.cpp` et `BG3Extender/Extender/Shared/Console.cpp`) pour pouvoir taper des commandes Lua depuis un terminal Linux classique plutôt que la console Win32 native (laggy sous le rendu GUI de Wine/Proton). Première implémentation (tail de logs, lecture seule) reconnue insuffisante et **revert** de `main`.
+- **11b/11c.** ~~Transmission bidirectionnelle + auto-complétion~~ — **implémenté, compile, bloqué en aval par un problème préexistant sans rapport (Abseil)** — voir aussi l'entrée "Console BG3SE distante" en tête de fichier (section Coordination) pour le détail des 3 branches en jeu :
   - Piste retenue après lecture de `CoreLib/Console.cpp`/`BG3Extender/Extender/Shared/Console.cpp` : pas de named pipe Windows (resterait interne au wineserver, pas trivialement exposable côté Linux) mais un **socket TCP en boucle locale (127.0.0.1)**, transparent à travers Proton puisque winsock s'appuie directement sur la pile réseau de l'hôte. La codebase avait déjà exactement ce pattern pour le débogueur Osiris/Lua (`SocketInterface`/`DebugInterface.cpp`, framing par longueur) — réutilisé tel quel plutôt que réinventé.
-  - Nouvelle classe `RemoteConsole` (`BG3Extender/Extender/Shared/RemoteConsole.{h,cpp}`, sous-classe de `SocketInterface`) : protocole texte à tags (`'L'` ligne de sortie, `'C'` commande, `'T'`/`'R'` requête/réponse de complétion). Démarrée par `DebugConsole::CreateRemoteConsole()`, appelée depuis `dllmain.cpp` **indépendamment** de `CreateConsole`/`AllocConsole` (config `EnableRemoteConsole`/`RemoteConsolePort`, port 9997 par défaut) — fonctionne donc même sans la console Win32 native, ce qui répond directement au problème de lag Wine/Proton. Complétion (11c) : commandes spéciales + énumération des globales Lua `_G` du contexte courant (`lua_next`, même pattern que `ExecLuaCommand` existant) ; complétion multi-niveaux (`Ext.I...`) pas implémentée.
-  - **NON buildé/testé côté C++** : aucun toolchain Windows dans cet environnement (`which mingw-w64-g++ x86_64-w64-mingw32-g++ wine` → absents ; seul `clang-cl` présent via linuxbrew, mais sans Windows SDK/`Windows.h`/`WinSock2.h` ni MSBuild pour driver les `.vcxproj`) — même blocage de fond que la section 19 (LSLibNative). Code écrit en miroir aussi fidèle que possible des patterns déjà existants dans cette codebase (`ExecLuaCommand`, `SocketInterface`), committé sur une branche locale **non poussée** du sous-module (`feat/RemoteConsoleSocket`, base `Norbyte/bg3se` — le fork `ElwinghL/bg3se` mentionné comme piste n'existe pas comme remote/sous-module de ce dépôt et n'a pas été créé, pour ne rien pousser sans accord explicite, même politique que `ElwinghL/lslib`). Le pointeur de sous-module du dépôt parent n'a PAS été mis à jour vers ce commit (resterait cassé pour quiconque n'a pas cette branche locale).
-  - Côté Python (`bg3_mod_tui/`), en revanche, **testé et fonctionnel** : `bg3se_remote_console.py` (client socket, protocole vérifié par 5 tests contre un faux serveur qui reproduit le protocole C++ à l'identique) + `widgets/bg3se_console.py` (ConsoleLog + Input + Tab-complétion façon shell, préfixe commun le plus long) intégré comme nouvel onglet "Console BG3SE" du `TabbedContent` Outils dans `ActionsScreen` — montage Textual vérifié manuellement (tous les descendants présents, pas d'exception). Prêt à parler à un vrai process de jeu dès que le patch C++ sera buildé (par Elwingh, ou dans un environnement avec toolchain Windows) et le port 9997 atteignable.
-  - **Reste ouvert** : build + test en conditions réelles du patch C++ (bloqué faute de toolchain), puis validation bout-en-bout avec le vrai jeu ; complétion multi-niveaux (`Ext.I...`) si le besoin s'en fait sentir.
+  - Nouvelle classe `RemoteConsoleInterface` (`BG3Extender/Extender/Shared/RemoteConsole.{h,cpp}`, sous-classe de `SocketInterface`) : protocole texte à tags (`'L'` ligne de sortie, `'C'` commande, `'T'`/`'R'` requête/réponse de complétion — identique octet pour octet à ce qu'attend déjà le client Python, framing longueur inclus). Démarrée dans `ScriptExtender::OnCoreLibInit` **indépendamment** de `CreateConsole`/`AllocConsole` (config `EnableRemoteConsole`/`RemoteConsolePort`, port 9997 par défaut, même pattern que `LuaDebugInterface`) — fonctionne donc même sans la console Win32 native, ce qui répond directement au problème de lag Wine/Proton (`CreateConsole: false` devient viable une fois validé). `DebugConsole::HandleCompletionRequest` : complétion par énumération de la table globale Lua, avec un niveau de nesting via `.` (`Osi.Add...`) ; complétion multi-niveaux plus profonde pas implémentée.
+  - **Compile sans erreur** (confirmé par CI GitHub Actions sur le fork `ElwinghL/bg3se`, branche `feat/RemoteConsoleTCPBridge` — voir `.github/workflows/build.yml`, ajouté à cette occasion faute de toolchain Windows local) : 0 erreur de compilation sur l'ensemble des fichiers. Le build échoue seulement à l'édition de liens, pour une raison **sans rapport** avec ce patch — voir `fix/AbseilLinkMissing` (protobuf v36.1/Abseil, section Coordination).
+  - Côté Python (`bg3_mod_tui/`), **testé et fonctionnel** : `bg3se_remote_console.py` (client socket, protocole vérifié par 5 tests contre un faux serveur qui reproduit le protocole C++ à l'identique) + `widgets/bg3se_console.py` (ConsoleLog + Input + Tab-complétion façon shell, préfixe commun le plus long, **champs hôte/port désormais éditables** — `feat/BG3SERemoteConsoleBridge`) intégré comme nouvel onglet "Console BG3SE" du `TabbedContent` Outils dans `ActionsScreen`.
+  - **Reste ouvert** : merge des 3 branches (voir section Coordination), puis test en conditions réelles contre un vrai `bg3.exe` (build Windows requis pour obtenir un `.dll` utilisable, aucun toolchain local) ; complétion multi-niveaux (`Ext.I...`) si le besoin s'en fait sentir.
 
 ## P4 — Futur
 
