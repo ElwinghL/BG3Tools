@@ -23,15 +23,23 @@ pas, même si elle semble terminée.
     ci-dessous.
   - `fix/AbseilLinkMissing` (sous-module `ElwinghL/bg3se`, **indépendante**,
     base commune `main`) — protobuf v36.1 requiert de lier explicitement les
-    bibliothèques Abseil (log/strings/status/...), absentes de
-    `BG3Extender.vcxproj` : ~190 `LNK2001` sur TOUT build actuel de ce fork,
-    pas seulement RemoteConsole. Fix en cours de validation CI ; une fois
-    vert → merge dans `main` du fork, puis `main` fusionné dans
+    bibliothèques Abseil (log/strings/status/...) ET `third_party/utf8_range`
+    (`libutf8_validity.lib`), absentes de `BG3Extender.vcxproj` : ~190
+    `LNK2001` sur TOUT build actuel de ce fork, pas seulement RemoteConsole.
+    Les deux fixes poussés (commits `7d38d5e`, `e6a8e3d`), plus un ciblage CI
+    `/t:BG3Extender` (`66ab2cf`, au lieu de `/t:Build` sur toute la `.sln`)
+    pour éviter deux échecs sans rapport sur d'autres projets de la solution
+    (`LuaDebugger.csproj` : restore NuGet Google.Protobuf absent en CI ;
+    `BG3Updater`/`TinyCrypt` : `PostBuildEvent` copiant vers un chemin
+    Windows local d'Elwingh inexistant sur le runner —
+    `PostBuildEventUseInBuild=false` ajouté). CI en cours de validation ;
+    une fois vert → merge dans `main` du fork, puis `main` fusionné dans
     `feat/RemoteConsoleTCPBridge`.
   - `feat/BG3SERemoteConsoleBridge` (dépôt principal) — côté `bg3_mod_tui/` :
     champs hôte/port de l'onglet "Console BG3SE" rendus éditables (avant,
-    figés sur `bg3modtools.toml`), 2 tests widget ajoutés. En attente que le
-    pont TCP soit confirmé buildable avant merge.
+    figés sur `bg3modtools.toml`), 6 tests widget ajoutés (champs éditables,
+    échec de connexion, déconnexion, complétion Tab candidat unique/ambigu).
+    En attente que le pont TCP soit confirmé buildable avant merge.
   - Reste ouvert après ces 3 merges : test en conditions réelles contre un
     vrai `bg3.exe` (build Windows requis, aucun toolchain local).
 - `fix/PakEntrySizeZeroBug` (dépôt principal) — bug des entrées `.pak`
@@ -44,11 +52,28 @@ pas, même si elle semble terminée.
   (dropdown natif). Statut : en cours, non mergé.
 - `chore/TestCoverageExpansion` (dépôt principal, worktree
   `.claude/worktrees/agent-a48c232636dedc09e`) — remontée de la couverture
-  globale (~48% avant, seuil CI 75% posé par `chore/CoverageThresholdPolicy`)
-  via ajout de tests unitaires sur les modules les moins couverts
-  (`native_mods.py`, `tools_manager.py`, `terminal_launcher.py`,
-  `platform_utils.py`, `launcher.py`, `linking.py`, `wineprefix.py`,
-  `downloader.py`, `screens/actions.py`, etc.). Statut : en cours, non mergé.
+  globale (~48% avant, seuil CI 75% posé par `chore/CoverageThresholdPolicy`,
+  55% après une première passe) via ajout de tests unitaires réels (pas de
+  tests creux/assertions triviales juste pour faire monter le pourcentage)
+  sur les modules les moins couverts (`native_mods.py`, `tools_manager.py`,
+  `terminal_launcher.py`, `platform_utils.py`, `launcher.py`, `linking.py`,
+  `wineprefix.py`, `downloader.py`, `screens/actions.py`, etc.). Statut : en
+  cours, non mergé — qualité des tests à revérifier un par un avant merge,
+  pas seulement le pourcentage final.
+
+**Terminé récemment**
+
+- `chore/ProjectCleanupAndQualityTooling` — fusion de
+  `.claude/AGENTS_IN_PROGRESS.md` dans cette section, ajout de `ruff` +
+  `pytest-cov`, `docs/forks.md`, `.claude/CLAUDE.md`. Mergé dans `main`
+  (`3e0cd56`).
+- `chore/CoverageThresholdPolicy` — `fail_under = 75` dans
+  `[tool.coverage.report]` (`pyproject.toml`) + consigne dans
+  `.claude/CLAUDE.md` demandant explicitement 75% par fichier modifié, pas
+  seulement sur la moyenne globale. Mergé dans `main`. Couverture globale
+  au moment du merge : ~48% (CI rouge assumée jusqu'à
+  `chore/TestCoverageExpansion` ci-dessus).
+>>>>>>> origin/main
 
 **Disponible ensuite (P2/P3, non pris)**
 
@@ -127,6 +152,11 @@ mais les causes racines ne sont pas corrigées :
 
 - ~~**1a-1e.**~~ — fait : `bg3_mod_tui/pak_reader.py` (mmap, header LSPK v15/16/18, index LZ4), parsing meta.lsx/meta.lsf, intégré dans `pak_metadata.read_pak_identity` (le point d'usage réel de Divine.exe — `inventory._match_pak_to_archive` ne lit aucun .pak, seulement les noms de fichiers), avec repli automatique sur Divine.exe y compris sur exception imprévue (`1e`)
   - ~~⚠️ **bug de taille 0 sur certaines entrées**~~ — fait (`fix/PakEntrySizeZeroBug`, en attente de merge) : cause racine identifiée — LSLib écrit délibérément `UncompressedSize=0` pour toute entrée **non compressée** (`compression_method=0`), la vraie taille dans ce cas est `SizeOnDisk` ; `pak_reader.py::_parse_file_entry` utilisait `UncompressedSize` tel quel sans ce repli. Reproduit contre 4 vrais `.pak` du jeu (15 480 divergences avant fix, 0 après, croisé avec le lecteur Rust indépendant `bg3rustpaklib`). Corrigé + 2 tests de régression (dont la contrepreuve "fichier vide légitime"), 279/279 tests verts. **`Tools/bg3pythonpaklib` (dépôt séparé) documente probablement le même bug** — pas corrigé ici (hors périmètre de ce commit), à planifier séparément.
+- **1f-1i. Écrivain `.pak` natif dans `Tools/bg3pythonpaklib` (remplacer `Divine.exe create-package`)** — état des lieux et étapes manquantes :
+  - **1f.** `Tools/bg3pythonpaklib` (dépôt séparé, `ElwinghL/bg3pythonpaklib`) est pour l'instant **lecture seule** — vérifié, aucun `write`/`create_package` dans son `src/`. Format de référence déjà connu côté lecture (header LSPK v15/16/18, table de fichiers, compression LZ4/zlib par entrée — section 1a-1e ci-dessus) et déjà implémenté côté écriture dans son homologue Rust `bg3rustpaklib` (`src/package/writer.rs` : `write_v15`/`write_v16`/`write_v18`, hash d'archive calqué sur `PackageWriter.cs` de LSLib) — utilisable comme référence de portage (algorithme/format), pas comme dépendance : `bg3pythonpaklib` reste pur Python, sans lier le binding Rust `pak_reader_rs`.
+  - **1g.** Implémenter l'écriture dans `bg3pythonpaklib` : construire la table de fichiers + header (probablement viser directement le format v18, le plus récent, sauf besoin de compat v15/v16 en écriture), compresser chaque entrée (LZ4 par défaut, zlib en option — mêmes méthodes déjà lues), calculer le hash d'archive attendu par le jeu/Divine. Prévoir une API proche de `PakArchive.open()` côté lecture, ex. une fonction/contexte `write_package(dest_path, source_dir)` ou `PakWriter`.
+  - **1h.** Validation croisée obligatoire avant tout remplacement d'usage réel : packager un mod source réel avec ce nouvel écrivain, puis relire le `.pak` produit avec LES TROIS lecteurs déjà en place (`bg3_mod_tui/pak_reader.py`, `pak_reader_rs`, `Divine.exe list-package`) — même rigueur que `scripts/compare_pak_reader.py` côté lecture. Le fork LSLib Linux (§19) a déjà révélé deux bugs de packaging (`0002-fix-linux-path-validation.patch`, quirk du point de montage `M2`) en faisant exactement ce test de bout en bout — s'attendre à des surprises similaires ici aussi.
+  - **1i.** Une fois 1g validé par 1h : dans `bg3_mod_tui`, ajouter `bg3pythonpaklib` comme dépendance/sous-module et remplacer l'appel à `Divine.exe -a create-package` par ce nouvel écrivain dans les points d'usage réels — `bg3_mod_tui/mod_fixer_fork.py::build_fork` (le plus simple : une seule source statique, `Tools/ModFixer/Mods/`), `bg3_mod_tui/compat_framework.py::build_pak`, et les scripts de build des patches NMCM (`Tools/nmcm_patches/*/README.md`, section "Building the .pak") — objectif final : packager un mod sous Linux sans dépendre de Wine/Proton pour lancer Divine.exe. Garder Divine.exe en repli tant que le nouvel écrivain n'a pas prouvé sa fiabilité sur un large échantillon de mods réels (même politique de prudence que côté lecture, `pak_metadata.read_pak_identity`).
 
 ### 2. Archives orphelines — écriture incrémentale du rapport
 
@@ -374,11 +404,9 @@ sacrifié pour y arriver, tant pis.
 - **12b.** GUI Python cross-platform (Linux + Windows) reprenant les fonctionnalités ci-dessus
 - **12c.** Alternative serveur web local : visualisation par navigateur, échange .pak/profils par socket sécurisé (clé + fichier auth type SSH)
 
-### 13. Licence
-
-- ~~**13a.** Identifier et citer les licences des outils/inspirations utilisés~~ — fait : `THIRD_PARTY_LICENSES.md` (dépendances Python via PyPI, LSLib/BG3SE/BG3 Mod Manager/BG3 Compatibility Framework/Native Mod Loader via l'API GitHub, licences vérifiées à la source) + mention dans le README ; deux cas non tranchables documentés tels quels (Para Tool : aucune licence détectée sur le dépôt ; Mod Fixer et MoreReactiveCompanions : pages Nexus Mods non accessibles en automatisé — HTTP 403 — usage sous conditions Nexus par défaut)
-
 ## Fait
+
+- **13a.** Identification et citation des licences des outils/inspirations utilisés : `THIRD_PARTY_LICENSES.md` (dépendances Python via PyPI, LSLib/BG3SE/BG3 Mod Manager/BG3 Compatibility Framework/Native Mod Loader via l'API GitHub, licences vérifiées à la source) + mention dans le README ; Para Tool : aucune licence détectée sur le dépôt (non tranchable). Mod Fixer : plus de flou — repackaging propre publié sous MIT (`github.com/ElwinghL/ModFixer`), créditant figs999 (auteur Nexus #141) et Norbyte/BG3SE (technique). MoreReactiveCompanions : retiré de `THIRD_PARTY_LICENSES.md` (app lancée telle quelle depuis Nexus, jamais modifiée/redistribuée — aucune obligation de licence).
 
 - progression X/Y pour téléchargement depuis fichier texte
 - message "déjà un hardlink" enrichi (mod, chemin)

@@ -1,38 +1,22 @@
-"""Fork local de Mod Fixer (Nexus #141, Norbyte) avec un meta.lsx propre.
+"""Construit `ModFixer.pak` (repackaging propre de Mod Fixer, meta.lsx
+valide) directement depuis le sous-module git `Tools/ModFixer`
+(github.com/ElwinghL/ModFixer, MIT -- voir son README pour l'attribution
+complète à figs999, auteur du mod d'origine sur Nexus Mods #141, et à
+Norbyte/BG3SE pour la technique elle-même).
 
-Mod Fixer n'est pas un mod comme les autres : il ne définit aucun module à
-lui — son seul contenu est un fichier vide,
-`Mods/Gustav/Story/RawFiles/Goals/ForceRecompile.txt`, déposé directement
-dans le dossier du module de BASE du jeu (Gustav) pour forcer la
-recompilation de sa story Osiris (corrige des soucis de compat après
-ajout/retrait de mods). N'ayant jamais eu besoin d'un `meta.lsx`/UUID, la
-validation "Load Order" de BG3 Mod Manager le signale (Medium) — bénin,
-mais gênant à distinguer d'un vrai problème.
-
-Ce module reconstruit donc un module séparé ("ModFixerFork", meta.lsx
-propre avec un UUID généré) contenant le même fichier au même chemin
-relatif — sous son propre dossier, jamais sous `Mods/Gustav/` (écraser le
-meta.lsx du module de base serait dangereux) — puis remplace `ModFixer.pak`
-par ce résultat (même nom de fichier, un seul .pak dans Mods/ : pas de
-doublon "ModFixer.pak" + "ModFixerFork.pak" à gérer soi-même). L'original
-est sauvegardé une fois pour toutes en `ModFixer.pak.orig` avant la
-première réécriture, pour rester réversible.
-
-Effet non garanti à 100% : si le moteur cible spécifiquement le cache du
-module Gustav pour décider de recompiler la story, ce fork sous un autre
-nom de module pourrait ne pas avoir le même effet — Nexus indique de toute
-façon que ce mod n'est plus nécessaire à partir du Patch 7 de BG3.
-
-Comme pour `compat_framework.py`, le .pak résultant n'est jamais committé
-(voir .gitignore) : reconstruit localement via Divine.exe (LSLib) à partir
-du ModFixer.pak déjà déployé par l'utilisateur."""
+Avant l'ajout de ce sous-module, ce module extrayait le `.pak` que
+l'utilisateur devait avoir installé depuis Nexus Mods au préalable
+(`extract-package` via Divine.exe) pour en retirer le fichier déclencheur
+et le remballer sous un `meta.lsx` propre. `Tools/ModFixer/Mods/` contient
+maintenant directement ce module complet (meta.lsx + fichier déclencheur
+vide) : il suffit de l'empaqueter (`create-package`), sans dépendre d'une
+installation Nexus préexistante ni d'extraire quoi que ce soit."""
 
 from __future__ import annotations
 
 import os
 import shutil
 import subprocess
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
@@ -43,66 +27,12 @@ from bg3_mod_tui.platform_utils import find_proton_prefix, is_windows, to_wine_p
 LogFn = Callable[[str], None]
 
 ORIGINAL_PAK_NAME = "ModFixer.pak"
-# Sauvegarde de l'original, écrite une seule fois (avant la toute première
-# réécriture) pour pouvoir revenir en arrière — jamais retouchée ensuite,
-# même si le fork est reconstruit plusieurs fois.
+# Sauvegarde d'un éventuel ModFixer.pak préexistant (installé manuellement
+# par l'utilisateur avant ce sous-module), écrite une seule fois, pour
+# pouvoir revenir en arrière -- jamais retouchée ensuite.
 ORIGINAL_BACKUP_NAME = "ModFixer.pak.orig"
-FORK_MODULE_NAME = "ModFixerFork"
-# UUID fixe (généré une fois, jamais recalculé) plutôt qu'un uuid4()
-# aléatoire à chaque reconstruction : un profil sauvegardé ou modsettings.lsx
-# qui référencerait ce module par UUID ne doit pas se retrouver cassé si le
-# fork est reconstruit une seconde fois (ex: après mise à jour de Divine.exe).
-FORK_UUID = "d0d7859c-09ab-45b7-b618-b59dded29403"
-# Chemin du fichier "déclencheur" à l'intérieur du module d'origine
-# (Gustav) — reproduit tel quel sous le nouveau module.
-_OVERRIDE_RELATIVE_PATH = Path("Story/RawFiles/Goals/ForceRecompile.txt")
-_ORIGINAL_MODULE_NAME = "Gustav"
 
 _DIVINE_TIMEOUT_SECONDS = 60
-
-_META_LSX_TEMPLATE = """<?xml version="1.0" encoding="utf-8"?>
-<save>
-  <version major="4" minor="0" revision="0" build="49" />
-  <region id="Config">
-    <node id="root">
-      <children>
-        <node id="ModuleInfo">
-          <attribute id="Author" type="LSWString" value="Norbyte (Mod Fixer) -- meta.lsx ajoute par ModTools" />
-          <attribute id="CharacterCreationLevelName" type="FixedString" value="" />
-          <attribute id="Description" type="LSWString" value="Fork local de Mod Fixer (Nexus #141) avec un meta.lsx propre, genere par ModTools (bg3_mod_tui/mod_fixer_fork.py) pour ne plus etre signale comme sans metadonnees par les validateurs de load order." />
-          <attribute id="Folder" type="LSWString" value="{folder}" />
-          <attribute id="GMTemplate" type="FixedString" value="" />
-          <attribute id="LobbyLevelName" type="FixedString" value="" />
-          <attribute id="MD5" type="LSString" value="" />
-          <attribute id="MainMenuBackgroundVideo" type="FixedString" value="" />
-          <attribute id="MenuLevelName" type="FixedString" value="" />
-          <attribute id="Name" type="FixedString" value="{folder}" />
-          <attribute id="NumPlayers" type="uint8" value="4" />
-          <attribute id="PhotoBooth" type="FixedString" value="" />
-          <attribute id="StartupLevelName" type="FixedString" value="" />
-          <attribute id="Tags" type="LSWString" value="" />
-          <attribute id="Type" type="FixedString" value="Patch" />
-          <attribute id="UUID" type="FixedString" value="{uuid}" />
-          <attribute id="Version64" type="int64" value="1" />
-          <children>
-            <node id="PublishVersion">
-              <attribute id="Version64" type="int64" value="1" />
-            </node>
-            <node id="Scripts" />
-            <node id="TargetModes">
-              <children>
-                <node id="Target">
-                  <attribute id="Object" type="FixedString" value="Story" />
-                </node>
-              </children>
-            </node>
-          </children>
-        </node>
-      </children>
-    </node>
-  </region>
-</save>
-"""
 
 
 class ModFixerForkError(RuntimeError):
@@ -161,28 +91,22 @@ def build_fork(
     reference_path: Path,
     log: LogFn = lambda _msg: None,
 ) -> Path:
-    """Reconstruit `ModFixer.pak` (voir docstring du module) dans
-    `mods_dir`, en l'écrasant par sa propre version forkée (meta.lsx
-    propre) — un seul fichier au final, pas un `ModFixerFork.pak` séparé
-    à gérer en plus de l'original.
+    """Empaquette `Tools/ModFixer/Mods/` en `ModFixer.pak` dans `mods_dir`,
+    en remplacement d'un éventuel `ModFixer.pak` déjà présent (sauvegardé
+    une seule fois en `ModFixer.pak.orig`, pour rester réversible).
 
-    Lève `ModFixerForkError` si `ModFixer.pak` (ou sa sauvegarde
-    `ModFixer.pak.orig`, si l'original a déjà été remplacé lors d'un appel
-    précédent) ou Divine.exe sont introuvables, ou si son contenu ne
-    correspond pas à celui attendu (mod mis à jour entre-temps par son
-    auteur, ou fichier différent) — on refuse de repackager à l'aveugle
-    plutôt que de produire un fork silencieusement incorrect."""
+    Lève `ModFixerForkError` si le sous-module `Tools/ModFixer` ou
+    Divine.exe sont introuvables, ou si l'empaquetage échoue."""
     dest_pak = mods_dir / ORIGINAL_PAK_NAME
     backup_pak = mods_dir / ORIGINAL_BACKUP_NAME
-    # Source à extraire : la sauvegarde si ModFixer.pak a déjà été remplacé
-    # par un fork précédent (sinon on repackagerait le fork lui-même, dont
-    # la structure Mods/ModFixerFork/ ne correspond plus à _ORIGINAL_MODULE_NAME).
-    original_pak = backup_pak if backup_pak.is_file() else dest_pak
-    if not original_pak.is_file():
+
+    source_root = tools_dir / "ModFixer"
+    if not (source_root / "Mods").is_dir():
         raise ModFixerForkError(
-            f"{ORIGINAL_PAK_NAME} introuvable dans {mods_dir} — installe d'abord Mod "
-            "Fixer (Nexus #141) normalement avant de le forker."
+            f"{source_root / 'Mods'} introuvable -- sous-module Tools/ModFixer manquant "
+            "ou non initialisé (git submodule update --init Tools/ModFixer)."
         )
+
     divine_exe = find_divine_exe(tools_dir)
     if divine_exe is None:
         raise ModFixerForkError(
@@ -192,60 +116,25 @@ def build_fork(
 
     use_wine_path = not is_windows()
 
-    with tempfile.TemporaryDirectory(prefix="bg3modtools_modfixerfork_") as tmp:
-        tmp_path = Path(tmp)
-        extract_dir = tmp_path / "extracted"
+    if dest_pak.is_file() and not backup_pak.is_file():
+        shutil.copy2(dest_pak, backup_pak)
+        log(f"Original conservé -> {backup_pak} (avant première réécriture).")
 
-        log(f"Extraction de {ORIGINAL_PAK_NAME} via Divine.exe...")
-        _run_divine(
-            divine_exe,
-            "extract-package",
-            [
-                "-s", to_wine_path(original_pak) if use_wine_path else str(original_pak),
-                "-d", to_wine_path(extract_dir) if use_wine_path else str(extract_dir),
-            ],
-            reference_path=reference_path,
-        )
-
-        source_file = extract_dir / "Mods" / _ORIGINAL_MODULE_NAME / _OVERRIDE_RELATIVE_PATH
-        if not source_file.is_file():
-            raise ModFixerForkError(
-                f"Contenu inattendu dans {ORIGINAL_PAK_NAME} (fichier "
-                f"'{_OVERRIDE_RELATIVE_PATH}' introuvable sous "
-                f"Mods/{_ORIGINAL_MODULE_NAME}/) — le mod a peut-être changé depuis, "
-                "refus de repackager à l'aveugle."
-            )
-
-        fork_module_dir = tmp_path / "fork_source" / "Mods" / FORK_MODULE_NAME
-        dest_override = fork_module_dir / _OVERRIDE_RELATIVE_PATH
-        dest_override.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_file, dest_override)
-
-        (fork_module_dir / "meta.lsx").write_text(
-            _META_LSX_TEMPLATE.format(folder=FORK_MODULE_NAME, uuid=FORK_UUID),
-            encoding="utf-8",
-        )
-
-        if not backup_pak.is_file():
-            shutil.copy2(original_pak, backup_pak)
-            log(f"Original sauvegardé -> {backup_pak} (avant première réécriture).")
-
-        log(f"Empaquetage de {ORIGINAL_PAK_NAME} (UUID {FORK_UUID}) via Divine.exe...")
-        _run_divine(
-            divine_exe,
-            "create-package",
-            [
-                "-s", to_wine_path(fork_module_dir.parent.parent) if use_wine_path else str(fork_module_dir.parent.parent),
-                "-d", to_wine_path(dest_pak) if use_wine_path else str(dest_pak),
-            ],
-            reference_path=reference_path,
-        )
+    log(f"Empaquetage de {ORIGINAL_PAK_NAME} depuis Tools/ModFixer via Divine.exe...")
+    _run_divine(
+        divine_exe,
+        "create-package",
+        [
+            "-s",
+            to_wine_path(source_root) if use_wine_path else str(source_root),
+            "-d",
+            to_wine_path(dest_pak) if use_wine_path else str(dest_pak),
+        ],
+        reference_path=reference_path,
+    )
 
     if not dest_pak.is_file():
         raise ModFixerForkError(f"Échec de l'empaquetage : {dest_pak} n'a pas été créé.")
 
-    log(
-        f"{ORIGINAL_PAK_NAME} remplacé par le fork -> {dest_pak} (original conservé "
-        f"dans {backup_pak.name})."
-    )
+    log(f"{ORIGINAL_PAK_NAME} construit -> {dest_pak}.")
     return dest_pak

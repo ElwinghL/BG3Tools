@@ -12,10 +12,11 @@ Liste des outils tiers utilisés dans ce workspace (non versionnés, voir
 | BG3 Script Extender (BG3SE) | `Tools/BG3 Script Extender/`                                      | https://github.com/ElwinghL/bg3se (fork de https://github.com/Norbyte/bg3se) |
 | Native Mod Loader           | — (à télécharger manuellement, DLL non récupérable depuis GitHub) | https://github.com/gottyduke/NativeModLoader / https://www.nexusmods.com/baldursgate3/mods/944 |
 | BG3 Compatibility Framework | `Tools/BG3-Compatibility-Framework/`                              | https://github.com/BG3-Community-Library-Team/BG3-Compatibility-Framework                      |
-| MoreReactiveCompanions      | `Tools/MoreReactiveCompanionsConfigApp/`                          | https://www.nexusmods.com/baldursgate3/mods/5447                                               |
+| MoreReactiveCompanions      | — (application de configuration lancée telle quelle, jamais téléchargée dans `Tools/`) | https://www.nexusmods.com/baldursgate3/mods/5447                                               |
+| Mod Fixer                   | `Tools/ModFixer/`                                                 | https://github.com/ElwinghL/ModFixer (repackaging propre — technique d'origine : Nexus #141 par figs999, créditant Norbyte/BG3SE) |
 | bg3rustpaklib                | `Tools/bg3rustpaklib/`                                            | https://github.com/ElwinghL/bg3rustpaklib                                                      |
 | bg3pythonpaklib              | `Tools/bg3pythonpaklib/`                                          | https://github.com/ElwinghL/bg3pythonpaklib                                                    |
-| NMCM (Native Mod Configuration Menu) | `Tools/bg3-nmcm/`                                         | https://github.com/Luiznunes12/bg3-nmcm / https://mod.io/g/baldursgate3/m/native-mod-configuration-menu |
+| NMCM (Native Mod Configuration Menu) | `Tools/bg3-nmcm/`                                         | https://github.com/ElwinghL/bg3-nmcm-patcher (fork de https://github.com/Luiznunes12/bg3-nmcm, pour y proposer nos patchs — voir `Tools/nmcm_patches/`) / https://mod.io/g/baldursgate3/m/native-mod-configuration-menu |
 | Yet Another BG3 Native Mod Loader (autostart) | `Installation BG3/bin/YABG3ML-Autostart/` (hardlink géré via `native_mods_manifest.json`) | https://github.com/MolotovCherry/Yet-Another-BG3-Native-Mod-Loader |
 
 ## Yet Another BG3 Native Mod Loader — contrainte registre Proton

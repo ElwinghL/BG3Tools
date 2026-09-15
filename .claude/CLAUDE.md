@@ -42,3 +42,14 @@ seulement sur la moyenne globale du projet — un fichier neuf à 30% qui
 acceptable. Vérifier avec `uv run pytest --cov=bg3_mod_tui
 --cov-report=term-missing` et regarder la ligne du fichier concerné avant
 de considérer une tâche terminée.
+
+## Ne jamais déplacer les fichiers de Yet Another BG3 Native Mod Loader (autostart)
+
+`bg3_autostart.exe`/`loader.dll` (`Installation BG3/bin/YABG3ML-Autostart/`)
+posent des clés de registre Proton (`Image File Execution Options`) qui
+pointent vers leur chemin exact au moment de l'installation. **Ne jamais
+déplacer ces fichiers après coup** sans d'abord lancer `uninstall.bat` —
+sinon le jeu refuse de démarrer tant que `uninstall.bat` n'a pas été relancé
+(pas de perte de sauvegarde, mais blocage). Détail complet (contrainte
+registre, pipeline `bg3_mod_tui` déjà safe vis-à-vis de ces fichiers) dans
+`Tools/TOOLS.md`.
