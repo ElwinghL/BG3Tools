@@ -15,13 +15,29 @@ pas, même si elle semble terminée.
 
 **EN COURS**
 
-- `feat/PakToolsBenchmark` (dépôt principal, worktree
-  `.claude/worktrees/agent-aa5dc47578d03919f`) — stratégie de benchmark
-  comparatif Divine.exe (LSLib) / bg3pythonpaklib / bg3rustpaklib (lecture
-  single/batch, création/édition/batch). Statut : implémentation terminée
-  et validée bout en bout (fixtures synthétiques, pas de vrai `.pak` du
-  jeu mesuré dans cette passe — décision explicite en cours de route),
-  prête à relire/merger par Elwingh. Détail en §22 ci-dessous.
+- `feat/PakToolsBenchmark` (dépôt principal + sous-modules
+  `Tools/bg3rustpaklib`/`Tools/bg3pythonpaklib`, même nom de branche dans
+  chacun ; **le worktree `.claude/worktrees/agent-aa5dc47578d03919f` a été
+  supprimé** — ne plus s'y référer) — stratégie de benchmark comparatif
+  Divine.exe (LSLib) / bg3pythonpaklib / bg3rustpaklib (lecture
+  single/batch, création/édition/batch). Statut : implémentation terminée,
+  validée sur fixtures synthétiques (création/édition) **et sur les vrais
+  `.pak` du jeu** (lecture, 48 fichiers réels) — un vrai bug de
+  décompression d'archive solide trouvé et corrigé au passage (`LowTex.pak`,
+  détail en §22 ci-dessous). Prête à relire/merger par Elwingh. **Incident
+  de coordination du 2026-09-15** : le worktree de l'agent a été supprimé
+  par erreur (`git worktree remove --force`) alors qu'il contenait deux
+  commits de sous-module jamais poussés — contenu restauré depuis la
+  transcription de l'agent, revérifié (compilation + tests), recommité.
+  Une session concurrente (`bg3tools-cb`) a aussi basculé le dépôt de
+  travail partagé sur sa propre branche pendant la récupération, faisant
+  atterrir un commit sur la mauvaise branche — récupéré par cherry-pick
+  isolé (worktree temporaire dédié) sans toucher au travail de l'autre
+  session. Aucune perte finale, mais working dir principal partagé entre
+  sessions concurrentes à traiter avec prudence à l'avenir (`git status`
+  systématique avant tout `checkout`/`worktree remove`, jamais de
+  `--force` sans avoir vérifié l'absence de sous-modules indépendants
+  dans le worktree ciblé).
 - Console BG3SE distante (§11b/11c) — trois branches liées, aucune mergée :
   - `feat/RemoteConsoleTCPBridge` (sous-module `ElwinghL/bg3se`) — pont TCP
     `RemoteConsole` réellement implémenté (pas juste conçu) : **compile sans
@@ -440,6 +456,38 @@ sacrifié pour y arriver, tant pis.
   mis à jour avec un pointeur vers le nouveau harnais, sans chiffres
   fabriqués. Statut : branche prête à relire/merger par Elwingh (pas
   mergée depuis ce sous-agent, conformément à la consigne de coordination).
+- ~~**22b.** Lecture mesurée sur les vrais `.pak` du jeu (pas seulement
+  synthétiques) et bug de décompression d'archive solide trouvé au
+  passage~~ — fait : en régénérant `rust-native_report.json` contre les 48
+  vrais `.pak` de `Data/` (lecture seule, rien écrit), `LowTex.pak`
+  (archive solide réelle du jeu de base) échouait avec `Invalid LZ4 block
+  size: 2147549184 > ...`. Cause racine, deux bugs distincts dans
+  `Tools/bg3rustpaklib/src/package/reader.rs` :
+  1. `decompress_solid_archive()` découpait le frame LZ4 7 octets trop
+     tard (à l'offset du premier fichier, qui pointe déjà après l'en-tête
+     LZ4 minimal de 7 octets, au lieu du vrai début du frame) — le magic
+     number LZ4 était donc absent de la tranche passée au décodeur, qui
+     retombait sur un chemin heuristique "legacy" produisant des tailles
+     de bloc aberrantes.
+  2. Les offsets décompressés cumulés étaient assignés dans l'ordre de la
+     table de fichiers, pas dans l'ordre de packing physique
+     (`entry.offset` croissant) — désormais trié avant accumulation.
+  3. `PackagedFile::size()` retombait sur `size_on_disk` pour toute entrée
+     non individuellement compressée (repli correct pour une entrée
+     classique, cf. le bug `UncompressedSize=0` déjà documenté côté
+     Python en section 1 ci-dessus) — mais faux pour une entrée d'archive
+     solide, où `compression_method` vaut toujours `None` au niveau
+     entrée et `size_on_disk` sert au calcul de bornes du frame, pas à la
+     taille décompressée. `size()` est désormais solid-aware.
+  Régression ajoutée : `test_lowtex_solid_archive_decompresses`
+  (`Tools/bg3rustpaklib/tests/pak_integration_tests.rs`, fixture réelle
+  locale gitignored `tests/paks/solid/LowTex.pak`) — vérifie que chaque
+  entrée décompresse exactement à sa taille déclarée. Après fix : 0/48
+  vraies erreurs (les 22 "erreurs" restantes dans le rapport sont
+  attendues — fichiers de continuation `*_N.pak` d'archives multi-parties,
+  que le harnais liste à tort comme des `.pak` indépendants ; annoté dans
+  le rapport plutôt que corrigé, périmètre séparé). Rapport
+  `docs/pak-tools-benchmark/` régénéré avec ces vrais chiffres.
 
 ### 12. Release standalone
 
