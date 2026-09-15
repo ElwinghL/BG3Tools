@@ -44,6 +44,10 @@ source = ["bg3_mod_tui"]
 [tool.coverage.report]
 show_missing = true
 exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+# Seuil global (pas par fichier — pytest-cov/coverage.py n'a pas cette
+# granularité nativement) : la CI échoue si la couverture totale de
+# bg3_mod_tui tombe sous 75%.
+fail_under = 75
 
 [build-system]
 requires = ["hatchling"]
