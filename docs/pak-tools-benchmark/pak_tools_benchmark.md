@@ -2,6 +2,8 @@
 
 Généré par `scripts/pak_bench_cli.py report`. Méthodologie : chaque outil est mesuré **dans son jus** (perf native/brute, sans pont intermédiaire) ET, quand c'est pertinent, dans le **pipeline réel** de BG3Tools (binding FFI, subprocess Wine/Proton) — voir la colonne dédiée plutôt qu'un chiffre mélangé.
 
+**Dashboard interactif** (matrice de capacités, graphes lecture natif/pipeline et création/édition, tableau filtrable des 253 `.pak` réels mesurés, highlight du cas `LowTex.pak`) : <https://claude.ai/artifact/Wk9Gtx6m4uiSJpWGvAjJoZ> — données consolidées par `scripts/pak_bench/export_dashboard_data.py` depuis `reports/*.json`.
+
 ## Matrice de capacités
 
 | Capacité | Divinity.exe (LSLib) | bg3pythonpaklib | bg3rustpaklib |

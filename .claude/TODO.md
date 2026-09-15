@@ -24,11 +24,16 @@ pas, même si elle semble terminée.
   validée sur fixtures synthétiques (création/édition) **et sur les vrais
   `.pak` du jeu** (lecture, 48 fichiers réels) — un vrai bug de
   décompression d'archive solide trouvé et corrigé au passage (`LowTex.pak`,
-  détail en §22 ci-dessous). Prête à relire/merger par Elwingh. **Incident
-  de coordination du 2026-09-15** : le worktree de l'agent a été supprimé
-  par erreur (`git worktree remove --force`) alors qu'il contenait deux
-  commits de sous-module jamais poussés — contenu restauré depuis la
-  transcription de l'agent, revérifié (compilation + tests), recommité.
+  détail en §22 ci-dessous). Dashboard interactif publié (§22d) par un
+  sous-agent dédié (worktree `.claude/worktrees/agent-a25c6336df791b628`,
+  à nettoyer maintenant que son commit a été cherry-pické sur cette
+  branche) — brief entièrement couvert, spec initial
+  (`docs/superpowers/specs/2026-09-15-pak-tools-benchmark-design.md`)
+  désormais sans brique manquante. Prête à relire/merger par Elwingh.
+  **Incident de coordination du 2026-09-15** : le worktree de l'agent
+  initial (`agent-aa5dc47578d03919f`) a été supprimé par erreur
+  (`git worktree remove --force`) alors qu'il contenait deux commits de
+  sous-module jamais poussés — contenu restauré depuis la
   Une session concurrente (`bg3tools-cb`) a aussi basculé le dépôt de
   travail partagé sur sa propre branche pendant la récupération, faisant
   atterrir un commit sur la mauvaise branche — récupéré par cherry-pick
@@ -503,6 +508,33 @@ sacrifié pour y arriver, tant pis.
   synthétiques précédents dans le tableau création/édition ; les fixtures
   synthétiques restent disponibles via `--synthetic` pour des profils de
   taille contrôlés).
+- ~~**22d.** Artifact HTML interactif (dernière brique prévue dès le spec
+  initial, différée en 22a)~~ — fait, par un sous-agent dédié :
+  <https://claude.ai/artifact/Wk9Gtx6m4uiSJpWGvAjJoZ> (matrice de
+  capacités, graphes lecture index/contenu natif vs pipeline PyO3 par
+  jeu de données, graphe création/édition médiane+min/max, tableau
+  filtrable des 253 `.pak` réels mesurés avec highlight du cas
+  `LowTex.pak`). Données consolidées par le nouveau
+  `scripts/pak_bench/export_dashboard_data.py` (strippe `content_hashes`
+  et le détail des `entries`, garde temps/erreurs/nombre d'entrées par
+  `.pak`) depuis `reports/*.json`, embarquées telles quelles dans le HTML
+  (~178 Ko, autonome, pas de connexion aux fichiers locaux). Palette et
+  specs de marks validés via la skill `dataviz`
+  (`scripts/validate_palette.js`, 4 slots catégoriels fixes
+  divine/rust-pipeline/rust-native/python, WARN de contraste light-mode
+  sur aqua/yellow atténué par labels directs + vue tableau, conforme à la
+  règle de secours). Écart au brief : la série Divine.exe du dashboard ne
+  vient PAS du fichier à 5 réussites utilisé dans le rapport Markdown
+  (`divine_report.json`) mais de `divine_data_report.json`, régénéré en
+  parallèle par la session orchestratrice pendant ce chantier (bug de
+  flag `-u` corrigé en cours de route) — capturé à 10/48 fichiers, 0
+  erreur, au moment de l'export (fichier écrit de façon incrémentale,
+  donc probablement encore partiel) ; documenté explicitement dans le
+  dashboard plutôt que présenté comme le lot complet. L'ancienne
+  tentative à 328 fichiers (`divine_batch_report.json`, 2026-09-10, 100%
+  échec) reste listée pour traçabilité, jamais mélangée aux chiffres de
+  succès. Lien ajouté dans
+  `docs/pak-tools-benchmark/pak_tools_benchmark.md`.
 
 ### 12. Release standalone
 
