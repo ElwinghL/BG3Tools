@@ -368,7 +368,7 @@ def _run_divine_batch_tool(
                     _path_arg(dest_root, use_wine_path=use_wine_path),
                     "-i",
                     "pak",
-                    "-u",
+                    "--use-package-name",
                 ],
                 reference_path=reference_path,
                 timeout=max(600, 5 * len(pak_paths)),
