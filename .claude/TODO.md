@@ -47,30 +47,6 @@ pas, même si elle semble terminée.
 
 **EN COURS**
 
-- `feat/PakToolsBenchmark` (dépôt principal + sous-modules
-  `Tools/bg3rustpaklib`/`Tools/bg3pythonpaklib`, même nom de branche dans
-  chacun ; **le worktree dédié `.claude/worktrees/agent-aa5dc47578d03919f`
-  a été supprimé — ne plus s'y référer**, le dépôt principal travaille
-  directement sur cette branche) — stratégie de benchmark comparatif
-  Divine.exe (LSLib) / bg3pythonpaklib / bg3rustpaklib (lecture
-  single/batch, création/édition/batch). Statut : implémentation terminée,
-  validée sur fixtures synthétiques (création/édition) **et sur les vrais
-  `.pak` du jeu** (lecture, 48 fichiers réels) — un vrai bug de
-  décompression d'archive solide trouvé et corrigé au passage (`LowTex.pak`,
-  détail en §22 ci-dessous). Prête à relire/merger par Elwingh.
-  **Incident de coordination du 2026-09-15** : le worktree de l'agent a été
-  supprimé par erreur (`git worktree remove --force`) alors qu'il contenait
-  deux commits de sous-module jamais poussés — contenu restauré depuis la
-  transcription de l'agent, revérifié (compilation + tests), recommité.
-  Une session concurrente (`bg3tools-cb`) a aussi basculé le dépôt de
-  travail partagé sur sa propre branche pendant la récupération, faisant
-  atterrir un commit sur la mauvaise branche — récupéré par cherry-pick
-  isolé (worktree temporaire dédié) sans toucher au travail de l'autre
-  session. Aucune perte finale, mais le dépôt de travail principal est
-  partagé entre sessions concurrentes : prudence à l'avenir (`git status`
-  systématique avant tout `checkout`/`worktree remove`, jamais de
-  `--force` sans avoir vérifié l'absence de sous-modules indépendants dans
-  le worktree ciblé).
 - Console BG3SE distante (§11b/11c) — trois branches liées, aucune mergée :
   - `feat/RemoteConsoleTCPBridge` (sous-module `ElwinghL/bg3se`) — pont TCP
     `RemoteConsole` réellement implémenté (pas juste conçu) : **compile sans
@@ -106,6 +82,29 @@ pas, même si elle semble terminée.
 
 **Terminé récemment**
 
+- `feat/PakToolsBenchmark` (dépôt principal + sous-modules
+  `Tools/bg3rustpaklib`/`Tools/bg3pythonpaklib`, mêmes noms de branche,
+  poussés vers leurs remotes GitHub) — stratégie de benchmark comparatif
+  Divine.exe (LSLib) / bg3pythonpaklib / bg3rustpaklib (lecture
+  single/batch, création/édition/batch), mesurée sur de vrais `.pak`
+  (253 en lecture, contenu réel extrait pour création/édition) plutôt
+  que seulement synthétique. Deux vrais bugs trouvés et corrigés au
+  passage : décompression d'archive solide dans `bg3rustpaklib`
+  (`LowTex.pak`) et mauvais flag Divine.exe en mode batch (`-u` au lieu
+  de `--use-package-name`, qui révèle ensuite un crash CLR upstream dans
+  LSLib non corrigeable côté script). Dashboard interactif versionné en
+  local (`docs/pak-tools-benchmark/dashboard.html`) avec mise à jour
+  automatisée (`pak_bench_cli.py report --update-dashboard`). Détail
+  complet en §22 ci-dessous (22a-22f). **Incident de coordination du
+  2026-09-15** : un worktree d'agent a été supprimé par erreur
+  (`git worktree remove --force`) avec des commits de sous-module non
+  poussés dedans — contenu restauré depuis la transcription de l'agent,
+  revérifié ; une session concurrente a aussi fait atterrir un commit
+  sur la mauvaise branche pendant la récupération, corrigé par
+  cherry-pick isolé. Aucune perte finale — leçon retenue : `git status`
+  systématique avant tout `checkout`/`worktree remove`, jamais de
+  `--force` sans avoir vérifié l'absence de sous-modules indépendants
+  dans le worktree ciblé.
 - `chore/TestCoverageExpansion` (dépôt principal, worktree
   `.claude/worktrees/agent-a48c232636dedc09e`) — remontée de la couverture
   globale (~48% avant, seuil CI 75% posé par `chore/CoverageThresholdPolicy`)
@@ -570,6 +569,122 @@ synthetic,report,strings}.py`. bg3rustpaklib mesuré "natif" via
   synthétiques précédents dans le tableau création/édition ; les fixtures
   synthétiques restent disponibles via `--synthetic` pour des profils de
   taille contrôlés).
+- ~~**22d.** Artifact HTML interactif (dernière brique prévue dès le spec
+  initial, différée en 22a)~~ — fait, par un sous-agent dédié :
+  <https://claude.ai/artifact/Wk9Gtx6m4uiSJpWGvAjJoZ> (matrice de
+  capacités, graphes lecture index/contenu natif vs pipeline PyO3 par
+  jeu de données, graphe création/édition médiane+min/max, tableau
+  filtrable des 253 `.pak` réels mesurés avec highlight du cas
+  `LowTex.pak`). Données consolidées par le nouveau
+  `scripts/pak_bench/export_dashboard_data.py` (strippe `content_hashes`
+  et le détail des `entries`, garde temps/erreurs/nombre d'entrées par
+  `.pak`) depuis `reports/*.json`, embarquées telles quelles dans le HTML
+  (~178 Ko, autonome, pas de connexion aux fichiers locaux). Palette et
+  specs de marks validés via la skill `dataviz`
+  (`scripts/validate_palette.js`, 4 slots catégoriels fixes
+  divine/rust-pipeline/rust-native/python, WARN de contraste light-mode
+  sur aqua/yellow atténué par labels directs + vue tableau, conforme à la
+  règle de secours). Écart au brief : la série Divine.exe du dashboard ne
+  vient PAS du fichier à 5 réussites utilisé dans le rapport Markdown
+  (`divine_report.json`) mais de `divine_data_report.json`, régénéré en
+  parallèle par la session orchestratrice pendant ce chantier (bug de
+  flag `-u` corrigé en cours de route) — capturé à 10/48 fichiers, 0
+  erreur, au moment de l'export (fichier écrit de façon incrémentale,
+  donc probablement encore partiel) ; documenté explicitement dans le
+  dashboard plutôt que présenté comme le lot complet. L'ancienne
+  tentative à 328 fichiers (`divine_batch_report.json`, 2026-09-10, 100%
+  échec) reste listée pour traçabilité, jamais mélangée aux chiffres de
+  succès. Lien ajouté dans
+  `docs/pak-tools-benchmark/pak_tools_benchmark.md`.
+- ~~**22e.** Divine.exe complété (48/48 jeu de base) + bug de mode batch
+  Divine.exe/LSLib trouvé + republication du dashboard~~ — fait :
+  - Wine trouvé (le premier essai résolvait le mauvais préfixe Proton —
+    `resolve_wine_bin(config.appdata_path)` au lieu de
+    `resolve_wine_bin(find_proton_prefix(config.appdata_path))` ; le vrai
+    binaire est fourni par Proton-GE, pas un `wine` système).
+  - Mode batch Divine.exe (`extract-packages`) : deux bugs superposés.
+    D'abord `-u` (n'existe pas dans les arguments CLI de Divine.exe —
+    `use-package-name` n'a qu'une forme longue) → corrigé en
+    `--use-package-name` dans `scripts/compare_pak_reader.py`. Puis, avec
+    le bon flag, crash CLR (`Fatal error. Internal CLR error.
+    0x80131506` dans `CommandLineArguments.GetResourceFormatByString`,
+    appelé inconditionnellement sur `-i pak` en mode batch alors que
+    cette fonction ne connaît que `lsb`/`lsf`/`lsj`/`lsx`) — bug upstream
+    LSLib dans le binaire tiers pré-compilé
+    (`Tools/ExportTools/dist/Tools/Divine.exe`), pas corrigeable côté
+    script. Le mode batch Divine.exe reste donc inutilisable ; documenté
+    comme tel plutôt que contourné en silence.
+  - Mode per-file (fonctionnel) relancé sur les 48 `.pak` du jeu de base :
+    42 réussis / 6 échecs réels (3 timeouts, 3 crashs sans message
+    exploitable — probablement OOM sur les plus gros fichiers/archives
+    multi-parties), ~15 min. Les 205 mods non passés par Divine.exe
+    (trop lent en per-file à cette échelle).
+  - `reports/{python,rust,rust-native}_report.json` (fichiers canoniques
+    lus par `scripts/pak_bench/report.py::load_read_reports`, qui ne lit
+    **que** ces noms précis — pas les `_data_report.json`/
+    `_mods_report.json` séparés générés en 22b/22c) fusionnés
+    manuellement pour couvrir les 253 `.pak` (48+205) au lieu des 205
+    seuls d'avant. `divine_report.json` remplacé par le run 48/48 complet
+    (au lieu de l'ancien run partiel à 5 fichiers).
+  - `docs/pak-tools-benchmark/pak_tools_benchmark.md` réécrit avec ces
+    chiffres complets (253 partout en lecture, Divine.exe 48/253 annoté
+    comme tel). **Le point d'attention noté ici a été résolu en 22f
+    ci-dessous** (les sections manuelles sont maintenant générées, pas
+    perdues à chaque regen).
+  - Dashboard (§22d) republié à la même URL avec les données complètes
+    (`scripts/pak_bench/export_dashboard_data.py` : texte de la note
+    `divine_incomplete` aussi corrigé, il décrivait encore un run "peut
+    être encore partiel" alors qu'il est maintenant terminé et complet
+    sur son périmètre réel).
+- ~~**22f.** Automatisation complète rapport + dashboard à chaque run du
+  batch (demandé par Elwingh, suite aux deux points d'attention notés en
+  22e)~~ — fait :
+  - **Fusion automatique des rapports multi-dossiers** :
+    `common.load_merged_tool_report(tool, reports_dir)` fusionne
+    désormais TOUS les `reports/{tool}_report.json` ET
+    `reports/{tool}_*_report.json` (glob, pas une liste figée) par nom de
+    `.pak` — `report.py::load_read_reports` l'utilise. Plus besoin de
+    fusionner à la main après un run sur plusieurs dossiers (root cause
+    du bug de 22e). Attention aux faux positifs : `reports/` contenait
+    déjà `rust_debug_report.json`/`rust_release_report.json` (vieille
+    comparaison debug/release non liée, §17a, déjà documentée dans
+    `Tools/bg3rustpaklib/README.md`) qui auraient été aspirés par erreur
+    dans l'agrégat "rust" — supprimés (finding déjà préservé ailleurs).
+    Même souci avec `divine_batch_report.json` (tentative à 328 fichiers
+    100% échec) qui matchait aussi le glob `divine_*_report.json` —
+    renommé en `divine_batch_FAILED_attempt.json` (suffixe qui ne matche
+    plus aucun glob `*_report.json`) pour ne plus jamais polluer un
+    futur agrégat automatique.
+  - **`export_dashboard_data.py` découvre aussi dynamiquement** ses
+    fichiers (`_discover_read_reports`, même logique de préfixe outil +
+    segment de mode déduit du nom de fichier) au lieu d'une liste
+    `READ_REPORTS` figée à modifier à la main pour chaque nouveau
+    dataset. La note `divine_incomplete` calcule maintenant ses chiffres
+    (nb fichiers, erreurs, datasets manquants) depuis les rapports
+    réels au lieu d'une chaîne figée décrivant un run passé.
+  - **`docs/pak-tools-benchmark/pak_tools_benchmark.md` : sections
+    manuelles génèrées, plus perdues au regen**. `strings.py` porte
+    désormais le lien dashboard, les notes de bas de page (dynamiques :
+    comptes d'erreurs recalculés depuis les données) et les sections "Fix
+    archive solide"/"Bug Divine.exe batch" (texte narratif stable,
+    affiché seulement si les données correspondantes sont présentes) —
+    `report.py::render_markdown` les assemble à chaque appel. Un
+    `pak_bench_cli.py report` nu régénère maintenant un rapport complet
+    et cohérent, pas juste les tableaux.
+  - **Nouvelle commande `pak_bench_cli.py report --update-dashboard`** :
+    copie le rapport+PNG vers `docs/pak-tools-benchmark/`, régénère
+    `reports/dashboard_data.json`, et réinjecte les données dans
+    `docs/pak-tools-benchmark/dashboard.html` (nouvelle fonction
+    `export_dashboard_data.update_html_dashboard`, remplace uniquement
+    le bloc `<script id="dashboard-data">`, laisse le reste de la page
+    intact — plus besoin du script Python jetable utilisé pour la
+    première republication). Testé de bout en bout : chiffres identiques
+    à la version écrite à la main précédente.
+  - 5 nouveaux tests (`tests/test_pak_bench.py`, 18 au total) :
+    fusion multi-fichiers, exclusion des fichiers non pertinents/en
+    échec connu, injection HTML (remplace uniquement le bon bloc, lève
+    `ValueError` si le gabarit ne correspond pas). `ruff check`/`format`
+    clean, 313/313 tests du projet toujours verts.
 
 ### 12. Release standalone
 

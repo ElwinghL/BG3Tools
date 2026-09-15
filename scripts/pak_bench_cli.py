@@ -8,6 +8,7 @@ reste des textes longs de ce chantier."""
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -16,9 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from bg3_mod_tui.compat_framework import find_divine_exe
 from bg3_mod_tui.config import load_config
-from scripts.pak_bench import create_edit, strings, synthetic
+from scripts.pak_bench import create_edit, export_dashboard_data, strings, synthetic
 from scripts.pak_bench import report as report_mod
 from scripts.pak_bench.common import REPORTS_DIR, ScenarioResult, write_scenario_report
+
+DOCS_DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "docs" / "pak-tools-benchmark"
 
 
 def _default_divine_exe(config) -> Path | None:
@@ -221,6 +224,33 @@ def cmd_report(args: argparse.Namespace) -> int:
     else:
         print(strings.MSG_CE_CHART_SKIPPED)
 
+    if args.update_dashboard:
+        DOCS_DASHBOARD_DIR.mkdir(parents=True, exist_ok=True)
+        docs_md = DOCS_DASHBOARD_DIR / "pak_tools_benchmark.md"
+        docs_md.write_text(md, encoding="utf-8")
+        print(strings.MSG_DASHBOARD_MD_COPIED.format(path=docs_md))
+
+        for src, name in (
+            (read_png, "pak_tools_benchmark_read.png"),
+            (ce_png, "pak_tools_benchmark_create_edit.png"),
+        ):
+            if src.is_file():
+                (DOCS_DASHBOARD_DIR / name).write_bytes(src.read_bytes())
+
+        payload = export_dashboard_data.build_dashboard_payload(REPORTS_DIR)
+        dashboard_data_path = REPORTS_DIR / "dashboard_data.json"
+        dashboard_data_path.parent.mkdir(parents=True, exist_ok=True)
+        dashboard_data_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+
+        dashboard_html = DOCS_DASHBOARD_DIR / "dashboard.html"
+        if dashboard_html.is_file():
+            export_dashboard_data.update_html_dashboard(dashboard_html, payload)
+            print(strings.MSG_DASHBOARD_HTML_UPDATED.format(path=dashboard_html))
+        else:
+            print(strings.MSG_DASHBOARD_HTML_MISSING.format(path=dashboard_html))
+
     return 0
 
 
@@ -257,6 +287,7 @@ def main() -> int:
 
     rp = sub.add_parser("report", help=strings.HELP_REPORT)
     rp.add_argument("--out-dir", type=Path, default=Path("reports"))
+    rp.add_argument("--update-dashboard", action="store_true", help=strings.HELP_UPDATE_DASHBOARD)
     rp.set_defaults(func=cmd_report)
 
     args = parser.parse_args()

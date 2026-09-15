@@ -125,6 +125,50 @@ def load_scenario_report(path: Path) -> list[dict[str, Any]]:
     return payload.get("results", [])
 
 
+def load_merged_tool_report(tool: str, reports_dir: Path = REPORTS_DIR) -> dict[str, Any] | None:
+    """Charge et fusionne TOUS les rapports de lecture d'un outil sous
+    `reports_dir` : le fichier canonique `{tool}_report.json` (écrit par
+    `compare_pak_reader.py run --tool {tool} --dir X`, sans `--out`) ET
+    toute variante `{tool}_*_report.json` (ex. `{tool}_data_report.json`,
+    `{tool}_mods_report.json` — un run par sous-ensemble/dossier, chacun
+    avec son propre `--out` pour ne pas s'écraser l'un l'autre).
+
+    Fusion par nom de `.pak` (dict `paks`, la clé de dédup naturelle) —
+    remplace le besoin de fusionner ces fichiers à la main après un batch
+    portant sur plusieurs dossiers (source du bug du 2026-09-15 : le
+    rapport/dashboard ne relisaient que le fichier canonique, ignorant les
+    variantes `_data`/`_mods` tant que personne ne les fusionnait
+    manuellement). Si le fichier canonique ET une variante contiennent le
+    même `.pak`, la dernière donnée lue gagne (elles devraient de toute
+    façon être identiques — même mesure)."""
+    paths = sorted(reports_dir.glob(f"{tool}_report.json")) + sorted(
+        reports_dir.glob(f"{tool}_*_report.json")
+    )
+    merged_paks: dict[str, Any] = {}
+    generated_at: str | None = None
+    sample_cap: int | None = None
+    found = False
+    for p in paths:
+        if not p.is_file():
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        found = True
+        merged_paks.update(data.get("paks", {}))
+        generated_at = data.get("generated_at") or generated_at
+        sample_cap = data.get("sample_cap") or sample_cap
+    if not found:
+        return None
+    return {
+        "tool": tool,
+        "generated_at": generated_at,
+        "sample_cap": sample_cap,
+        "paks": merged_paks,
+    }
+
+
 def median(values: list[float]) -> float:
     if not values:
         return 0.0
