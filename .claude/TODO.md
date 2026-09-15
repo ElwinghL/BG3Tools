@@ -66,17 +66,35 @@ pas, même si elle semble terminée.
   le patch Absolute Defeat (déjà mergé), sur Visible Shields - Universal
   (`enum` + `slider_int`) — premier patch à gérer un type `enum` côté NMCM
   (dropdown natif). Statut : en cours, non mergé.
-- `chore/TestCoverageExpansion` (dépôt principal, sous-agent) — la
-  couverture globale (`pytest --cov`) est à ~48%, sous le seuil `fail_under
-= 75` désormais imposé (voir "Terminé récemment" ci-dessous). Sous-agent
-  chargé d'ajouter des tests réels (pas de tests creux/assertions triviales
-  juste pour faire monter le pourcentage) en priorisant les fichiers les
-  moins couverts (`native_mods.py`, `tools_manager.py`,
-  `terminal_launcher.py`, `platform_utils.py`, `screens/actions.py`, ...).
-  Statut : en cours, non mergé — qualité des tests à revérifier un par un
-  avant merge, pas seulement le pourcentage final.
-
 **Terminé récemment**
+
+- `chore/TestCoverageExpansion` (dépôt principal, worktree
+  `.claude/worktrees/agent-a48c232636dedc09e`) — remontée de la couverture
+  globale (~48% avant, seuil CI 75% posé par `chore/CoverageThresholdPolicy`)
+  via trois passes de tests réels (subprocess/httpx/filesystem mockés,
+  hardlinks réels sous `tmp_path`, widgets Textual montés dans une App de
+  test) : **seuil global 75% franchi — 75.53%, 742 tests passent**
+  (`uv run pytest --cov=bg3_mod_tui --cov-report=term-missing -q`).
+  Fichiers amenés à 93-100% : `tools_manager.py` (99%),
+  `terminal_launcher.py` (95%), `archives.py` (100%),
+  `compat_framework.py` (100%), `widgets/bg3se_console.py` (95%),
+  `providers/nexus.py` et `providers/modio.py` (100%), `pak_metadata.py`
+  (93%), `profiles.py` (99%), `game_deploy.py` (97%),
+  `screens/directory_picker.py` (99%), `widgets/path_input.py` (100%),
+  `screens/setup.py` (100%), `screens/main.py` (83%), `inventory.py` (98%).
+  Fichiers restants sous 75% individuellement (pas bloquant pour le seuil
+  global, mais à garder en tête si retouchés) : `screens/actions.py` (27%,
+  1250 stmts — le plus gros contributeur au manque, non attaqué faute de
+  temps), `mod_pipeline.py` (70%), `profile_archive.py` (70%), `app.py`
+  (59%), `__main__.py` (38%), `config.py` (75% pile), `log_format.py` (79%).
+  Un test widget `test_main_screen.py::test_on_mount_loads_both_tabs_successfully`
+  a révélé que la couverture de threads `@work(thread=True)` peut être
+  incomplète/instable selon l'ordre d'exécution (lignes de
+  `load_nexus_mods` parfois non comptabilisées malgré une exécution
+  confirmée par les assertions) — limite connue de coverage.py sur du code
+  multithread, pas un bug du code testé. Échantillon de tests revérifié par
+  Elwingh avant merge (qualité conforme — vraies assertions, mocks propres,
+  cas limites couverts).
 
 - `chore/ProjectCleanupAndQualityTooling` — fusion de
   `.claude/AGENTS_IN_PROGRESS.md` dans cette section, ajout de `ruff` +
