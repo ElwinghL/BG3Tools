@@ -15,6 +15,13 @@ pas, même si elle semble terminée.
 
 **EN COURS**
 
+- `feat/PakToolsBenchmark` (dépôt principal, worktree
+  `.claude/worktrees/agent-aa5dc47578d03919f`) — stratégie de benchmark
+  comparatif Divine.exe (LSLib) / bg3pythonpaklib / bg3rustpaklib (lecture
+  single/batch, création/édition/batch). Statut : implémentation terminée
+  et validée bout en bout (fixtures synthétiques, pas de vrai `.pak` du
+  jeu mesuré dans cette passe — décision explicite en cours de route),
+  prête à relire/merger par Elwingh. Détail en §22 ci-dessous.
 - Console BG3SE distante (§11b/11c) — trois branches liées, aucune mergée :
   - `feat/RemoteConsoleTCPBridge` (sous-module `ElwinghL/bg3se`) — pont TCP
     `RemoteConsole` réellement implémenté (pas juste conçu) : **compile sans
@@ -395,6 +402,44 @@ sacrifié pour y arriver, tant pis.
 ### 21. Isoler le temps de lecture Rust pur (sans PyO3/Python) dans le comparatif
 
 - ~~**21a.** Ajouter un chemin de mesure isolé (binaire/exemple Rust autonome, pas de Python dans la boucle) pour départager le coût réel de lecture `.pak` du coût du binding PyO3~~ — fait : nouvel exemple `native_timing.rs` dans `Tools/bg3rustpaklib`, nouveau chemin `--tool rust-native` dans `scripts/compare_pak_reader.py` (parse son JSON, affiche l'overhead FFI/binding par fichier et au total quand les rapports `rust`/`rust-native` sont présents). Aucun chiffre réel mesuré (pas de vrais `.pak` BG3 accessibles dans l'environnement de dev utilisé) — intégration vérifiée de bout en bout sur un `.pak` synthétique
+
+### 22. Benchmark création/édition/batch .pak (Divine.exe / bg3pythonpaklib / bg3rustpaklib)
+
+- ~~**22a.** Étendre `scripts/compare_pak_reader.py` (lecture seule) à des
+  scénarios création/édition/batch, avec matrice de capacités, rapport
+  Markdown+PNG et mesure "dans son jus" (natif) séparée du coût pipeline
+  réel~~ — fait (branche `feat/PakToolsBenchmark`) : logique commune
+  extraite vers `scripts/pak_bench/common.py` (`PakRecord`,
+  `ScenarioResult`, I/O rapport JSON, `median`) — `compare_pak_reader.py`
+  l'importe désormais au lieu de la redéfinir, rétro-compatible (mêmes
+  CLI/rapports). Nouveau `scripts/pak_bench_cli.py` (sous-commandes
+  `fixtures`/`create`/`edit`/`report`) + `scripts/pak_bench/{create_edit,
+  synthetic,report,strings}.py`. bg3rustpaklib mesuré "natif" via
+  `Tools/bg3rustpaklib/examples/native_timing.rs` (nouveau, release,
+  aucun Python/PyO3 dans la boucle — étend le binaire déjà noté "fait" en
+  §21a, qui n'était en réalité pas présent dans le pin de sous-module
+  utilisé ici, avec les modes `create`/`edit`/`batch-create`/`batch-edit`
+  en plus du mode lecture legacy) ; Divine.exe mesuré "pipeline" via le
+  pattern d'invocation déjà en prod (`compat_framework.py`, Wine/Proton),
+  overhead de lancement pur mesurable séparément
+  (`divine_launch_overhead_seconds`, pas encore intégré au rapport
+  agrégé). Textes longs (aide CLI, gabarits Markdown, labels de graphes)
+  centralisés dans `scripts/pak_bench/strings.py` plutôt qu'en littéraux
+  inline. 13 tests (`tests/test_pak_bench.py`, logique pure, pas de
+  subprocess/vrai outil). Spec :
+  `docs/superpowers/specs/2026-09-15-pak-tools-benchmark-design.md`.
+  Rapport versionné : `docs/pak-tools-benchmark/` (Markdown + 2 PNG
+  matplotlib, `reports/` reste gitignored — sortie JSON brute locale/
+  régénérable). **Limitation actée** : aucune mesure sur de vrais `.pak`
+  BG3 dans cette passe (décision explicite en cours de route) —
+  uniquement des fixtures synthétiques (`scripts/pak_bench/synthetic.py`),
+  qui valident le pipeline de mesure bout en bout (round-trip vérifié) mais
+  pas la performance absolue attendue sur de vraies archives. Pas
+  d'Artifact HTML interactif dans cette passe (suivi possible, mêmes
+  données JSON). READMEs `bg3pythonpaklib`/`bg3rustpaklib` (`.md`+`.fr.md`)
+  mis à jour avec un pointeur vers le nouveau harnais, sans chiffres
+  fabriqués. Statut : branche prête à relire/merger par Elwingh (pas
+  mergée depuis ce sous-agent, conformément à la consigne de coordination).
 
 ### 12. Release standalone
 

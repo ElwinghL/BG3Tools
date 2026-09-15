@@ -43,7 +43,6 @@ Le binaire Rust natif (`rust-native`) doit être compilé au préalable :
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import shutil
 import subprocess
@@ -51,8 +50,6 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -62,90 +59,23 @@ from bg3_mod_tui.compat_framework import find_divine_exe
 from bg3_mod_tui.config import load_config
 from bg3_mod_tui.pak_metadata import PakMetadataError, _path_arg, _run_divine, parse_meta_lsx
 from bg3_mod_tui.platform_utils import is_windows
+from scripts.pak_bench.common import (
+    REPORTS_DIR,
+    PakRecord,
+    _pick_sample_names,
+    _sha256,
+    _write_report,
+)
 
-REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 _BG3RUSTPAKLIB_DIR = Path(__file__).resolve().parent.parent / "Tools" / "bg3rustpaklib"
 _NATIVE_TIMING_BIN = _BG3RUSTPAKLIB_DIR / "target" / "release" / "examples" / "native_timing"
 _COMPRESSION_NAMES = {0: "aucune", 1: "zlib", 2: "lz4", 3: "zstd"}
 
 
-@dataclass
-class PakRecord:
-    file: str
-    error: str | None = None
-    identity: tuple[str, str] | None = None
-    entries: dict[str, dict[str, int]] = field(default_factory=dict)  # name -> {size, compression}
-    index_or_extract_seconds: float = 0.0
-    content_hashes: dict[str, str] = field(default_factory=dict)
-    content_errors: dict[str, str] = field(default_factory=dict)  # nom d'entrée -> erreur (n'interrompt pas le run)
-    content_seconds: float = 0.0
-
-
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def _pick_sample_names(entries: dict[str, dict[str, int]], cap: int) -> list[str]:
-    """Échantillon stratifié par méthode de compression quand connue
-    (python/rust), sinon réparti uniformément sur les noms triés (divine,
-    qui n'expose pas cette info avant extraction). `meta.lsx`/`meta.lsf`
-    toujours inclus."""
-    names = sorted(entries)
-    if len(names) <= cap:
-        return names
-    forced = [n for n in names if n.lower().endswith(("meta.lsx", "meta.lsf"))]
-    picked = set(forced)
-    by_method: dict[int, list[str]] = {}
-    for n in names:
-        by_method.setdefault(entries[n].get("compression", -1), []).append(n)
-    methods = sorted(by_method)
-    cursors = {m: 0 for m in methods}
-    sample = list(forced)
-    while len(sample) < cap and any(cursors[m] < len(by_method[m]) for m in methods):
-        for m in methods:
-            if len(sample) >= cap:
-                break
-            lst = by_method[m]
-            while cursors[m] < len(lst) and lst[cursors[m]] in picked:
-                cursors[m] += 1
-            if cursors[m] < len(lst):
-                sample.append(lst[cursors[m]])
-                picked.add(lst[cursors[m]])
-                cursors[m] += 1
-    return sample
-
-
-def _write_report(
-    out_path: Path,
-    tool: str,
-    sample_cap: int,
-    records: dict[str, PakRecord],
-    *,
-    extra: dict[str, Any] | None = None,
-) -> None:
-    """Écrit (ou réécrit) le rapport JSON à partir de `records` tel quel à
-    l'instant de l'appel — appelée après chaque `.pak` traité (pas
-    seulement une fois à la fin) pour qu'une interruption ou une erreur
-    inattendue au milieu d'un lot laisse un rapport partiel exploitable au
-    lieu de rien du tout (même principe que `_flush_orphans_progress`
-    ailleurs dans le projet). `extra` : champs additionnels au niveau
-    racine du rapport (ex: mode batch Divine.exe, temps total brut avant
-    répartition par fichier) — jamais dans `paks[...]` pour ne pas être
-    confondu avec les champs par-fichier existants."""
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, Any] = {
-        "tool": tool,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "sample_cap": sample_cap,
-        **(extra or {}),
-        "paks": {name: asdict(record) for name, record in records.items()},
-    }
-    out_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
-
 # --------------------------------------------------------------------------
 # Voie Python native (bg3_mod_tui.pak_reader)
 # --------------------------------------------------------------------------
+
 
 def _run_python(
     pak_paths: list[Path],
@@ -171,7 +101,10 @@ def _run_python(
             continue
         record.index_or_extract_seconds = time.monotonic() - start
         record.entries = {
-            e.name.replace("\\", "/"): {"size": e.uncompressed_size, "compression": e.compression_method}
+            e.name.replace("\\", "/"): {
+                "size": e.uncompressed_size,
+                "compression": e.compression_method,
+            }
             for e in archive.entries
         }
         meta_entry = archive.find_suffix("meta.lsx")
@@ -199,6 +132,7 @@ def _run_python(
 # --------------------------------------------------------------------------
 # Voie Rust native (pak_reader_rs)
 # --------------------------------------------------------------------------
+
 
 def _run_rust(
     pak_paths: list[Path],
@@ -258,6 +192,7 @@ def _run_rust(
 # Voie Rust natif isolé (pas de Python/PyO3 dans la boucle)
 # --------------------------------------------------------------------------
 
+
 def _run_rust_native(
     pak_paths: list[Path],
     sample_cap: int,
@@ -304,7 +239,9 @@ def _run_rust_native(
         stdout = proc.stdout.strip()
         line = stdout.splitlines()[-1] if stdout else ""
         if not line:
-            record.error = f"pas de sortie JSON (code {proc.returncode}) : {proc.stderr.strip()[:500]}"
+            record.error = (
+                f"pas de sortie JSON (code {proc.returncode}) : {proc.stderr.strip()[:500]}"
+            )
             if on_progress is not None:
                 on_progress(record)
             continue
@@ -330,6 +267,7 @@ def _run_rust_native(
 # Voie Divine.exe (référence)
 # --------------------------------------------------------------------------
 
+
 def _finalize_divine_extraction(
     record: PakRecord, work_dir: Path, sample_cap: int, *, reference_path: Path
 ) -> None:
@@ -341,9 +279,13 @@ def _finalize_divine_extraction(
     mais aucune écriture n'a lieu : uniquement des lectures dans `work_dir`
     (jamais dans le `.pak` source lui-même)."""
     disk_files = {
-        str(p.relative_to(work_dir)).replace("\\", "/"): p for p in work_dir.rglob("*") if p.is_file()
+        str(p.relative_to(work_dir)).replace("\\", "/"): p
+        for p in work_dir.rglob("*")
+        if p.is_file()
     }
-    record.entries = {name: {"size": p.stat().st_size, "compression": -1} for name, p in disk_files.items()}
+    record.entries = {
+        name: {"size": p.stat().st_size, "compression": -1} for name, p in disk_files.items()
+    }
 
     from bg3_mod_tui.pak_reader import extract_uuid_from_lsf_bytes
 
@@ -403,7 +345,10 @@ def _run_divine_batch_tool(
 
     with tempfile.TemporaryDirectory(prefix="bg3_compare_divine_batch_") as tmp:
         dest_root = Path(tmp)
-        assert dest_root.resolve() != scan_dir.resolve() and dest_root.resolve() not in scan_dir.resolve().parents, (
+        assert (
+            dest_root.resolve() != scan_dir.resolve()
+            and dest_root.resolve() not in scan_dir.resolve().parents
+        ), (
             "la destination d'extraction ne doit jamais être (ou contenir) le dossier source des .pak"
         )
 
@@ -413,11 +358,16 @@ def _run_divine_batch_tool(
             _run_divine(
                 divine_exe,
                 [
-                    "-g", "bg3",
-                    "-a", "extract-packages",
-                    "-s", _path_arg(scan_dir, use_wine_path=use_wine_path),
-                    "-d", _path_arg(dest_root, use_wine_path=use_wine_path),
-                    "-i", "pak",
+                    "-g",
+                    "bg3",
+                    "-a",
+                    "extract-packages",
+                    "-s",
+                    _path_arg(scan_dir, use_wine_path=use_wine_path),
+                    "-d",
+                    _path_arg(dest_root, use_wine_path=use_wine_path),
+                    "-i",
+                    "pak",
                     "-u",
                 ],
                 reference_path=reference_path,
@@ -480,10 +430,14 @@ def _run_divine_tool(
                 _run_divine(
                     divine_exe,
                     [
-                        "-g", "bg3",
-                        "-a", "extract-package",
-                        "-s", _path_arg(pak_path, use_wine_path=use_wine_path),
-                        "-d", _path_arg(work_dir, use_wine_path=use_wine_path),
+                        "-g",
+                        "bg3",
+                        "-a",
+                        "extract-package",
+                        "-s",
+                        _path_arg(pak_path, use_wine_path=use_wine_path),
+                        "-d",
+                        _path_arg(work_dir, use_wine_path=use_wine_path),
                     ],
                     reference_path=reference_path,
                 )
@@ -507,6 +461,7 @@ def _run_divine_tool(
 # CLI : run
 # --------------------------------------------------------------------------
 
+
 def _resolve_pak_paths(args: argparse.Namespace, config) -> tuple[list[Path], Path | None]:
     """Retourne `(chemins_.pak, dossier_scanné)` — le dossier est `None`
     quand des `.pak` précis ont été passés en positionnels plutôt qu'un
@@ -516,7 +471,9 @@ def _resolve_pak_paths(args: argparse.Namespace, config) -> tuple[list[Path], Pa
         return [Path(p) for p in args.paks], None
     scan_dir = args.dir or config.appdata_mods_dir
     if not scan_dir.is_dir():
-        raise SystemExit(f"Dossier introuvable : {scan_dir} (précise --dir ou configure bg3_appdata_dir).")
+        raise SystemExit(
+            f"Dossier introuvable : {scan_dir} (précise --dir ou configure bg3_appdata_dir)."
+        )
     return sorted(scan_dir.glob("*.pak")), scan_dir
 
 
@@ -623,6 +580,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 # CLI : diff
 # --------------------------------------------------------------------------
 
+
 def _load_report(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -701,7 +659,10 @@ def cmd_diff(args: argparse.Namespace) -> int:
             missing.append(pak)
             continue
 
-        identities = {t: tuple(rec["identity"]) if rec.get("identity") else None for t, rec in available.items()}
+        identities = {
+            t: tuple(rec["identity"]) if rec.get("identity") else None
+            for t, rec in available.items()
+        }
         if len(set(identities.values())) > 1:
             identity_mismatches.append(f"{pak}: {identities}")
 
@@ -725,7 +686,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
                 size_mismatches.append(f"{pak}:{name}: {sizes}")
 
         hash_sets = {t: rec["content_hashes"] for t, rec in available.items()}
-        common_hashed = set.intersection(*(set(h) for h in hash_sets.values())) if hash_sets else set()
+        common_hashed = (
+            set.intersection(*(set(h) for h in hash_sets.values())) if hash_sets else set()
+        )
         for name in sorted(common_hashed):
             values = {t: hash_sets[t][name] for t in hash_sets}
             if len(set(values.values())) > 1:
@@ -745,7 +708,12 @@ def cmd_diff(args: argparse.Namespace) -> int:
     if missing:
         print(f".pak avec moins de 2 rapports exploitables : {len(missing)}")
 
-    total_problems = len(identity_mismatches) + len(entry_mismatches) + len(size_mismatches) + len(content_mismatches)
+    total_problems = (
+        len(identity_mismatches)
+        + len(entry_mismatches)
+        + len(size_mismatches)
+        + len(content_mismatches)
+    )
     print(f"\n{'AUCUNE DIVERGENCE' if total_problems == 0 else f'{total_problems} DIVERGENCE(S)'}")
 
     _show_rust_native_overhead(present)
@@ -754,21 +722,33 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    run_parser = sub.add_parser("run", help="Exécute un seul outil sur un lot de .pak et écrit son rapport")
-    run_parser.add_argument("--tool", choices=["python", "rust", "rust-native", "divine"], required=True)
-    run_parser.add_argument("paks", nargs="*", type=Path, help="Fichiers .pak précis (sinon --dir/config)")
+    run_parser = sub.add_parser(
+        "run", help="Exécute un seul outil sur un lot de .pak et écrit son rapport"
+    )
+    run_parser.add_argument(
+        "--tool", choices=["python", "rust", "rust-native", "divine"], required=True
+    )
+    run_parser.add_argument(
+        "paks", nargs="*", type=Path, help="Fichiers .pak précis (sinon --dir/config)"
+    )
     run_parser.add_argument("--dir", type=Path, help="Dossier à scanner (*.pak)")
-    run_parser.add_argument("--sample", type=int, default=60, help="Fichiers de contenu hashés par .pak (défaut 60)")
+    run_parser.add_argument(
+        "--sample", type=int, default=60, help="Fichiers de contenu hashés par .pak (défaut 60)"
+    )
     run_parser.add_argument(
         "--verbose",
         action="store_true",
         help="Affiche une ligne de progression par .pak traité (nom, temps, statut) — "
         "utile sur un run long (ex: Divine.exe per-file) pour voir que ça avance.",
     )
-    run_parser.add_argument("--divine-exe", type=Path, help="Chemin vers Divine.exe (outil divine seulement)")
+    run_parser.add_argument(
+        "--divine-exe", type=Path, help="Chemin vers Divine.exe (outil divine seulement)"
+    )
     run_parser.add_argument(
         "--divine-mode",
         choices=["per-file", "batch"],
@@ -781,8 +761,12 @@ def main() -> int:
             "(incompatible avec une liste de .pak explicite)."
         ),
     )
-    run_parser.add_argument("--reference-path", type=Path, help="Chemin de référence Proton/WINEPREFIX")
-    run_parser.add_argument("--out", type=Path, help="Chemin du rapport JSON (défaut reports/<tool>_report.json)")
+    run_parser.add_argument(
+        "--reference-path", type=Path, help="Chemin de référence Proton/WINEPREFIX"
+    )
+    run_parser.add_argument(
+        "--out", type=Path, help="Chemin du rapport JSON (défaut reports/<tool>_report.json)"
+    )
     run_parser.set_defaults(func=cmd_run)
 
     diff_parser = sub.add_parser("diff", help="Croise les rapports déjà générés sous reports/")
